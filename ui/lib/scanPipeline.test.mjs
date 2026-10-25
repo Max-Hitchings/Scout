@@ -4032,10 +4032,12 @@ test('hyphenated rejection outcomes remain authoritative beyond the 384-assessme
     const vacancy = {
       vacancyId: 'historical-0', company: 'Synthetic Employer 0', role: 'Synthetic Role',
       url: 'https://jobs.example.test/historical-0', description: 'Deliver reliable synthetic systems.', preRankScore: 80,
+      source: 'synthetic', providerId: 'opening-0',
     };
     const reviewed = Array.from({ length: 600 }, (_, index) => ({
       vacancyId: `historical-${index}`, company: `Synthetic Employer ${index}`, role: 'Synthetic Role',
       sourceUrl: `https://jobs.example.test/historical-${index}`, outcome: 'below-threshold',
+      sourceReferences: [{ source: 'synthetic', providerId: `opening-${index}`, url: '' }],
       contentFingerprint: vacancyContentFingerprint({ ...vacancy, company: `Synthetic Employer ${index}` }),
     }));
     const explanations = Array.from({ length: 128 }, (_, index) => ({

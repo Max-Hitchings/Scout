@@ -17,7 +17,7 @@ import {
 } from './vacancyObservation.mjs';
 import { rankVacancies, vacancyNoveltyComparison } from './vacancyRank.mjs';
 import { selectVacancies } from './vacancySelect.mjs';
-import { lifecycleRecords, partitionVacanciesForAssessment, rejected } from './vacancyLifecycle.mjs';
+import { lifecycleRecords, normaliseVacancyOutcome, partitionVacanciesForAssessment, rejected } from './vacancyLifecycle.mjs';
 import {
   buildCoverageRollups, buildVacancyExplanations, reconcileCoverageFunnel,
 } from './scanCoverage.mjs';
@@ -1226,7 +1226,7 @@ function decisionRecord(item, run, assessed = true) {
     sourceReferences: sourceReferencesOf({
       sourceReferences: Array.isArray(item.sourceReferences) ? item.sourceReferences : [],
     }).slice(0, 8),
-    outcome: boundedText(item.outcome, 80),
+    outcome: normaliseVacancyOutcome(boundedText(item.outcome, 80)),
     contentFingerprint: /^[a-f0-9]{64}$/.test(String(item.contentFingerprint || ''))
       ? item.contentFingerprint
       : null,
