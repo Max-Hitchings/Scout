@@ -374,6 +374,7 @@ const Scout = {
       : { state: 'waiting', requests: [] };
     this.feedbackLearning = feedbackLearning;
     this.applyWorkspaceConfig(this.state.data.workspaceConfig, { render: false });
+    this.renderDiscoveryMode();
     const h = this.state.data.scanHealth;
     const activeRun = this.scanRuns.find((run) => !['complete', 'partial', 'abandoned', 'failed'].includes(run.state));
     const queuedCount = this.scanQueue.requests.filter((request) => request.status === 'queued').length;
@@ -396,6 +397,16 @@ const Scout = {
     this.renderPipeline();
     this.renderAll();
     this.queueStrongMatches();
+  },
+
+  renderDiscoveryMode() {
+    const banner = document.getElementById('discovery-mode-banner');
+    if (!banner) return;
+    const legacy = this.state.data?.discoveryEngine === 'legacy-discovery';
+    banner.classList.toggle('hidden', !legacy);
+    banner.innerHTML = legacy
+      ? '<p><strong>Earlier search settings are active.</strong> Scout can still scan using your earlier setup. It starts ranking the complete pool only after you review and publish your search profile.</p><button class="act" type="button" data-action="review-search-profile">Review search profile</button>'
+      : '';
   },
 
   async scanNow({ provider } = {}) {
@@ -2935,6 +2946,7 @@ const Scout = {
   runAction(element) {
     const { action, id, key, tab, date, index, slug, prefill, prompt, engine } = element.dataset;
     switch (action) {
+      case 'review-search-profile': return window.ScoutSetup?.openSettings?.('search');
       case 'show-discovery': return this.showDiscovery();
       case 'dismiss-discoveries': return this.dismissDiscoveries();
       case 'sort': return this.setSort(key);

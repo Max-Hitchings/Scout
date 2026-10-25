@@ -1123,6 +1123,10 @@ async function handleRead(req, res, url) {
       schedule: readScheduleSummary(config),
       categories: readCategories(),
       workspaceConfig: config,
+      discoveryEngine: loadPublishedSearchProfile(WORKSPACE_ROOT)
+        ? 'ranked-discovery'
+        : setupReadiness(WORKSPACE_ROOT, config, {}, data).established
+          ? 'legacy-discovery' : 'publication-required',
       trackerRevision: snapshot.revision,
     });
   }

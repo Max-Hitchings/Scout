@@ -856,6 +856,7 @@ test('search-profile routes review a complete draft and publish only the current
   const setupStatus = await request({ method: 'GET', path: '/api/setup/status' });
   assert.equal(setupStatus.status, 200);
   assert.equal(JSON.parse(setupStatus.text).searchProfilePublished, false);
+  assert.equal(JSON.parse((await request({ path: '/api/opportunities' })).text).discoveryEngine, 'publication-required');
   const migrated = await request({ method: 'GET', path: '/api/search-profile' });
   assert.equal(migrated.status, 200);
   const migratedState = JSON.parse(migrated.text);
@@ -865,6 +866,14 @@ test('search-profile routes review a complete draft and publish only the current
     'deterministic-derivation',
   );
   assert.equal(fs.existsSync(paths.searchProfilePublished), false);
+
+  const originalTracker = fs.readFileSync(paths.tracker);
+  try {
+    fs.writeFileSync(paths.tracker, JSON.stringify({ opportunities: [{ id: 'synthetic-existing-role' }] }));
+    assert.equal(JSON.parse((await request({ path: '/api/opportunities' })).text).discoveryEngine, 'legacy-discovery');
+  } finally {
+    fs.writeFileSync(paths.tracker, originalTracker);
+  }
 
   const migratedPublication = await request({
     method: 'POST', path: '/api/search-profile/publish', headers: JSON_HEADERS(),
@@ -962,6 +971,7 @@ test('search-profile routes review a complete draft and publish only the current
   const publishedStatus = await request({ method: 'GET', path: '/api/setup/status' });
   assert.equal(publishedStatus.status, 200);
   assert.equal(JSON.parse(publishedStatus.text).searchProfilePublished, true);
+  assert.equal(JSON.parse((await request({ path: '/api/opportunities' })).text).discoveryEngine, 'ranked-discovery');
   const lanePlan = JSON.parse(fs.readFileSync(paths.searchLanes, 'utf8'));
   assert.equal(lanePlan.profileId, result.published.id);
   assert.ok(lanePlan.lanes.some(({ profileFields }) => (
