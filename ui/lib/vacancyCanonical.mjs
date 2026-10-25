@@ -50,6 +50,16 @@ function responsibilityDescription(vacancy) {
   return normaliseText(vacancy?.description).replace(APPLICATION_BOILERPLATE, '').replace(/\s+/g, ' ').trim();
 }
 
+function compensationFacts(value) {
+  const supplied = valueOf(value) || null;
+  if (!supplied || typeof supplied !== 'object' || Array.isArray(supplied)) return supplied;
+  // Evidence metadata must not make unchanged old salaries look materially
+  // different on upgrade. A corrected currency or amount still changes facts.
+  const { currencyProvenance, ...facts } = supplied;
+  void currencyProvenance;
+  return facts;
+}
+
 function fingerprintShape(vacancy, { includeBoilerplate = false } = {}) {
   return {
     title: normaliseText(valueOf(vacancy?.title) || vacancy?.role),
@@ -63,7 +73,7 @@ function fingerprintShape(vacancy, { includeBoilerplate = false } = {}) {
     qualifications: valueOf(vacancy?.qualifications) || null,
     eligibility: valueOf(vacancy?.eligibility) || null,
     industry: normaliseText(valueOf(vacancy?.industry)),
-    compensation: valueOf(vacancy?.compensation) || null,
+    compensation: compensationFacts(vacancy?.compensation),
     description: vacancy?.semanticEvidence?.descriptionDigest
       || (includeBoilerplate ? normaliseText(vacancy?.description) : responsibilityDescription(vacancy)),
   };
