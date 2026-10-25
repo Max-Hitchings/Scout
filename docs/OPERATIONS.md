@@ -209,6 +209,10 @@ Access details differ by operator and must be discovered from the private operat
    Platform packagers consume only the audit-created content snapshot, recheck
    its privacy-authorized digest immediately before and after packaging, and
    remove the sealed snapshot in a `finally` path.
+   Workflow-policy tests check immutable action pins throughout every workflow
+   receiving secrets. Allowlisted application and public-source trees exclude
+   nested dependency directories; production dependencies use the separate
+   lockfile-selected top-level staging pass and the same staged privacy audit.
 5. Commit intentionally, push the branch, and open a pull request against `main`.
 6. For release rehearsal, update the protected `codex/release-candidate` branch to the reviewed commit.
 7. Tag the reviewed package version. The protected release workflow builds every platform, deploys the exact tag to the VPS, verifies health and rollback, and only then publishes.
