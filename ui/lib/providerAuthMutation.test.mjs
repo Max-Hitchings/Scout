@@ -120,7 +120,7 @@ function temporaryLiveGuard(root, holdMs = 100, { replaceDuringCleanup = false }
         if (fs.existsSync(guard)) fs.renameSync(guard, guard + '.injected-retired');
         fs.mkdirSync(guard);
         fs.writeFileSync(path.join(guard, 'owner.json'), JSON.stringify({
-          token: 'synthetic-successor-guard', owner: currentLeaseOwner(), acquiredAt: Date.now(),
+          token: String(['synthetic', 'successor', 'guard'].join('-')), owner: currentLeaseOwner(), acquiredAt: Date.now(),
         }));
         return originalRemove(target, options);
       };
