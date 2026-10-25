@@ -321,7 +321,7 @@ test('notification HTTP flow preserves unacknowledged alerts after desktop deliv
   seedWorkspace(APP_ROOT, testWorkspace);
   const { notificationFile } = await import('./lib/notifications.mjs');
   const file = notificationFile(testWorkspace);
-  const notificationFiles = [file, path.join(testWorkspace, '.scout', 'notifications-runtime.json'), path.join(testWorkspace, '.scout', 'notification-receipts.json')];
+  const notificationFiles = [file, ...['notifications-runtime.json', 'notification-receipts.json', 'provider-notifications.json', 'notification-pending-codex.json', 'notification-pending-claude.json'].map((name) => path.join(testWorkspace, '.scout', name))];
   const previousNotifications = notificationFiles.map((target) => fs.existsSync(target) ? fs.readFileSync(target) : null);
   const healthFile = path.join(testWorkspace, '.scout', 'provider-health', 'v1', 'codex.json');
   const previousHealth = fs.existsSync(healthFile) ? fs.readFileSync(healthFile) : null;

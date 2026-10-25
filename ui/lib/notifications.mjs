@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { atomicWriteFile } from './atomicWrite.mjs';
 import { validatePhysicalWorkspacePath } from './physicalPath.mjs';
 import { withWorkspaceMutationAuthority } from './workspaceMutationAuthority.mjs';
@@ -11,6 +11,7 @@ const BLOCKING = new Set(['sign-in-required', 'network-unavailable', 'rate-limit
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_MATCHES = 10_000;
 const MAX_ALERTS = 1_000;
+const MAX_PROVIDER_ALERTS = 64;
 const keys = (value, expected) => value && typeof value === 'object' && !Array.isArray(value)
   && Object.keys(value).sort().join(',') === [...expected].sort().join(',');
 const hash = (value) => createHash('sha256').update(String(value)).digest('hex');
@@ -34,12 +35,13 @@ export function validateNotifications(value) {
     || value.pending.length > MAX_MATCHES || new Set(value.pending).size !== value.pending.length
     || !value.pending.every((item) => HASH.test(item)) || !nullableTime(value.digestAfter)
     || !value.providerEpisodes || typeof value.providerEpisodes !== 'object' || Array.isArray(value.providerEpisodes)
-    || !Array.isArray(value.alerts) || value.alerts.length > MAX_ALERTS) fail();
+    || !Array.isArray(value.alerts) || value.alerts.length > MAX_ALERTS + MAX_PROVIDER_ALERTS) fail();
   for (const [id, item] of Object.entries(value.matches)) if (!HASH.test(id) || !tuple(item)) fail();
   for (const [provider, item] of Object.entries(value.providerEpisodes)) {
-    if (!['codex', 'claude'].includes(provider) || !keys(item, ['state', 'episode'])
+    if (!['codex', 'claude'].includes(provider) || !(keys(item, ['state', 'episode']) || keys(item, ['state', 'episode', 'intentId']))
       || !(item.state === null || BLOCKING.has(item.state))
-      || !Number.isSafeInteger(item.episode) || item.episode < 0) fail();
+      || !Number.isSafeInteger(item.episode) || item.episode < 0
+      || (item.intentId !== undefined && item.intentId !== null && !HASH.test(item.intentId))) fail();
   }
   const ids = new Set();
   for (const item of value.alerts) {
@@ -80,7 +82,7 @@ function readReceipts(root) {
   const value = readJson(root, 'notification-receipts.json') || { schemaVersion: 1, receipts: {} };
   if (!keys(value, ['schemaVersion', 'receipts']) || value.schemaVersion !== 1
     || !value.receipts || typeof value.receipts !== 'object' || Array.isArray(value.receipts)
-    || Object.keys(value.receipts).length > 3_001) throw new Error('notification receipts have an unsupported schema');
+    || Object.keys(value.receipts).length > 12_065) throw new Error('notification receipts have an unsupported schema');
   for (const [id, item] of Object.entries(value.receipts)) {
     if (!HASH.test(id) || !keys(item, ['deliveredAt', 'acknowledgedAt'])
       || !nullableTime(item.deliveredAt) || !nullableTime(item.acknowledgedAt)) {
@@ -98,12 +100,13 @@ function trimAcknowledged(alerts) {
   }
 }
 
-function combine(base, runtime, receipts) {
+function combine(base, runtime, receipts, providerState = emptyNotifications()) {
   const state = structuredClone(base);
-  state.providerEpisodes = structuredClone(runtime.providerEpisodes);
-  state.alerts = [...new Map([...base.alerts, ...runtime.alerts].map((item) => [item.id, item])).values()]
+  state.providerEpisodes = structuredClone(providerState.providerEpisodes);
+  state.alerts = [...new Map([...base.alerts, ...runtime.alerts].filter((item) => item.kind !== 'provider').map((item) => [item.id, item])).values()]
     .map((item) => ({ ...item, ...(receipts.receipts[item.id] || {}) }));
   trimAcknowledged(state.alerts);
+  state.alerts.push(...providerState.alerts.map((item) => ({ ...item, ...(receipts.receipts[item.id] || {}) })));
   if (state.pending.length && state.alerts.some((item) => item.id === pendingDigestId(state.pending))) {
     state.pending = [];
     state.digestAfter = null;
@@ -112,7 +115,8 @@ function combine(base, runtime, receipts) {
 }
 
 export function readNotifications(root) {
-  return combine(readState(root), readState(root, 'notifications-runtime.json'), readReceipts(root));
+  for (const provider of ['codex', 'claude']) readProviderIntent(root, provider);
+  return combine(readState(root), readState(root, 'notifications-runtime.json'), readReceipts(root), readProviderState(root));
 }
 
 function persistJson(root, name, state) {
@@ -124,12 +128,13 @@ function persistJson(root, name, state) {
 function readRuntime(root) {
   const state = readState(root, 'notifications-runtime.json');
   const receipts = readReceipts(root);
-  state.alerts = state.alerts.map((item) => ({ ...item, ...(receipts.receipts[item.id] || {}) }));
+  state.alerts = state.alerts.filter((item) => item.kind !== 'provider').map((item) => ({ ...item, ...(receipts.receipts[item.id] || {}) }));
+  state.providerEpisodes = {};
   return state;
 }
 
 function persistRuntime(root, state) {
-  const merged = combine(readState(root), validateNotifications(state), readReceipts(root));
+  const merged = combine(readState(root), validateNotifications(state), readReceipts(root), readProviderState(root));
   const retained = new Set(merged.alerts.map((item) => item.id));
   state.alerts = state.alerts.filter((item) => retained.has(item.id));
   persistJson(root, 'notifications-runtime.json', state);
@@ -139,8 +144,13 @@ function addAlert(state, kind, identity, at, count = 1, provider = null) {
   if (!iso(at)) throw new TypeError('notification time must be an ISO timestamp');
   const id = hash(`${kind}:${identity}`);
   if (state.alerts.some((item) => item.id === id)) return;
-  while (state.alerts.length >= MAX_ALERTS) {
-    const index = state.alerts.findIndex((item) => item.acknowledgedAt !== null);
+  const providerAlert = kind === 'provider';
+  const limit = providerAlert ? MAX_PROVIDER_ALERTS : MAX_ALERTS;
+  const activeProviderIds = new Set(Object.entries(state.providerEpisodes).filter(([, value]) => value.state !== null)
+    .map(([name, value]) => hash(`provider:${name}:${value.episode}`)));
+  while (state.alerts.filter((item) => (item.kind === 'provider') === providerAlert).length >= limit) {
+    const index = state.alerts.findIndex((item) => (item.kind === 'provider') === providerAlert
+      && (item.acknowledgedAt !== null || (providerAlert && !activeProviderIds.has(item.id))));
     if (index < 0) throw new Error('Review older notifications before creating more alerts');
     state.alerts.splice(index, 1);
   }
@@ -199,6 +209,7 @@ export function flushNotificationDigest(input, config, at, { tracker } = {}) {
 // pending obligations rather than accumulating every historically good job.
 export function notificationsForAssessment(input, config, reviewed, at, { tracker } = {}) {
   const initial = structuredClone(validateNotifications(input));
+  initial.alerts = initial.alerts.filter((item) => item.kind !== 'provider');
   const index = trackerReferences(tracker);
   for (const entry of tracker?.opportunities || []) {
     const id = hash(identityOf(entry));
@@ -239,23 +250,88 @@ export function notificationsForAssessment(input, config, reviewed, at, { tracke
   return validateNotifications(state);
 }
 
-// Called only inside recordProviderHealth's current fence. It never acquires
-// another lease. The companion file cannot change a scan's receipted target.
-export function enqueueProviderNotificationUnderFence(root, record) {
+function readProviderState(root) {
+  const state = readState(root, 'provider-notifications.json');
+  if (state.alerts.length > MAX_PROVIDER_ALERTS || state.alerts.some((item) => item.kind !== 'provider')
+    || Object.keys(state.matches).length || state.pending.length || state.digestAfter !== null) {
+    throw new Error('provider notification storage has an unsupported schema');
+  }
+  const receipts = readReceipts(root);
+  state.alerts = state.alerts.map((item) => ({ ...item, ...(receipts.receipts[item.id] || {}) }));
+  return state;
+}
+
+function readProviderIntent(root, provider) {
+  const value = readJson(root, `notification-pending-${provider}.json`);
+  if (value === null) return null;
+  if (!keys(value, ['schemaVersion', 'id', 'provider', 'events']) || value.schemaVersion !== 1
+    || value.provider !== provider || !HASH.test(value.id) || !Array.isArray(value.events)
+    || value.events.length < 1 || value.events.length > MAX_PROVIDER_ALERTS
+    || value.events.some((item) => !keys(item, ['state', 'createdAt'])
+      || !(BLOCKING.has(item.state) || item.state === 'ready') || !iso(item.createdAt))) {
+    throw new Error('provider notification intent has an unsupported schema');
+  }
+  return value;
+}
+
+function providerEvent(record) {
+  if (!record) return null;
+  if (BLOCKING.has(record.state) && record.alert) return { state: record.state, createdAt: record.alert.createdAt };
+  if (['ready', 'credentials-present-unverified'].includes(record.state) && record.remoteAuthBarrier !== true) {
+    return { state: 'ready', createdAt: iso(record.checkedAt) ? record.checkedAt : new Date().toISOString() };
+  }
+  return null;
+}
+
+// The tiny intent is independent of match history. Its preparation is best
+// effort: a notification error must never prevent authoritative health writes.
+export function prepareProviderNotificationUnderFence(root, current, record) {
   const provider = record?.provider;
   if (!['codex', 'claude'].includes(provider)) throw new TypeError('notification provider is unsupported');
-  const blocking = BLOCKING.has(record.state) && record.alert;
-  const recovered = ['ready', 'credentials-present-unverified'].includes(record.state) && record.remoteAuthBarrier !== true;
-  if (!blocking && !recovered) return;
-  const state = readRuntime(root);
-  const previous = state.providerEpisodes[provider] || { state: null, episode: 0 };
-  if (blocking && previous.state !== record.state) {
-    const episode = previous.episode + 1;
-    addAlert(state, 'provider', `${provider}:${episode}`, record.alert.createdAt, 1, provider);
-    state.providerEpisodes[provider] = { state: record.state, episode };
-  } else if (recovered && previous.state !== null) state.providerEpisodes[provider] = { state: null, episode: previous.episode };
-  else return;
-  persistRuntime(root, state);
+  const state = readProviderState(root);
+  const existing = readProviderIntent(root, provider);
+  const events = existing && state.providerEpisodes[provider]?.intentId !== existing.id
+    ? existing.events.slice() : [];
+  for (const value of [current, record]) {
+    const event = providerEvent(value);
+    if (event && events.at(-1)?.state !== event.state) events.push(event);
+  }
+  if (!events.length) return;
+  // Superseded transitions are historical; retain the oldest unreported event
+  // and newest state when an unavailable notification store spans many changes.
+  while (events.length > MAX_PROVIDER_ALERTS) events.splice(1, 1);
+  const unchanged = existing && JSON.stringify(events) === JSON.stringify(existing.events)
+    && state.providerEpisodes[provider]?.intentId !== existing.id;
+  const intent = { schemaVersion: 1, id: unchanged ? existing.id : hash(randomUUID()), provider, events };
+  persistJson(root, `notification-pending-${provider}.json`, intent);
+}
+
+export function publishProviderNotificationIntentUnderFence(root, provider) {
+  if (!['codex', 'claude'].includes(provider)) throw new TypeError('notification provider is unsupported');
+  const intent = readProviderIntent(root, provider);
+  if (!intent) return;
+  const state = readProviderState(root);
+  let previous = state.providerEpisodes[provider] || { state: null, episode: 0, intentId: null };
+  if (previous.intentId !== intent.id) {
+    for (const event of intent.events) {
+      if (event.state === 'ready') previous = { ...previous, state: null };
+      else if (previous.state !== event.state) {
+        previous = { state: event.state, episode: previous.episode + 1, intentId: previous.intentId };
+        state.providerEpisodes[provider] = previous;
+        addAlert(state, 'provider', `${provider}:${previous.episode}`, event.createdAt, 1, provider);
+      }
+    }
+    state.providerEpisodes[provider] = { ...previous, intentId: intent.id };
+    validateNotifications(state);
+    persistJson(root, 'provider-notifications.json', state);
+  }
+  fs.rmSync(fileAt(root, `notification-pending-${provider}.json`), { force: true });
+}
+
+// Public producer for callers already holding the current workspace fence.
+export function enqueueProviderNotificationUnderFence(root, record) {
+  prepareProviderNotificationUnderFence(root, null, record);
+  publishProviderNotificationIntentUnderFence(root, record.provider);
 }
 
 function loadNotificationTracker(root) {
@@ -272,7 +348,8 @@ export function markNotification(root, id, action, at = new Date().toISOString()
     if (!state.alerts.some((item) => item.id === id)) throw new Error('notification is unavailable');
     const base = readState(root);
     const runtime = readState(root, 'notifications-runtime.json');
-    const retained = new Set([...base.alerts, ...runtime.alerts].map((item) => item.id));
+    const providerState = readProviderState(root);
+    const retained = new Set([...base.alerts, ...runtime.alerts, ...providerState.alerts].map((item) => item.id));
     retained.add(pendingDigestId(base.pending));
     const pending = new Set(base.pending);
     for (const [matchId, match] of allMatchStates(base, loadNotificationTracker(root))) {
@@ -290,6 +367,7 @@ export function markNotification(root, id, action, at = new Date().toISOString()
 
 export function refreshNotificationDigest(root, config, at = new Date().toISOString()) {
   return withWorkspaceMutationAuthority(root, { kind: 'notifications', phase: 'digest' }, () => {
+    for (const provider of ['codex', 'claude']) publishProviderNotificationIntentUnderFence(root, provider);
     const current = readNotifications(root);
     const next = flushNotificationDigest(current, config, at, { tracker: loadNotificationTracker(root) });
     const known = new Set(current.alerts.map((item) => item.id));

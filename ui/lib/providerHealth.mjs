@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFile } from './atomicWrite.mjs';
-import { enqueueProviderNotificationUnderFence } from './notifications.mjs';
+import { prepareProviderNotificationUnderFence, publishProviderNotificationIntentUnderFence } from './notifications.mjs';
 import { readProviderAuthMutation } from './providerAuthMutation.mjs';
 import { providerRemoteHealthSignal } from './providers.mjs';
 import {
@@ -393,8 +393,9 @@ function persistRecord(root, provider, evidence) {
     throw new Error('provider health record exceeds its size limit');
   }
   const file = providerFile(root, provider, { create: true });
-  enqueueProviderNotificationUnderFence(root, record);
+  try { prepareProviderNotificationUnderFence(root, current, record); } catch { /* notification storage cannot own health authority */ }
   atomicWriteFile(file, encoded, { mode: 0o600 });
+  try { publishProviderNotificationIntentUnderFence(root, provider); } catch { /* the fenced pending intent is retried by notification polling */ }
   return { ...structuredClone(record), shouldNotify };
 }
 

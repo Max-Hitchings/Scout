@@ -41,14 +41,18 @@ matches as background alerts. Already-created alerts remain reviewable.
 
 Assessed-match state is kept in the workspace's private
 `.scout/notifications.json` and committed with the tracker/report mutation and
-its recovery receipt. Provider episodes and timer-produced digests use
+its recovery receipt. Provider episodes have independent reserved capacity in
+`.scout/provider-notifications.json`. Timer-produced digests use
 `.scout/notifications-runtime.json`; delivery and acknowledgement use
 `.scout/notification-receipts.json`. Those companion files never rewrite a
 scan's receipted target. Lifetime vacancy dedupe is a small `notificationState`
 tuple on the existing private tracker entry, committed in the same mutation. Repeating or recovering that mutation does not create another
-alert. Provider failures enter the outbox while their health evidence is fenced,
-before the health record is replaced. Repeating a partially written failure
-cannot create another episode. Checking and sign-in progress do not create
+alert. Provider transitions prepare a small fenced pending intent; the authoritative
+health record is replaced before publishing the warning. Preparing or publishing
+a notification cannot prevent health replacement. A full match outbox therefore
+cannot erase an authentication failure. Pending intents are retried by the next
+health transition or local notification poll, retaining quick failure/recovery
+episodes without duplicates. Checking and sign-in progress do not create
 notifications. A new failure after recovery can create a new alert.
 
 The Windows tray polls the local outbox every 30 seconds. Each displayed
@@ -77,10 +81,16 @@ notification calls. macOS, Linux and a remote browser retain dashboard alerts;
 this change does not install a native notification daemon on those platforms.
 
 Each notification file is bounded to 4 MiB; the combined outbox retains at
-most 1,000 alerts. Acknowledged historical alerts may be removed to make room,
+most 1,000 match/digest alerts plus 64 provider warnings. The provider reserve
+retires superseded or resolved operational history while preserving current
+provider warnings; episode identities continue monotonically. Acknowledged
+match/digest history may be removed to make room,
 including on a dashboard-only host without native delivery. Unacknowledged
 obligations are kept. Delivery receipts retain only current alerts and pending
-obligations. Previously qualifying vacancies do not accumulate in the outbox:
+obligations. Each provider also has a bounded pending-intent file; if notification
+storage is unavailable through many state changes, it keeps the oldest
+unreported transition and newest transitions rather than growing indefinitely.
+Previously qualifying vacancies do not accumulate in the outbox:
 their dedupe tuple stays with their existing tracker entry. If unresolved alerts
 reach the bound, acknowledge older dashboard alerts to make room. Scout does
 not silently discard an unseen alert or fill the disk. Notification files are

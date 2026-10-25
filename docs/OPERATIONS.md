@@ -126,7 +126,8 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   ranking/assessment gates apply mode-dependent thresholds and scan caps.
   Assessed-match notifications participate in the tracker/report mutation
   receipt; provider-failure episodes enter the bounded private local outbox
-  before fenced health replacement. Active hunting flushes a non-empty daily
+  independently of fenced health replacement, using a bounded pending intent.
+  Full notification storage cannot override a remote-authentication failure. Active hunting flushes a non-empty daily
   digest; background watch has no routine digest. Windows tray delivery polls
   only local endpoints and acknowledges delivery separately from dashboard
   acknowledgement. No outbound notification service is configured. See

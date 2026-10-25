@@ -65,7 +65,7 @@ test('provider failure episodes survive recovery, deduplicate until state change
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('real provider health producer durably queues before a failed health replacement and retries once', async () => {
+test('real provider health producer retains a retryable intent across failed health replacement', async () => {
   const n = await import('./notifications.mjs');
   const { recordProviderHealth } = await import('./providerHealth.mjs');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-health-outbox-'));
@@ -80,7 +80,8 @@ test('real provider health producer durably queues before a failed health replac
       return rename(source, target);
     };
     assert.throws(() => recordProviderHealth(root, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' }, { now: new Date(at) }), /synthetic/);
-    assert.equal(n.readNotifications(root).alerts.length, 1, 'the failure remains in the outbox even if health replacement fails');
+    assert.equal(fs.existsSync(path.join(root, '.scout', 'notification-pending-codex.json')), true, 'the failure intent survives even if health replacement fails');
+    assert.equal(n.readNotifications(root).alerts.length, 0, 'publication follows the authoritative health write');
     fs.renameSync = rename;
     recordProviderHealth(root, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' }, { now: new Date(later) });
     assert.equal(n.readNotifications(root).alerts.length, 1, 'retrying a partial commit must not create a new episode');
@@ -203,4 +204,84 @@ test('distinct legacy adverts sharing a privacy-redacted URL still produce disti
     assert.equal(state.pending.length, 2, 'distinct semantic adverts must not collapse at the alert boundary');
     assert.equal(artifacts.tracker.opportunities.filter((entry) => entry.notificationState?.qualified).length, 2);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a full match outbox cannot prevent authoritative remote-auth failure or permit a local-only preflight', async () => {
+  const { createHash } = await import('node:crypto');
+  const { recordProviderHealth, readProviderHealth, providerPreflight } = await import('./providerHealth.mjs');
+  const n = await import('./notifications.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-full-outbox-auth-'));
+  try {
+    recordProviderHealth(root, 'codex', { kind: 'remote-success', source: 'provider-operation' }, { now: new Date(at) });
+    const state = n.emptyNotifications();
+    state.alerts = Array.from({ length: 1000 }, (_, index) => ({ id: createHash('sha256').update(`synthetic-full-${index}`).digest('hex'), kind: 'match', provider: null, count: 1, createdAt: at, deliveredAt: null, acknowledgedAt: null }));
+    fs.writeFileSync(n.notificationFile(root), JSON.stringify(state));
+    recordProviderHealth(root, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' }, { now: new Date(later) });
+    const health = readProviderHealth(root, 'codex');
+    assert.equal(health.remoteAuthBarrier, true);
+    assert.equal(health.state, 'sign-in-required');
+    const preflight = await providerPreflight(root, 'codex', 'manual-run', { now: new Date(later), probe: async () => ({ kind: 'local-credentials-present', source: 'manual-preflight' }) });
+    assert.equal(preflight.ok, false, 'local credential presence must not erase a remote-auth barrier when alerts are full');
+    assert.equal(n.notificationView(n.readNotifications(root)).outbox.filter((item) => item.kind === 'provider').length, 1, 'provider warnings have capacity independent of match history');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('full reserved provider history retires resolved episodes while preserving current provider truth and warnings', async () => {
+  const { recordProviderHealth, readProviderHealth } = await import('./providerHealth.mjs');
+  const n = await import('./notifications.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-provider-history-'));
+  try {
+    for (let index = 0; index < 70; index += 1) {
+      recordProviderHealth(root, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' }, { now: new Date(Date.parse(at) + index * 2000) });
+      recordProviderHealth(root, 'codex', { kind: 'remote-success', source: 'provider-operation' }, { now: new Date(Date.parse(at) + index * 2000 + 1000) });
+    }
+    recordProviderHealth(root, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' }, { now: new Date(later) });
+    const state = n.readNotifications(root);
+    assert.equal(readProviderHealth(root, 'codex').remoteAuthBarrier, true);
+    assert.equal(state.alerts.filter((item) => item.kind === 'provider').length, 64);
+    assert.equal(state.providerEpisodes.codex.episode, 71);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a notification-intent preparation failure cannot stop the authoritative health replacement', async () => {
+  const { recordProviderHealth, readProviderHealth } = await import('./providerHealth.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-intent-authority-'));
+  const rename = fs.renameSync;
+  let injected = false;
+  try {
+    recordProviderHealth(root, 'codex', { kind: 'remote-success', source: 'provider-operation' }, { now: new Date(at) });
+    fs.renameSync = (source, target) => {
+      if (String(target).endsWith('notification-pending-codex.json')) { injected = true; throw new Error('synthetic notification intent failure'); }
+      return rename(source, target);
+    };
+    recordProviderHealth(root, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' }, { now: new Date(later) });
+    assert.equal(injected, true);
+    assert.equal(readProviderHealth(root, 'codex').remoteAuthBarrier, true, 'notification storage must not own authentication authority');
+  } finally { fs.renameSync = rename; fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('failed provider publication preserves the failure through quick recovery and idle polling', async () => {
+  const { recordProviderHealth, readProviderHealth } = await import('./providerHealth.mjs');
+  const n = await import('./notifications.mjs');
+  for (const recover of [true, false]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-provider-intent-replay-'));
+    const rename = fs.renameSync;
+    try {
+      recordProviderHealth(root, 'codex', { kind: 'remote-success', source: 'provider-operation' }, { now: new Date(at) });
+      fs.renameSync = (source, target) => {
+        if (String(target).endsWith('provider-notifications.json')) throw new Error('synthetic provider outbox failure');
+        return rename(source, target);
+      };
+      recordProviderHealth(root, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' }, { now: new Date(later) });
+      assert.equal(readProviderHealth(root, 'codex').remoteAuthBarrier, true);
+      assert.equal(fs.existsSync(path.join(root, '.scout', 'notification-pending-codex.json')), true);
+      fs.renameSync = rename;
+      if (recover) recordProviderHealth(root, 'codex', { kind: 'remote-success', source: 'provider-operation' }, { now: new Date('2026-10-26T08:00:01.000Z') });
+      else n.refreshNotificationDigest(root, { mode: 'background' }, later);
+      assert.equal(n.readNotifications(root).alerts.filter((item) => item.kind === 'provider').length, 1, 'a recovered failure still reaches the durable warning outbox');
+      n.refreshNotificationDigest(root, { mode: 'background' }, later);
+      assert.equal(n.readNotifications(root).alerts.filter((item) => item.kind === 'provider').length, 1, 'intent replay must be idempotent');
+      assert.equal(readProviderHealth(root, 'codex').remoteAuthBarrier, !recover);
+    } finally { fs.renameSync = rename; fs.rmSync(root, { recursive: true, force: true }); }
+  }
 });

@@ -88,3 +88,9 @@ Work done after this snapshot goes in its own section below, signed with the aut
 - The Linux test container's PID 1 does not reap orphan processes. Tests use an
   external child-subreaper wrapper; Scout's process tests were not weakened.
   F-1, D-1, live provider checks, private workspaces and deployment were untouched.
+
+- Follow-up self-review isolated provider-warning capacity from match history.
+  Health replacement always wins over notification-storage errors; a bounded
+  pending intent preserves failure/recovery episodes until publication. The
+  independent 64-record operational reserve retires superseded/resolved history
+  while retaining current warnings and monotonic episode identities.
