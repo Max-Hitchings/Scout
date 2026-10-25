@@ -1467,6 +1467,10 @@ const Setup = {
       this.providerLoginState[provider] = { ...result, loading: false };
       const sessionChanged = JSON.stringify(current?.session || null)
         !== JSON.stringify(result.session || null);
+      if (sessionChanged && result.session?.state === 'succeeded') {
+        await this.refreshStatus({ keepOpen: true });
+        if (this.providerLoginGeneration[provider] !== generation) return;
+      }
       if (sessionChanged && this.providerLoginVisible()) {
         if (this.view === 'section') this.renderProviderSettings();
         else this.renderProviders();
@@ -1554,6 +1558,10 @@ const Setup = {
       if (this.providerLoginGeneration[provider] !== generation) return;
       const session = result.session || null;
       this.providerLoginState[provider] = { ...entry, mutating: false, session };
+      if (session?.state === 'succeeded') {
+        await this.refreshStatus({ keepOpen: true });
+        if (this.providerLoginGeneration[provider] !== generation) return;
+      }
       if (action === 'clear') {
         if (result.result?.state !== 'cleared') {
           throw new Error('Claude credential clearing did not complete');

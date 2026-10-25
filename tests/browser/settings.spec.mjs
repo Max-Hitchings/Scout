@@ -720,6 +720,7 @@ test('settings is a single usable scroll surface on a phone viewport', async ({ 
 });
 
 test('guided provider login supports code, failure, retry and cancel without browser persistence', async ({ page }) => {
+  let session = null;
   await page.unroute('**/api/setup/status');
   await page.route('**/api/setup/status', async (route) => {
     await route.fulfill({
@@ -738,7 +739,6 @@ test('guided provider login supports code, failure, retry and cancel without bro
     });
   });
   await page.unroute('**/api/provider-login/status?*');
-  let session = null;
   let startCount = 0;
   let retryCount = 0;
   let statusRequests = 0;
