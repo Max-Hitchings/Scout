@@ -197,6 +197,7 @@ export function providerCardPresentation(provider = {}) {
 export function buildConfig(form, current = {}) {
   const salary = String(form.salaryMinimum || '').trim();
   return {
+    mode: form.mode || current.mode || 'background',
     locale: String(form.locale || current.locale || 'en-GB').trim(),
     currency: String(form.currency || current.currency || 'GBP').trim().toUpperCase(),
     timezone: String(form.timezone || current.timezone || 'Europe/London').trim(),
