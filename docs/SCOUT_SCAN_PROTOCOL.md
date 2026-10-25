@@ -92,6 +92,10 @@ The synthetic scale fixture can be rerun on a disposable development host with
 `node ui/lib/fixtures/canonical-scale.mjs 2500` or `10000`; it prints timings and
 whether reversed input plus prior identities produces the same result. These
 measurements do not establish live-host performance.
+The 5,000-vacancy regression allows five seconds of process CPU time and a
+30-second wall deadline, reporting both timings. The separate wall deadline
+allows for other test processes competing on a hosted runner without hiding
+the processing cost of an accidentally quadratic implementation.
 
 ## Search coverage and health
 
