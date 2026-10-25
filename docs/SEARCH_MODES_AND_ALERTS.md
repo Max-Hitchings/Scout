@@ -34,19 +34,26 @@ one, then creates one digest. No empty digest is sent. A running host checks
 every five minutes, so delivery can be a few minutes after the due time or
 wait until a scan releases the workspace. When the host is stopped, the next
 start or local delivery poll catches up. Changing to background watch clears
-an unsent digest; already-created alerts remain available for review.
+ordinary unsent active matches, while preserving outstanding exceptional
+matches as background alerts. Already-created alerts remain reviewable.
 
 ## Local delivery and acknowledgement
 
-Alerts are kept durably in the workspace's private `.scout/notifications.json`.
-Assessed-match alerts are committed with the tracker/report mutation and its
-recovery receipt. Repeating or recovering that mutation does not create another
+Assessed-match state is kept in the workspace's private
+`.scout/notifications.json` and committed with the tracker/report mutation and
+its recovery receipt. Provider episodes and timer-produced digests use
+`.scout/notifications-runtime.json`; delivery and acknowledgement use
+`.scout/notification-receipts.json`. Those companion files never rewrite a
+scan's receipted target. Lifetime vacancy dedupe is a small `notificationState`
+tuple on the existing private tracker entry, committed in the same mutation. Repeating or recovering that mutation does not create another
 alert. Provider failures enter the outbox while their health evidence is fenced,
 before the health record is replaced. Repeating a partially written failure
 cannot create another episode. Checking and sign-in progress do not create
 notifications. A new failure after recovery can create a new alert.
 
-The Windows tray polls the local outbox every 30 seconds. It shows only generic
+The Windows tray polls the local outbox every 30 seconds. Each displayed
+notification has an immutable event owner, so delayed update, recovery or old
+notification events cannot acknowledge a newer match. It shows only generic
 match counts or a provider name, never CV details, role titles, account data or
 technical provider output. Clicking a balloon opens Scout. A delivery receipt
 is recorded after Windows reports that the balloon was shown. If that receipt
@@ -69,12 +76,15 @@ protect mutations. There are no email, push, webhook or other outbound
 notification calls. macOS, Linux and a remote browser retain dashboard alerts;
 this change does not install a native notification daemon on those platforms.
 
-The file is bounded to 4 MiB, 10,000 previously qualifying vacancy states and
-1,000 retained alerts. Only acknowledged, delivered historical alerts may be
-removed to make room. Unresolved obligations are kept. If that bound is reached,
-Scout reports that notification history needs review rather than discarding an
-unseen alert or filling the disk. The outbox is host runtime state and is not
-added to ordinary tracked workspace backup files.
+Each notification file is bounded to 4 MiB; the combined outbox retains at
+most 1,000 alerts. Acknowledged historical alerts may be removed to make room,
+including on a dashboard-only host without native delivery. Unacknowledged
+obligations are kept. Delivery receipts retain only current alerts and pending
+obligations. Previously qualifying vacancies do not accumulate in the outbox:
+their dedupe tuple stays with their existing tracker entry. If unresolved alerts
+reach the bound, acknowledge older dashboard alerts to make room. Scout does
+not silently discard an unseen alert or fill the disk. Notification files are
+host runtime state; the per-vacancy tuple follows ordinary private tracker backup.
 
 ## Check the result
 
