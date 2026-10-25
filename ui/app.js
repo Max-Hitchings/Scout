@@ -395,7 +395,7 @@ const Scout = {
     this.queueStrongMatches();
   },
 
-  async scanNow() {
+  async scanNow({ provider } = {}) {
     if (this.scanRunning || this.chat?.streaming) return;
     const button = document.getElementById('scan-now');
     this.scanRunning = true;
@@ -404,7 +404,7 @@ const Scout = {
     try {
       const response = await fetch('/api/scan', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ provider: this.workspaceConfig?.ai?.provider }),
+        body: JSON.stringify({ provider: provider || this.workspaceConfig?.ai?.provider }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || `Scan failed (${response.status})`);
@@ -539,6 +539,7 @@ const Scout = {
         this.scanOperationTimer = null;
         this.scanRunning = false;
         if (button) { button.disabled = false; button.textContent = 'Scan now'; }
+        void this.loadProviderHealth();
         if (body.operation.status === 'succeeded') await this.loadOpportunities();
       } catch {
         // A transient transport or decoding failure is not evidence that the
@@ -3119,6 +3120,103 @@ const Scout = {
     banner.append(actions);
   },
 
+  providerName(provider) { return provider === 'claude' ? 'Claude' : 'Codex'; },
+
+  async loadProviderHealth() {
+    let providers;
+    try {
+      const body = await this.api('/api/provider-health');
+      providers = Array.isArray(body?.providers) ? body.providers : [];
+    } catch { return; } // an unreachable host is already reported by the host-unavailable notice
+    // Re-rendering identical content would make screen readers announce it again.
+    if (JSON.stringify(providers) === JSON.stringify(this.providerHealth)) return;
+    this.providerHealth = providers;
+    this.renderProviderHealthBanner();
+  },
+
+  async providerHealthPost(pathname, payload) {
+    const response = await fetch(pathname, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+    return body;
+  },
+
+  renderProviderHealthBanner() {
+    const container = document.getElementById?.('provider-health-banner');
+    if (!container) return;
+    container.replaceChildren();
+    this.providerHealthDismissed = this.providerHealthDismissed || new Set();
+    for (const entry of this.providerHealth || []) {
+      // "Not now" and a started scan only hide the resume row for this page load.
+      if (entry.signInRequired || !this.providerHealthDismissed.has(entry.provider)) {
+        container.append(this.providerHealthRow(entry));
+      }
+    }
+    container.classList.toggle('hidden', !container.childElementCount);
+  },
+
+  providerHealthRow(entry) {
+    const name = this.providerName(entry.provider);
+    const row = document.createElement('aside');
+    row.className = 'update-banner provider-banner';
+    row.dataset.provider = entry.provider;
+    const copy = document.createElement('p');
+    const actions = document.createElement('div');
+    actions.className = 'update-banner-actions';
+    const add = (label, className, onClick) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = className;
+      button.textContent = label;
+      button.addEventListener('click', async () => {
+        const all = actions.querySelectorAll('button');
+        all.forEach((item) => { item.disabled = true; });
+        try { await onClick(); } catch (error) { copy.textContent = error.message; } finally {
+          all.forEach((item) => { item.disabled = false; });
+        }
+      });
+      actions.append(button);
+    };
+    const hideRow = () => { this.providerHealthDismissed.add(entry.provider); this.renderProviderHealthBanner(); };
+    if (entry.signInRequired) {
+      const waiting = entry.jobs.map((job) => `${job.id} (${job.time})`).join(', ');
+      copy.textContent = entry.acknowledged
+        ? `${name} still needs sign-in. Reconnect when you are ready.`
+        : `${name} sign-in has expired, so ${name} work cannot run until you reconnect.${waiting ? ` Scheduled scans waiting: ${waiting}.` : ''}`;
+      add(`Reconnect ${name}`, 'act primary', () => window.ScoutSetup?.openSettings?.('providers'));
+      if (!entry.acknowledged) {
+        add('Remind me later', 'act', async () => {
+          await this.providerHealthPost('/api/provider-health/acknowledge', { provider: entry.provider, alertId: entry.alertId });
+          await this.loadProviderHealth();
+        });
+      }
+    } else {
+      copy.textContent = `${name} is signed in again.${entry.missedJobIds.length ? ` Missed scheduled scan: ${entry.missedJobIds.join(', ')}.` : ''}${entry.manualBlocked ? ' Your last scan was blocked by the expired sign-in.' : ''}`;
+      if (entry.missedJobIds.length) {
+        add('Run missed scan now', 'act primary', async () => {
+          for (const id of entry.missedJobIds) {
+            await this.providerHealthPost('/api/schedule', { action: 'run-now', id, provider: entry.provider });
+          }
+          this.providerHealthDismissed.add(entry.provider);
+          copy.textContent = 'Missed scan started. Scout will show the result when it finishes.';
+          actions.replaceChildren();
+        });
+      }
+      if (entry.manualBlocked) {
+        add('Retry now', 'act primary', async () => {
+          if (this.scanRunning) throw new Error('A scan is already running.');
+          hideRow();
+          await this.scanNow({ provider: entry.provider });
+        });
+      }
+      add('Not now', 'act', async () => hideRow());
+    }
+    row.append(copy, actions);
+    return row;
+  },
+
   init() {
     ScoutModal.register(document.getElementById?.('cv-options-overlay'), {
       initialFocus: '#cv-options-title', onEscape: () => this.closeCvOptions(),
@@ -3146,23 +3244,27 @@ const Scout = {
     document.getElementById?.('cv-options-continue')?.addEventListener('click', () => this.startCvFromOptions());
     this.bindDelegatedActions();
     window.addEventListener?.('focus', () => {
+      this.loadProviderHealth();
       this.refreshSyncStatus({ retry: true });
       this.serviceWorkerRegistration?.update?.();
       this.checkUiBuild();
     });
     document.addEventListener?.('visibilitychange', () => {
       if (!document.hidden) {
+        this.loadProviderHealth();
         this.refreshSyncStatus({ retry: true });
         this.serviceWorkerRegistration?.update?.();
         this.checkUiBuild();
       }
     });
     this.loadOpportunities();
+    this.loadProviderHealth();
     this.reattachScanOperation();
     this.refreshSyncStatus();
     this.checkUiBuild();
     window.setTimeout?.(() => this.checkForAppUpdate(false), 2500);
     window.setInterval?.(() => this.refreshSyncStatus(), 5 * 60 * 1000);
+    window.setInterval?.(() => this.loadProviderHealth(), 5 * 60 * 1000);
     window.setInterval?.(() => {
       this.serviceWorkerRegistration?.update?.();
       this.checkUiBuild();

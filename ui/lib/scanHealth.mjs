@@ -215,6 +215,8 @@ export function publicRunSummary(manifest = {}, { events = [], lease = null, now
     updatedAt,
     profileVersion: safeToken(manifest.compatibility?.profileVersion),
     pipelineVersion: safeToken(manifest.compatibility?.pipelineVersion),
+    provider: ['codex', 'claude'].includes(manifest.compatibility?.provider) ? manifest.compatibility.provider : null,
+    scheduleJobId: manifest.compatibility?.scheduleJobId === 'none' ? null : safeToken(manifest.compatibility?.scheduleJobId),
     completedStages,
     assessment: assessmentProgress(manifest, assessmentEvents),
     recoveryCount: Array.isArray(manifest.recoveryAttempts) ? manifest.recoveryAttempts.length : 0,

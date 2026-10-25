@@ -37,6 +37,7 @@ const { enqueueScanRequest } = await import('./lib/scanQueue.mjs');
 const {
   acquireProviderAuthMutation, releaseProviderAuthMutation,
 } = await import('./lib/providerAuthMutation.mjs');
+const { readProviderHealth, recordProviderHealth } = await import('./lib/providerHealth.mjs');
 
 test('server startup and periodic provider health use the configured runtime entry points', async () => {
   const config = {
@@ -315,6 +316,79 @@ const JSON_HEADERS = () => {
   const host = `127.0.0.1:${port}`;
   return { host, origin: `http://${host}`, 'content-type': 'application/json' };
 };
+
+test('provider health banner lists an expired session and "Remind me later" acknowledges it durably', async () => {
+  const originalConfig = loadWorkspaceConfig(WORKSPACE_ROOT);
+  writeWorkspaceConfig(WORKSPACE_ROOT, {
+    ...originalConfig,
+    ai: { ...originalConfig.ai, provider: 'codex' },
+    schedule: {
+      ...originalConfig.schedule,
+      jobs: [{ id: 'claude-primary', enabled: true, time: '07:30', days: null, provider: 'claude', mode: 'primary', model: null }],
+    },
+  });
+  const acknowledge = (body, headers = JSON_HEADERS()) => request({
+    method: 'POST', path: '/api/provider-health/acknowledge', headers, body: JSON.stringify(body),
+  });
+  try {
+    assert.deepEqual(JSON.parse((await request({ path: '/api/provider-health' })).text), { providers: [] });
+
+    recordProviderHealth(WORKSPACE_ROOT, 'claude', { kind: 'remote-auth-failure', source: 'scheduled-preflight' }, { purpose: 'scheduled-job' });
+    const listed = JSON.parse((await request({ path: '/api/provider-health' })).text);
+    assert.deepEqual(listed, { providers: [{
+      provider: 'claude',
+      signInRequired: true,
+      alertId: 'provider-health:claude:sign-in-required',
+      acknowledged: false,
+      jobs: [{ id: 'claude-primary', time: '07:30', mode: 'primary' }],
+      missedJobIds: [],
+      manualBlocked: false,
+    }] });
+    assert.doesNotMatch(JSON.stringify(listed), /token|path|@/i);
+
+    assert.equal((await acknowledge({ provider: 'claude', alertId: 'provider-health:claude:ready' })).status, 409);
+    assert.equal((await acknowledge({ provider: 'gemini', alertId: 'x' })).status, 400);
+    assert.equal((await acknowledge({ provider: 'claude', alertId: listed.providers[0].alertId, extra: true })).status, 400);
+    assert.equal((await acknowledge({ provider: 'claude', alertId: listed.providers[0].alertId }, { ...JSON_HEADERS(), 'content-type': 'text/plain' })).status, 415);
+    assert.equal((await acknowledge({ provider: 'claude', alertId: listed.providers[0].alertId }, { ...JSON_HEADERS(), origin: 'https://attacker.example' })).status, 403);
+    assert.equal(readProviderHealth(WORKSPACE_ROOT, 'claude').alert.acknowledgedAt, null);
+
+    const ok = await acknowledge({ provider: 'claude', alertId: listed.providers[0].alertId });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(JSON.parse(ok.text), { ok: true });
+    assert.notEqual(readProviderHealth(WORKSPACE_ROOT, 'claude').alert.acknowledgedAt, null);
+    assert.equal(JSON.parse((await request({ path: '/api/provider-health' })).text).providers[0].acknowledged, true);
+
+    // A fresh sign-in failure after recovery is a new alert, so it is not silenced.
+    recordProviderHealth(WORKSPACE_ROOT, 'claude', { kind: 'remote-success', source: 'post-auth' }, { purpose: 'post-auth' });
+    assert.deepEqual(JSON.parse((await request({ path: '/api/provider-health' })).text), { providers: [] });
+    recordProviderHealth(WORKSPACE_ROOT, 'claude', { kind: 'remote-auth-failure', source: 'scheduled-preflight' }, { purpose: 'scheduled-job' });
+    assert.equal(JSON.parse((await request({ path: '/api/provider-health' })).text).providers[0].acknowledged, false);
+  } finally {
+    writeWorkspaceConfig(WORKSPACE_ROOT, originalConfig);
+    fs.rmSync(path.join(WORKSPACE_ROOT, '.scout', 'provider-health'), { recursive: true, force: true });
+  }
+});
+
+test('the remote owner can acknowledge a provider alert without encrypted backup enabled', () => {
+  const settings = {
+    remoteAccess: { enabled: true, ownerLogin: 'owner@example.test', origin: 'https://scout.example.ts.net' },
+  };
+  const req = {
+    method: 'POST',
+    headers: {
+      host: 'scout.example.ts.net',
+      origin: 'https://scout.example.ts.net',
+      'tailscale-user-login': 'owner@example.test',
+      'content-type': 'application/json',
+    },
+    socket: { remoteAddress: '127.0.0.1' },
+  };
+  assert.deepEqual(
+    requestAccess(req, new URL('https://scout.example.ts.net/api/provider-health/acknowledge'), settings),
+    { ok: true, access: 'remote-owner' },
+  );
+});
 
 test('provider setup status projects only bounded readiness fields', () => {
   const raw = {

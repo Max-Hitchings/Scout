@@ -53,7 +53,9 @@ If Scout reports a provider-health block, open **Settings -> AI providers**.
 `sign-in required`, `network unavailable`, `rate limited`, `CLI update
 required`, and `provider error` are distinct conditions. Fix only the named
 provider and retry explicitly; Scout does not substitute the other provider or
-automatically replay a missed scheduled window. Guided sign-in uses the fixed
+automatically replay a missed scheduled window. A dashboard notice follows an
+expired session and offers **Run missed scan now** once it is reconnected; see
+[reconnecting a provider](RECONNECT_PROVIDER.md). Guided sign-in uses the fixed
 Codex device flow or fixed Claude login flow. If it is unavailable, use the
 manual command shown in Settings. Claude credential clearing is offered only
 after a fresh expired-credential failure and always requires confirmation.

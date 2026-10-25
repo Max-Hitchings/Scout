@@ -27,6 +27,7 @@ The [canonical VPS state and automatic backup guide](VPS_BACKUP_AND_STATE.md) co
 
 - [Configuration reference](CONFIGURATION.md)
 - [AI providers](PROVIDERS.md)
+- [Reconnect an expired Codex or Claude session](RECONNECT_PROVIDER.md)
 - [Job sources and Adzuna](ADZUNA_AND_SOURCES.md)
 - [Scheduled scans](AUTOMATION.md)
 - [Upgrades and rollback](UPGRADES.md)

@@ -131,7 +131,7 @@ export function providerLoginPanelHtml(
     <p class="meta" role="status" aria-live="polite">${statusText}</p>
     ${device}${verification}
     <div class="provider-login-actions">${code}${start}${cancel}${retry}${clear}</div>
-    ${authenticated ? '' : `<p class="meta">Manual fallback: open your terminal and run <code>${command}</code>. <a href="${guide}" target="_blank" rel="noreferrer">Official ${name} login guide</a>. Retry only checks sign-in; it does not rerun a missed scan.</p>`}
+    ${authenticated ? '' : `<p class="meta">Manual fallback: open your terminal and run <code>${command}</code>. <a href="${guide}" target="_blank" rel="noreferrer">Official ${name} login guide</a>. Retry only checks sign-in. After reconnecting, close Settings and use Run missed scan now on the dashboard.</p>`}
   </section>`;
 }
 
@@ -854,6 +854,7 @@ const Setup = {
     this.providerLoginPollTimer = null;
     this.el('setup-close').classList.add('hidden');
     this.el('setup-overlay').classList.add('hidden');
+    void window.Scout?.loadProviderHealth?.();
   },
 
   async restartServer() {

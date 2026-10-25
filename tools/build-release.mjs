@@ -43,6 +43,7 @@ export const RELEASE_FILES = Object.freeze([
   { source: 'docs/PRIVATE_REMOTE_ACCESS.md', target: 'docs/PRIVATE_REMOTE_ACCESS.md' },
   { source: 'docs/CV_QUALITY.md', target: 'docs/CV_QUALITY.md' },
   { source: 'docs/PROVIDERS.md', target: 'docs/PROVIDERS.md' },
+  { source: 'docs/RECONNECT_PROVIDER.md', target: 'docs/RECONNECT_PROVIDER.md' },
   { source: 'docs/ADZUNA_AND_SOURCES.md', target: 'docs/ADZUNA_AND_SOURCES.md' },
   { source: 'docs/AUTOMATION.md', target: 'docs/AUTOMATION.md' },
   { source: 'docs/UPGRADES.md', target: 'docs/UPGRADES.md' },

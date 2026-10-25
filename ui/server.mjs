@@ -39,8 +39,9 @@ import {
   assertSafeModel, detectProvidersAsync, providerLocalHealthSignal, runProviderCommand,
 } from './lib/providers.mjs';
 import {
-  PROVIDER_HEALTH_STATES, providerPreflight, readProviderHealth,
+  PROVIDER_HEALTH_STATES, acknowledgeProviderAlert, providerPreflight, readProviderHealth,
 } from './lib/providerHealth.mjs';
+import { providerRecoveryView } from './lib/providerRecovery.mjs';
 import {
   acquireProviderAuthMutation, acquireProviderWork, attachProviderAuthMutationChild,
   beginProviderAuthMutationChild, finishProviderAuthMutationChild, releaseProviderAuthMutation,
@@ -602,6 +603,7 @@ const REMOTE_MUTATION_WITHOUT_BACKUP = new Set([
   'POST /api/provider-login/cancel',
   'POST /api/provider-login/retry',
   'POST /api/provider-login/clear-claude-credentials',
+  'POST /api/provider-health/acknowledge',
 ]);
 
 function applySecurityHeaders(res, url) {
@@ -665,6 +667,7 @@ export function requestAccess(req, url, settings = loadDeviceSettings()) {
     || url.pathname.startsWith('/api/workspace/')
     || url.pathname.startsWith('/api/remote-access/')
     || url.pathname.startsWith('/api/provider-login/')
+    || url.pathname.startsWith('/api/provider-health/')
     || ['POST /api/restart', 'POST /api/setup/proposal', 'POST /api/setup/activate', 'POST /api/setup/recovery'].includes(`${req.method} ${url.pathname}`);
   if (mutatingApi && requiresJson) {
     const mediaType = String(req.headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
@@ -1130,6 +1133,11 @@ async function handleRead(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/scan-health') {
     return sendJson(res, 200, readScanHealth());
   }
+  if (req.method === 'GET' && url.pathname === '/api/provider-health') {
+    let runs = [];
+    try { runs = readPublicRunSummaries(WORKSPACE_ROOT, { lease: readScanLease(WORKSPACE_ROOT) }).runs; } catch { /* no durable runs to relate */ }
+    return sendJson(res, 200, { providers: providerRecoveryView(WORKSPACE_ROOT, loadWorkspaceConfig(WORKSPACE_ROOT), runs) });
+  }
   if (req.method === 'GET' && url.pathname === '/api/scan/runs') {
     try { return sendJson(res, 200, readPublicRunSummaries(WORKSPACE_ROOT, { lease: readScanLease(WORKSPACE_ROOT) })); }
     catch { return sendJson(res, 503, { error: 'durable scan state needs attention' }); }
@@ -1390,6 +1398,21 @@ function requireProviderLoginCsrf(req, res) {
   replyJson(res, 403, { error: 'provider login CSRF token required' });
   return false;
 }
+
+routes['POST /api/provider-health/acknowledge'] = (req, res, body) => {
+  const value = exactJsonBody(body, ['alertId', 'provider']);
+  if (!value || !['codex', 'claude'].includes(value.provider) || typeof value.alertId !== 'string') {
+    return replyJson(res, 400, { error: 'supported provider and alert are required' });
+  }
+  try {
+    acknowledgeProviderAlert(WORKSPACE_ROOT, value.provider, value.alertId);
+    return replyJson(res, 200, { ok: true });
+  } catch (error) {
+    return error?.message === 'provider health alert is not active'
+      ? replyJson(res, 409, { error: 'provider alert changed; refresh and retry' })
+      : replyJson(res, 503, { error: 'provider health is busy; try again shortly' });
+  }
+};
 
 routes['GET /api/provider-login/status'] = (req, res, _body, url) => {
   const provider = url.searchParams.get('provider');
