@@ -10,7 +10,7 @@ import { parseClaudeLine } from './chatClaude.mjs';
 import { emptyChat, loadChat, saveChat } from './chatStore.mjs';
 import { HANDOFF_SUMMARY_PROMPT } from './chatPrompts.mjs';
 import { interviewPrepPath } from './interviewPrep.mjs';
-import { readProviderHealth } from './providerHealth.mjs';
+import { readProviderHealth, recordProviderHealth, recordProviderResultHealth } from './providerHealth.mjs';
 import { ProviderLifecycleUnclosedError } from './structuredTurn.mjs';
 import { mergeWorkspaceDefaults, writeWorkspaceConfig } from './workspace.mjs';
 import {
@@ -73,6 +73,160 @@ function routeFixture(root, overrides = {}) {
   });
   return routes;
 }
+
+test('real provider preflight blocks chat and fit after remote sign-out despite local credentials', async (t) => {
+  for (const mode of [null, 'fit-assessment']) {
+    const root = tmpRoot();
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    recordProviderHealth(root, 'codex', {
+      kind: 'remote-auth-failure', source: 'provider-operation',
+    }, { purpose: 'manual-run' });
+    let calls = 0;
+    const routes = routeFixture(root, {
+      runTurnFn() { calls += 1; return { stop() {}, finished: Promise.resolve({ ok: true, text: 'Unexpected' }) }; },
+      runStructuredTurnFn() { calls += 1; return Promise.resolve({ value: { summary: 'Unexpected', strengths: [], evidenceGaps: [], mandatoryGaps: [], recommendation: 'check' } }); },
+    });
+    const response = await callRoute(routes['POST /api/chat/send'], JSON.stringify({
+      id: ID, engine: 'codex', text: 'Check this role', mode,
+    }));
+    assert.equal(calls, 0, mode || 'chat');
+    assert.match(response.text(), /sign.in|required|reconnect/i);
+  }
+});
+
+test('chat result health is committed before real provider work exclusion is released', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let authWasExcluded;
+  const routes = routeFixture(root, {
+    runTurnFn: () => ({ stop() {}, finished: Promise.resolve({ ok: false, reasonCode: 'authentication-required' }) }),
+    async recordProviderResultHealthFn(...args) {
+      const mutation = acquireProviderAuthMutation(root, 'codex');
+      authWasExcluded = mutation === null;
+      if (mutation) releaseProviderAuthMutation(root, mutation);
+      return recordProviderResultHealth(...args);
+    },
+  });
+  await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'codex', text: 'Review this role' }));
+  assert.equal(authWasExcluded, true);
+  assert.equal(readProviderHealth(root, 'codex').remoteAuthBarrier, true);
+});
+
+test('a real transcript filesystem failure never prints its private path', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const messages = [];
+  const originalError = console.error;
+  console.error = (...values) => messages.push(values.join(' '));
+  t.after(() => { console.error = originalError; });
+  const routes = routeFixture(root, {
+    runTurnFn() {
+      fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'data', 'chats'), 'blocked-directory');
+      return { stop() {}, finished: Promise.resolve({ ok: true, text: 'Completed', filesTouched: [] }) };
+    },
+  });
+  const response = await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'codex', text: 'Review this role' }));
+  assert.match(response.text(), /done/);
+  assert.equal(messages.length, 1);
+  assert.doesNotMatch(messages.join('\n'), new RegExp(root));
+  assert.doesNotMatch(messages.join('\n'), /ENOTDIR|EEXIST|mkdir/);
+});
+
+test('a saved failed chat can be explicitly resent once without duplicating its user message', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let calls = 0;
+  const routes = routeFixture(root, {
+    runTurnFn() {
+      calls += 1;
+      return { stop() {}, finished: Promise.resolve(calls === 1
+        ? { ok: false, reasonCode: 'authentication-required', filesTouched: [] }
+        : { ok: true, text: 'Resent after reconnecting.', filesTouched: [] }) };
+    },
+  });
+  await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'codex', text: 'Retain this request.' }));
+  const saved = loadChat(root, ID);
+  assert.ok(saved.retry?.id, 'failed request must survive closing the chat');
+  assert.equal(calls, 1, 'failure never automatically resends');
+  recordProviderHealth(root, 'codex', { kind: 'remote-success', source: 'post-auth' }, { purpose: 'post-auth' });
+  const request = JSON.stringify({ id: ID, retryId: saved.retry.id });
+  const response = await callRoute(routes['POST /api/chat/send'], request);
+  assert.equal(sseEvents(response.text()).at(-1).event, 'done');
+  assert.equal(calls, 2);
+  const retried = loadChat(root, ID);
+  assert.equal(retried.messages.filter(({ role }) => role === 'user').length, 1);
+  assert.equal(retried.messages.at(-1).text, 'Resent after reconnecting.');
+  assert.equal(retried.retry, undefined);
+  const replayed = await callRoute(routes['POST /api/chat/send'], request);
+  assert.equal(replayed.statusCode, 409);
+  assert.equal(calls, 2);
+});
+
+test('two chat requests cannot both cross asynchronous preflight for the same opportunity', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let calls = 0;
+  const routes = routeFixture(root, {
+    runTurnFn() { calls += 1; return { stop() {}, finished: Promise.resolve({ ok: true, text: 'One result.', filesTouched: [] }) }; },
+  });
+  const body = JSON.stringify({ id: ID, engine: 'codex', text: 'Send once.' });
+  const first = new MockResponse();
+  const second = new MockResponse();
+  routes['POST /api/chat/send'](new EventEmitter(), first, body);
+  routes['POST /api/chat/send'](new EventEmitter(), second, body);
+  await Promise.all([first.finished, second.finished]);
+  assert.equal(second.statusCode, 409);
+  assert.equal(calls, 1);
+});
+
+test('a local sign-out records real health and a durable failed message before reconnecting', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const routes = routeFixture(root, {
+    providerStatusFn: () => ({ installed: true, authenticated: false, capabilities: { structuredOutput: true } }),
+    runTurnFn() { assert.fail('a signed-out provider must not run'); },
+  });
+  await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'codex', text: 'Save this before reconnecting.' }));
+  assert.equal(readProviderHealth(root, 'codex').state, 'sign-in-required');
+  const saved = loadChat(root, ID);
+  assert.equal(saved.messages[0].text, 'Save this before reconnecting.');
+  assert.ok(saved.retry.id);
+});
+
+test('Stop during real handoff preflight prevents both provider turns', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const chat = emptyChat('codex');
+  chat.cliSessionId = 'synthetic-handoff-session';
+  saveChat(root, ID, chat);
+  let calls = 0;
+  const routes = routeFixture(root, {
+    runTurnFn() { calls += 1; return { stop() {}, finished: Promise.resolve({ ok: true, text: 'Summary', sessionId: 'synthetic-next', filesTouched: [] }) }; },
+  });
+  const response = new MockResponse();
+  routes['POST /api/chat/handoff'](new EventEmitter(), response, JSON.stringify({ id: ID }));
+  const stop = await callRoute(routes['POST /api/chat/stop'], JSON.stringify({ id: ID }));
+  await response.finished;
+  assert.equal(JSON.parse(stop.text()).stopped, true);
+  assert.equal(calls, 0);
+});
+
+test('a handoff reserves chat admission before asynchronous preflight', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const chat = emptyChat('codex');
+  chat.cliSessionId = 'synthetic-handoff-session';
+  saveChat(root, ID, chat);
+  const routes = routeFixture(root, {
+    runTurnFn: () => ({ stop() {}, finished: Promise.resolve({ ok: true, text: 'Summary', sessionId: 'synthetic-next', filesTouched: [] }) }),
+  });
+  const response = new MockResponse();
+  routes['POST /api/chat/handoff'](new EventEmitter(), response, JSON.stringify({ id: ID }));
+  const competing = await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'codex', text: 'Concurrent request' }));
+  await response.finished;
+  assert.equal(competing.statusCode, 409);
+});
 
 async function callRoute(handler, body, { closeRequest = false } = {}) {
   const req = new EventEmitter();
@@ -745,6 +899,7 @@ test('ordinary chat records remote-auth failure without resending and preserves 
     filesTouched: [],
     usage: {},
   };
+  recordProviderHealth(root, 'codex', { kind: 'remote-success', source: 'post-auth' }, { purpose: 'post-auth' });
   const retried = await callRoute(
     routes['POST /api/chat/send'],
     JSON.stringify({ id: ID, engine: 'codex', text: 'I confirm this retry.' }),
@@ -823,16 +978,19 @@ test('runtime shutdown stops and awaits active SSE provider turns', async () => 
   await shutdownActiveChatTurns({ timeoutMs: 500 });
   await res.finished;
   assert.equal(stopped, true);
-  assert.equal(sseEvents(res.text()).at(-1).data.reasonCode, undefined);
+  assert.equal(sseEvents(res.text()).at(-1).data.reasonCode, 'stopped');
 });
 
 test('a settled late chat result is not resent or allowed to overwrite login-in-progress health', async () => {
   const root = tmpRoot();
   let resolveTurn;
+  let markStarted;
+  const started = new Promise((resolve) => { markStarted = resolve; });
   let invocations = 0;
   const routes = routeFixture(root, {
     runTurnFn: () => {
       invocations += 1;
+      markStarted();
       return {
         stop() {},
         finished: new Promise((resolve) => { resolveTurn = resolve; }),
@@ -846,6 +1004,7 @@ test('a settled late chat result is not resent or allowed to overwrite login-in-
     res,
     JSON.stringify({ id: ID, engine: 'codex', text: 'Finish exactly once.' }),
   );
+  await started;
   const mutationWhileRunning = acquireProviderAuthMutation(root, 'codex', {
     owner: { host: 'synthetic-host', pid: 43, processStart: 'synthetic-start-2' },
     mutationId: 'chat-auth-mutation-0002',

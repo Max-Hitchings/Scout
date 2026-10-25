@@ -6,7 +6,8 @@ import { doctor } from './doctor.mjs';
 import { loadWorkspaceConfig, validateWorkspaceConfig, workspacePaths } from './workspace.mjs';
 import { providerStatus } from './providers.mjs';
 import { runStructuredTurn } from './structuredTurn.mjs';
-import { recordProviderResultHealth } from './providerHealth.mjs';
+import { providerPreflight, recordProviderResultHealth } from './providerHealth.mjs';
+import { providerLocalHealthSignal } from './providers.mjs';
 import {
   acquireProviderWork, assertProviderAuthIdle, createProviderWorkSupervisor,
   releaseProviderWork, renewProviderWork,
@@ -371,6 +372,15 @@ export async function createOnboardingProposal(root, provider, {
     });
     assertProviderAuthIdleFn(root, provider);
     const status = providerStatusFn(provider);
+    const health = await providerPreflight(root, provider, 'manual-run', {
+      source: 'manual-preflight',
+      probe: async () => providerLocalHealthSignal(status, { source: 'manual-preflight' }),
+    });
+    if (!health.ok) {
+      const error = new Error('Reconnect the provider before generating a setup proposal.');
+      error.reasonCode = health.state === 'sign-in-required' ? 'authentication-required' : health.reasonCode;
+      throw error;
+    }
     const operation = runStructuredTurnFn({
       provider, status, schema: ONBOARDING_SCHEMA, prompt,
       model: config.ai?.provider === provider ? config.ai?.model : null,
@@ -386,6 +396,7 @@ export async function createOnboardingProposal(root, provider, {
       signal?.removeEventListener('abort', stopForAbort);
     }
     providerWork.assertCurrent();
+    await observeProviderResult({ ...turn, ok: true });
   } catch (error) {
     lifecycleError = error;
     await observeProviderResult(error);
@@ -393,7 +404,6 @@ export async function createOnboardingProposal(root, provider, {
   } finally {
     if (providerWork) await providerWork.release(lifecycleError);
   }
-  await observeProviderResult({ ...turn, ok: true });
   onProgress({ phase: 'Validating and staging proposal', current: 3, total: 4 });
   const proposalId = crypto.randomUUID();
   const files = renderOnboardingFiles(config, turn.value);
