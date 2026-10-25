@@ -126,7 +126,7 @@ function scanHarness(sources, seenCandidates) {
       const candidates = seenCandidates();
       const value = assessmentFor(candidates);
       validate(value);
-      return { value, usage: {} };
+      return { ok: true, value, usage: {} };
     },
     acquireLockFn: () => ({ ok: true, lock: { token: fixtureToken('ranked-discovery-test') } }),
     releaseLockFn: () => ({ ok: true }),
@@ -2325,4 +2325,34 @@ test('a scan records its assessment version and a model change assesses an earli
   assert.deepEqual(assessedUrls, [job.url, job.url], 'a different model assesses the rejection again');
   assert.equal(lastRun().assessment_version.model, 'model-b');
   assert.deepEqual(lastRun().explanations.map((item) => item.lifecycle.reason), ['assessment-change']);
+});
+
+test('workspace modes apply different real scan capacity and assessment gates with durable alert delivery', async () => {
+  const { readNotifications, flushNotificationDigest } = await import('../ui/lib/notifications.mjs');
+  for (const [workspaceMode, expectedCount] of [['background', 6], ['active', 12]]) {
+    const root = scanRoot();
+    try {
+      const config = { ...loadWorkspaceConfig(root), mode: workspaceMode };
+      writeWorkspaceConfig(root, config);
+      const jobs = Array.from({ length: 12 }, (_, index) => ({ company: `Synthetic${String.fromCharCode(65 + index)}group`, title: 'Example Role', url: `https://example.test/jobs/${index}`, score: 98, source: 'hiring_cafe' }));
+      let candidates = [];
+      const result = await runScanWith(root, 'codex', 'primary', {
+        ...scanHarness({ hiring_cafe: { configured: true, status: 'healthy', count: jobs.length, jobs } }, () => candidates),
+        checkLivenessFn: async (items) => { candidates = items; return { live: items, removed: [], summary: { checked: items.length, gone: 0, unverified: 0 } }; },
+      });
+      assert.equal(result.ok, true, result.error);
+      assert.equal(candidates.length, expectedCount, `${workspaceMode} must drive the production candidate cap`);
+      assert.ok(fs.existsSync(path.join(root, '.scout', 'notifications.json')), 'the real finalisation must write its outbox');
+      if (workspaceMode === 'background') {
+        assert.equal(readNotifications(root).alerts.length, 0, 'a generic keep recommendation is not evidence of an exceptional match');
+        assert.equal(result.scan.keepers_added, 0);
+      }
+      else {
+        const state = readNotifications(root);
+        assert.equal(state.alerts.length, 0);
+        assert.equal(state.pending.length, expectedCount);
+        assert.equal(flushNotificationDigest(state, config, state.digestAfter).alerts[0].count, expectedCount);
+      }
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  }
 });

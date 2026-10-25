@@ -22,3 +22,10 @@ test('mode policy feeds existing assessment thresholds and bounds scan capacity'
   assert.deepEqual([active.triage.checkScore, active.triage.actionScore, active.resultCap, active.digestHours], [55, 70, 60, 24]);
   assert.equal(workspaceModePolicy({ mode: 'active', triage: { checkScore: 60, actionScore: 80 } }).triage.actionScore, 80);
 });
+
+test('raising the background threshold cannot turn a generic keep recommendation into an exceptional score', async () => {
+  const { gateAssessment } = await import('./scanPipeline.mjs');
+  const gate = gateAssessment({ recommendation: 'keep', mandatoryRequirements: [] }, { actionScore: 95, checkScore: 85 }, {});
+  assert.equal(gate.keep, false);
+  assert.equal(gate.score, 70);
+});

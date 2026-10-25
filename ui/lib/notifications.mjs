@@ -25,11 +25,11 @@ export function emptyNotifications() {
 export function validateNotifications(value) {
   const fail = () => { throw new Error('notification storage has an unsupported schema'); };
   if (!keys(value, ['schemaVersion', 'matches', 'pending', 'digestAfter', 'providerEpisodes', 'alerts'])
-    || value.schemaVersion !== 1 || !value.matches || Array.isArray(value.matches)
+    || value.schemaVersion !== 1 || !value.matches || typeof value.matches !== 'object' || Array.isArray(value.matches)
     || Object.keys(value.matches).length > MAX_MATCHES || !Array.isArray(value.pending)
     || value.pending.length > MAX_MATCHES || new Set(value.pending).size !== value.pending.length
     || !value.pending.every((item) => HASH.test(item)) || !nullableTime(value.digestAfter)
-    || !value.providerEpisodes || Array.isArray(value.providerEpisodes)
+    || !value.providerEpisodes || typeof value.providerEpisodes !== 'object' || Array.isArray(value.providerEpisodes)
     || !Array.isArray(value.alerts) || value.alerts.length > MAX_ALERTS) fail();
   for (const [id, item] of Object.entries(value.matches)) {
     if (!HASH.test(id) || !keys(item, ['qualified', 'episode']) || typeof item.qualified !== 'boolean'
@@ -72,7 +72,7 @@ export function readNotifications(root) {
 function persist(root, state) {
   validateNotifications(state);
   const file = notificationFile(root);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   atomicWriteFile(notificationFile(root), `${JSON.stringify(state)}\n`, { mode: 0o600 });
 }
 
@@ -107,7 +107,7 @@ export function notificationsForAssessment(input, config, reviewed, at) {
   const state = flushNotificationDigest(input, config, at);
   const policy = workspaceModePolicy(config);
   for (const item of reviewed || []) {
-    const reference = item.vacancyId || item.id;
+    const reference = item.vacancyId || item.id || item.sourceUrl;
     if (!reference) continue;
     const id = hash(reference);
     const previous = state.matches[id] || { qualified: false, episode: 0 };
@@ -121,7 +121,8 @@ export function notificationsForAssessment(input, config, reviewed, at) {
     if (!qualified || previous.qualified) continue;
     if (policy.mode === 'background') addAlert(state, 'match', `${id}:${episode}`, at);
     else {
-      if (!state.pending.includes(id)) state.pending.push(id);
+      const pendingId = hash(`${id}:${episode}`);
+      if (!state.pending.includes(pendingId)) state.pending.push(pendingId);
       state.digestAfter ||= new Date(Date.parse(at) + policy.digestHours * 3_600_000).toISOString();
     }
   }

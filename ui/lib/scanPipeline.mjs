@@ -1,3 +1,4 @@
+import { notificationsForAssessment, readNotifications } from './notifications.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -2224,8 +2225,8 @@ export function gateAssessment(assessment, policy, candidate = {}) {
   const rankedScore = Number(candidate?.preRankScore);
   const total = Number.isFinite(rankedScore)
     ? Math.round(rankedScore * 100) / 100
-    : assessment.recommendation === 'keep' ? actionScore
-      : assessment.recommendation === 'check' ? checkScore : 0;
+    : assessment.recommendation === 'keep' ? 70
+      : assessment.recommendation === 'check' ? 55 : 0;
   const unmet = (assessment.mandatoryRequirements || []).filter((item) => item.status === 'unmet');
   const unknown = (assessment.mandatoryRequirements || []).filter((item) => item.status === 'unknown');
   if (assessment.recommendation === 'discard' || unmet.length) {
@@ -2621,6 +2622,9 @@ export function coordinateScanArtifacts(root, input, { run, lease, hooks = {} })
       || input.startedAt;
     const artifacts = buildScanArtifacts(root, { ...input, timestamp });
     const date = artifacts.run.timestamp.slice(0, 10);
+    const notifications = input.notificationConfig ? notificationsForAssessment(
+      readNotifications(root), input.notificationConfig, artifacts.run.reviewed, timestamp,
+    ) : null;
     const hasTracker = artifacts.contents.tracker !== undefined;
     const selectedLanes = Array.isArray(input.lanes) ? input.lanes : [];
     const currentLanePlan = selectedLanes.length ? loadSearchLanePlan(root) : null;
@@ -2696,6 +2700,7 @@ export function coordinateScanArtifacts(root, input, { run, lease, hooks = {} })
       schemaVersion: 1,
       files: [
         ...(hasTracker ? [{ kind: 'tracker', key: 'tracker' }] : []),
+        ...(notifications ? [{ kind: 'json', key: 'notifications' }] : []),
         { kind: 'report', key: `report:${date}` },
         { kind: 'run-log', key: 'scan-log' },
         ...(updatedLanePlan ? [{ kind: 'json', key: 'search-lanes' }] : []),
@@ -2709,6 +2714,7 @@ export function coordinateScanArtifacts(root, input, { run, lease, hooks = {} })
           artifacts.contents.tracker,
         ),
       } : {}),
+      ...(notifications ? { notifications: jsonReplaceRecipe(notifications) } : {}),
       [`report:${date}`]: artifacts.recipes.report,
       'scan-log': artifacts.recipes.runLog,
       ...(updatedLanePlan ? { 'search-lanes': jsonReplaceRecipe(updatedLanePlan) } : {}),

@@ -64,3 +64,56 @@ test('provider failure episodes survive recovery, deduplicate until state change
     assert.equal(n.readNotifications(root).alerts.length, 2);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('real provider health producer durably queues before a failed health replacement and retries once', async () => {
+  const n = await import('./notifications.mjs');
+  const { recordProviderHealth } = await import('./providerHealth.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-health-outbox-'));
+  const rename = fs.renameSync;
+  let injected = false;
+  try {
+    fs.renameSync = (source, target) => {
+      if (String(target).endsWith(`${path.sep}codex.json`) && !injected) {
+        injected = true;
+        throw new Error('synthetic health replacement failure');
+      }
+      return rename(source, target);
+    };
+    assert.throws(() => recordProviderHealth(root, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' }, { now: new Date(at) }), /synthetic/);
+    assert.equal(n.readNotifications(root).alerts.length, 1, 'the failure remains in the outbox even if health replacement fails');
+    fs.renameSync = rename;
+    recordProviderHealth(root, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' }, { now: new Date(later) });
+    assert.equal(n.readNotifications(root).alerts.length, 1, 'retrying a partial commit must not create a new episode');
+    recordProviderHealth(root, 'codex', { kind: 'remote-success', source: 'provider-operation' }, { now: new Date(later) });
+    recordProviderHealth(root, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' }, { now: new Date('2026-10-27T08:00:00.000Z') });
+    assert.equal(n.readNotifications(root).alerts.length, 2);
+  } finally { fs.renameSync = rename; fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('scan finalisation includes the exceptional-match outbox in the same receipted mutation', async () => {
+  const { coordinateScanArtifacts } = await import('./scanPipeline.mjs');
+  const { acquireScanLease, currentLeaseOwner, releaseScanLease } = await import('./scanLease.mjs');
+  const { openRunJournal } = await import('./runJournal.mjs');
+  const { loadPreparedMutation } = await import('./mutationCoordinator.mjs');
+  const n = await import('./notifications.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-assessed-alert-'));
+  let lease;
+  try {
+    fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'reports'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'data', 'opportunities.json'), JSON.stringify({ updated: '2026-10-25', opportunities: [] }));
+    lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: 'run-alert-composition' });
+    const run = openRunJournal(root, 'run-alert-composition');
+    const candidate = { candidateId: 'candidate-001', vacancyId: 'synthetic-vacancy', company: 'Example Company', role: 'Example Role', source: 'ats', url: 'https://example.test/job', preRankScore: 98 };
+    const assessment = { candidateId: 'candidate-001', summary: 'Synthetic fit', responsibilityFit: { rating: 'strong', advertEvidence: 'Deliver services', profileEvidence: 'Delivered services', explanation: 'Aligned evidence' }, mandatoryRequirements: [], transferableExperience: [], uncertainties: [], strengths: [{ point: 'Evidence aligns', advertEvidence: 'Deliver services', profileEvidence: 'Delivered services' }], concerns: [], recommendation: 'keep' };
+    const input = { provider: 'codex', mode: 'primary', startedAt: at, candidates: [candidate], sources: { ats: { status: 'healthy', count: 1, jobs: [] } }, assessmentResult: { assessments: [assessment] }, policy: { actionScore: 95, checkScore: 85 }, notificationConfig: { mode: 'background' } };
+    const result = coordinateScanArtifacts(root, input, { run, lease });
+    assert.ok(result.mutationReceipt);
+    assert.equal(n.readNotifications(root).alerts.length, 1, 'assessed keeper must reach the durable outbox at tracker commit');
+    const prepared = run.events.find((event) => event.type === 'mutation.prepared');
+    const plan = loadPreparedMutation(run, prepared.payload.reference.id);
+    assert.ok(plan.files.some((file) => file.key === 'notifications'));
+    coordinateScanArtifacts(root, input, { run, lease });
+    assert.equal(n.readNotifications(root).alerts.length, 1, 'receipt recovery must not repeat an alert');
+  } finally { if (lease) releaseScanLease(lease); fs.rmSync(root, { recursive: true, force: true }); }
+});

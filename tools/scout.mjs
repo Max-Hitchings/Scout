@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { workspaceModePolicy } from '../ui/lib/workspaceMode.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -107,6 +108,7 @@ function queuedScanOutcome(durable) {
 
 function sourceConfigFingerprint(config) {
   return scanDigest({
+    mode: config.mode,
     locale: config.locale,
     currency: config.currency,
     search: config.search,
@@ -786,6 +788,7 @@ export async function runScanWith(root, provider, mode, {
   if (!['primary', 'second-pass', 'broadened'].includes(mode)) throw new Error('mode must be primary, broadened or second-pass');
   const providerHealthPurpose = requester === 'scheduled' ? 'scheduled-job' : 'manual-run';
   const config = loadWorkspaceConfig(root);
+  const modePolicy = workspaceModePolicy(config);
   model = model === undefined
     ? (config.ai?.provider === provider ? assertSafeModel(config.ai?.model) : null)
     : assertSafeModel(model);
@@ -849,15 +852,15 @@ export async function runScanWith(root, provider, mode, {
       decisionHistory: readVacancyDecisionHistory(root),
       rejectionMemory: readRejectedVacancyMemory(root),
       assessmentVersion: assessmentVersionOf(compatibility),
-      limit: DEFAULT_CANDIDATE_LIMIT,
-      relevanceThreshold: config.search?.relevanceThreshold ?? config.triage?.checkScore,
+      limit: modePolicy.resultCap,
+      relevanceThreshold: Math.max(config.search?.relevanceThreshold ?? 0, modePolicy.triage.checkScore),
     })
     : {
       collect,
       normalise({ priorArtifact }) {
         const compacted = compactCandidates(
           priorArtifact.sources,
-          DEFAULT_CANDIDATE_LIMIT,
+          modePolicy.resultCap,
           { trustedStageArtifact: true },
         );
         return { candidates: compacted.candidates, dropped: compacted.dropped };
@@ -1001,7 +1004,7 @@ export async function runScanWith(root, provider, mode, {
           lanes: collected?.lanes || plannedQueryPlan.lanes,
           candidates,
           assessmentResult: null,
-          policy: config.triage,
+          policy: modePolicy.triage,
           startedAt,
           error: error.message,
           dropped,
@@ -1053,7 +1056,7 @@ export async function runScanWith(root, provider, mode, {
             let selectedVacancies = liveness.selected;
             if (mode === 'second-pass') {
               const verification = verificationCandidates(
-                assessmentCandidatesForSelection(selectedVacancies), tracker, new Date().toISOString().slice(0, 10), config.triage,
+                assessmentCandidatesForSelection(selectedVacancies), tracker, new Date().toISOString().slice(0, 10), modePolicy.triage,
               );
               const selectedIds = new Set(verification.candidates.map((candidate) => candidate.vacancyId));
               selectedVacancies = selectedVacancies.filter((vacancy) => selectedIds.has(vacancy.vacancyId));
@@ -1085,7 +1088,7 @@ export async function runScanWith(root, provider, mode, {
               candidateId: `candidate-${String(index + 1).padStart(3, '0')}`,
             }));
             if (mode === 'second-pass') {
-              const verification = verificationCandidates(candidates, tracker, new Date().toISOString().slice(0, 10), config.triage);
+              const verification = verificationCandidates(candidates, tracker, new Date().toISOString().slice(0, 10), modePolicy.triage);
               candidates = verification.candidates.map((candidate, index) => ({
                 ...candidate,
                 candidateId: `candidate-${String(index + 1).padStart(3, '0')}`,
@@ -1215,7 +1218,7 @@ export async function runScanWith(root, provider, mode, {
           const artifacts = coordinateScanArtifacts(root, {
             provider, mode, sources: collected.sources, queries: collected.queries,
             lanes: collected.lanes, candidates, assessmentResult,
-            policy: config.triage, startedAt,
+            policy: modePolicy.triage, notificationConfig: config, startedAt,
             assessmentFailures,
             dropped, hardExcluded, closedAdverts, exclusions: discovery?.exclusions || [],
             livenessSummary, verificationScoped, funnel, selection,

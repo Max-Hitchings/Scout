@@ -2307,3 +2307,31 @@ test('runtime shutdown closes admission and drains checkpoints produced while wo
   );
   delete routes['POST /api/test/shutdown-admitted-handler'];
 });
+
+test('notification HTTP flow preserves unacknowledged alerts after desktop delivery and rejects cross-origin acknowledgement', async () => {
+  seedWorkspace(APP_ROOT, testWorkspace);
+  const { notificationFile } = await import('./lib/notifications.mjs');
+  const file = notificationFile(testWorkspace);
+  const previous = fs.existsSync(file) ? fs.readFileSync(file) : null;
+  try {
+    fs.rmSync(file, { force: true });
+    recordProviderHealth(testWorkspace, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' });
+    const first = await request({ path: '/api/notifications', headers: JSON_HEADERS() });
+    assert.equal(first.status, 200);
+    const body = JSON.parse(first.text);
+    const id = body.alerts.find((item) => item.kind === 'provider' && item.provider === 'codex').id;
+    const crossOrigin = await request({ method: 'POST', path: '/api/notifications/acknowledge', headers: { ...JSON_HEADERS(), origin: 'https://example.invalid' }, body: JSON.stringify({ id }) });
+    assert.equal(crossOrigin.status, 403);
+    const delivered = await request({ method: 'POST', path: '/api/notifications/delivered', headers: JSON_HEADERS(), body: JSON.stringify({ id }) });
+    assert.equal(delivered.status, 200);
+    assert.ok(JSON.parse(delivered.text).alerts.some((item) => item.id === id));
+    assert.equal(JSON.parse(delivered.text).outbox.some((item) => item.id === id), false);
+    const acknowledged = await request({ method: 'POST', path: '/api/notifications/acknowledge', headers: JSON_HEADERS(), body: JSON.stringify({ id }) });
+    assert.equal(acknowledged.status, 200);
+    assert.equal(JSON.parse(acknowledged.text).alerts.some((item) => item.id === id), false);
+    assert.doesNotMatch(first.text, /provider-health:|\.scout|credential|token|\/tmp\//);
+  } finally {
+    if (previous) fs.writeFileSync(file, previous);
+    else fs.rmSync(file, { force: true });
+  }
+});
