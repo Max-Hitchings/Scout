@@ -2244,3 +2244,46 @@ test('runtime scan bounds the complete assembled context before calling a provid
   assert.match(result.error, /assembled scan context exceeds Scout's 280,000-character limit/);
   assert.equal(providerCalls, 0);
 });
+
+test('an unchanged rejection is not assessed again once newer assessments fill the recent history window', async () => {
+  const root = scanRoot();
+  enableRankedDiscovery(root);
+  const jobs = [
+    { company: 'Rejected Co', title: 'Ideal Role', url: 'https://example.test/jobs/rejected', providerId: 'rejected', description: 'Deliver the ideal role responsibilities.' },
+    { company: 'Fresh Co', title: 'Ideal Role', url: 'https://example.test/jobs/fresh', providerId: 'fresh', description: 'Deliver the ideal role responsibilities.' },
+  ];
+  const assessedUrls = [];
+  const scan = (visible, recommendation) => runScanWith(root, 'codex', 'primary', {
+    providerStatusFn: authenticated,
+    collectSourcesFn: async () => ({ generatedAt: '2026-07-26T20:00:00Z', queries: [], sources: {
+      ats: { configured: true, status: 'healthy', count: visible.length, jobs: visible },
+    } }),
+    runStructuredTurnFn: async ({ prompt, validate }) => {
+      const batch = JSON.parse(prompt.split('\n\n').at(-1)).candidates;
+      assessedUrls.push(...batch.map((item) => item.url));
+      const value = { assessments: batch.map((item) => nuancedAssessment(item.candidateId, {
+        recommendation: item.url.endsWith('/rejected') ? recommendation : 'keep',
+      })) };
+      validate(value);
+      return { value, usage: {} };
+    },
+    checkLivenessFn: async (items) => ({ live: items, removed: [], summary: { checked: items.length, gone: 0, unverified: 0 } }),
+    acquireLockFn: () => ({ ok: true, lock: { token: fixtureToken('rejection-memory-test') } }),
+    releaseLockFn: () => ({ ok: true }),
+    onProgress: () => {},
+  });
+
+  assert.equal((await scan([jobs[0]], 'discard')).ok, true);
+  assert.deepEqual(assessedUrls, [jobs[0].url]);
+  const logPath = path.join(root, 'data', 'scan-runs.jsonl');
+  const firstRun = JSON.parse(fs.readFileSync(logPath, 'utf8').trim().split(/\r?\n/).at(-1));
+  assert.equal(firstRun.reviewed[0].outcome, 'provider_discarded');
+  const filler = Array.from({ length: 600 }, (_, index) => ({
+    vacancyId: `vacancy-filler-${index}`, company: `Filler ${index}`, role: 'Ideal Role', source: 'ats',
+    sourceUrl: `https://example.test/jobs/filler-${index}`, outcome: 'kept', profileId: firstRun.profile_id,
+  }));
+  fs.appendFileSync(logPath, `${JSON.stringify({ timestamp: '2026-07-27T09:00:00.000Z', profile_id: firstRun.profile_id, reviewed: filler })}\n`);
+
+  assert.equal((await scan(jobs, 'discard')).ok, true);
+  assert.deepEqual(assessedUrls, [jobs[0].url, jobs[1].url]);
+});

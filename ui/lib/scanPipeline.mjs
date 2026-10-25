@@ -17,7 +17,7 @@ import {
 } from './vacancyObservation.mjs';
 import { rankVacancies, vacancyNoveltyComparison } from './vacancyRank.mjs';
 import { selectVacancies } from './vacancySelect.mjs';
-import { lifecycleRecords, partitionVacanciesForAssessment } from './vacancyLifecycle.mjs';
+import { lifecycleRecords, partitionVacanciesForAssessment, rejected } from './vacancyLifecycle.mjs';
 import {
   buildCoverageRollups, buildVacancyExplanations, reconcileCoverageFunnel,
 } from './scanCoverage.mjs';
@@ -1212,6 +1212,67 @@ export function assessmentCandidatesForSelection(selected) {
 }
 
 const VACANCY_DECISION_HISTORY_LIMIT = 512;
+const REJECTION_MEMORY_LIMIT = 4096;
+
+function decisionRecord(item, run) {
+  if (!item?.company || !item?.role || !item?.outcome) return null;
+  return {
+    vacancyId: boundedText(item.vacancyId, 160) || null,
+    company: boundedText(item.company, 120),
+    role: boundedText(item.role, 160),
+    source: boundedText(item.source, 80),
+    url: safeSourceUrl(item.sourceUrl),
+    sourceReferences: sourceReferencesOf({
+      sourceReferences: Array.isArray(item.sourceReferences) ? item.sourceReferences : [],
+    }).slice(0, 8),
+    outcome: boundedText(item.outcome, 80),
+    contentFingerprint: /^[a-f0-9]{64}$/.test(String(item.contentFingerprint || ''))
+      ? item.contentFingerprint
+      : null,
+    profileId: boundedText(item.profileId || run.profile_id, 80),
+    learningVersionId: boundedText(
+      item.learningVersionId || run.learning_version_id || 'learning-baseline',
+      80,
+    ),
+    assessedAt: boundedText(run.timestamp, 80),
+  };
+}
+
+// The newest assessed decision for each distinct vacancy, kept only while it is still a rejection. The recent-history
+// window above holds a few hundred assessed records, so without this an unchanged rejected advert would be assessed
+// again once newer assessments push it out of that window. shortcut: reads the whole run log each scan; keep a
+// compact rejection ledger instead if the log grows beyond tens of megabytes.
+export function readRejectedVacancyMemory(root, { limit = REJECTION_MEMORY_LIMIT } = {}) {
+  const file = workspacePaths(root).scanRuns;
+  const boundedLimit = Math.max(0, Math.min(REJECTION_MEMORY_LIMIT, Math.floor(Number(limit) || 0)));
+  if (!boundedLimit || !fs.existsSync(file)) return [];
+  const remembered = [];
+  const decided = new Set();
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).reverse()) {
+    let run;
+    try {
+      run = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    for (const item of [...(Array.isArray(run?.reviewed) ? run.reviewed : [])].reverse()) {
+      const record = decisionRecord(item, run);
+      if (!record) continue;
+      const keys = [
+        record.vacancyId && `id:${record.vacancyId}`,
+        record.url && `url:${record.url}`,
+        ...record.sourceReferences.map(({ source, providerId }) => source && providerId && `ref:${source}|${providerId}`),
+      ].filter(Boolean);
+      if (!keys.length) keys.push(`job:${record.company}|${record.role}`);
+      if (keys.some((key) => decided.has(key))) continue;
+      keys.forEach((key) => decided.add(key));
+      if (!rejected(record)) continue;
+      remembered.push(record);
+      if (remembered.length >= boundedLimit) return remembered;
+    }
+  }
+  return remembered;
+}
 
 export function readVacancyDecisionHistory(root, { limit = VACANCY_DECISION_HISTORY_LIMIT } = {}) {
   const file = workspacePaths(root).scanRuns;
@@ -1241,28 +1302,8 @@ export function readVacancyDecisionHistory(root, { limit = VACANCY_DECISION_HIST
         outcome: item.reason_code || item.assessment_status,
       }));
     const append = (item, records) => {
-      if (!item?.company || !item?.role || !item?.outcome) return;
-      if (records.length >= boundedLimit) return;
-      records.push({
-        vacancyId: boundedText(item.vacancyId, 160) || null,
-        company: boundedText(item.company, 120),
-        role: boundedText(item.role, 160),
-        source: boundedText(item.source, 80),
-        url: safeSourceUrl(item.sourceUrl),
-        sourceReferences: sourceReferencesOf({
-          sourceReferences: Array.isArray(item.sourceReferences) ? item.sourceReferences : [],
-        }).slice(0, 8),
-        outcome: boundedText(item.outcome, 80),
-        contentFingerprint: /^[a-f0-9]{64}$/.test(String(item.contentFingerprint || ''))
-          ? item.contentFingerprint
-          : null,
-        profileId: boundedText(item.profileId || run.profile_id, 80),
-        learningVersionId: boundedText(
-          item.learningVersionId || run.learning_version_id || 'learning-baseline',
-          80,
-        ),
-        assessedAt: boundedText(run.timestamp, 80),
-      });
+      const record = decisionRecord(item, run);
+      if (record && records.length < boundedLimit) records.push(record);
     };
     for (const item of [...assessed].reverse()) append(item, reviewedRecords);
     for (const item of [...preAssessment].reverse()) append(item, preAssessmentRecords);
@@ -1316,13 +1357,19 @@ function observationInputs(sources) {
   return { observations, funnelSources };
 }
 
+// The artifact keeps only what explanations and reports need about skipped vacancies. A long rejection memory can skip
+// thousands of them, and their full ranked objects would push the select-stage artifact past its 16 MiB limit.
+function skippedRecords(skipped) {
+  return skipped.map(({ vacancyId, company, role, lifecycle }) => ({ vacancyId, company, role, lifecycle }));
+}
+
 // The deterministic discovery boundary deliberately evaluates every
 // normalised, canonical vacancy before it applies the bounded assessment set.
 // Candidate identifiers are generated only after selection, so a source's
 // response order cannot leak into provider-facing identities.
 export function prepareRankedDiscovery({
   sources, profile, tracker = { opportunities: [] }, runId = '', limit = DEFAULT_CANDIDATE_LIMIT,
-  relevanceThreshold, decisionHistory = [], learningPolicy = null,
+  relevanceThreshold, decisionHistory = [], rejectionMemory = [], learningPolicy = null,
 } = {}) {
   if (!profile || profile.status !== 'published') throw new Error('ranked discovery requires a published search profile');
   const input = observationInputs(sources);
@@ -1334,7 +1381,7 @@ export function prepareRankedDiscovery({
   const discoveryCounts = laneDiscoveryCounts(vacancies, profile, reviewedHistory);
   const filtered = filterVacancies(vacancies, profile, { learningPolicy });
   const ranked = rankVacancies(filtered.eligible, profile, reviewedHistory, { learningPolicy });
-  const lifecycle = partitionVacanciesForAssessment(ranked, decisionHistory, {
+  const lifecycle = partitionVacanciesForAssessment(ranked, [...rejectionMemory, ...decisionHistory], {
     profileId: profile.id, learningVersionId: learningPolicy?.id || 'learning-baseline',
   });
   const configuredThreshold = Number(relevanceThreshold ?? profile?.selection?.relevanceThreshold ?? 1);
@@ -1345,7 +1392,7 @@ export function prepareRankedDiscovery({
     exploration: Number(profile?.selection?.exploration || 0),
     seed: runId,
   });
-  selection.assessmentSkipped = lifecycle.skipped;
+  selection.assessmentSkipped = skippedRecords(lifecycle.skipped);
   selection.lifecycle = lifecycleRecords(lifecycle);
   const funnel = assertDiscoveryFunnel(advanceDiscoveryFunnel(initialFunnel, 'selection', {
     parsed: initialFunnel.sourceRecords,
@@ -1748,6 +1795,7 @@ export function createRankedDiscoveryStages({
   profile,
   tracker = { opportunities: [] },
   decisionHistory = [],
+  rejectionMemory = [],
   learningPolicy = null,
   limit = DEFAULT_CANDIDATE_LIMIT,
   relevanceThreshold,
@@ -1835,7 +1883,7 @@ export function createRankedDiscoveryStages({
       const threshold = Number.isFinite(configuredThreshold) ? Math.max(Number.EPSILON, configuredThreshold) : 1;
       const lifecycle = partitionVacanciesForAssessment(
         priorArtifact.ranked,
-        decisionHistory,
+        [...rejectionMemory, ...decisionHistory],
         { profileId: profile.id, learningVersionId: learningPolicy?.id || 'learning-baseline' },
       );
       const selection = selectVacancies(lifecycle.eligible, {
@@ -1844,7 +1892,7 @@ export function createRankedDiscoveryStages({
         exploration: Number(profile?.selection?.exploration || 0),
         seed: run.runId,
       });
-      selection.assessmentSkipped = lifecycle.skipped;
+      selection.assessmentSkipped = skippedRecords(lifecycle.skipped);
       selection.lifecycle = lifecycleRecords(lifecycle);
       const funnel = assertDiscoveryFunnel(advanceDiscoveryFunnel(priorArtifact.initialFunnel, 'selection', {
         parsed: priorArtifact.initialFunnel.sourceRecords,

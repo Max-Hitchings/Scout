@@ -22,7 +22,7 @@ import { ProviderLifecycleUnclosedError, runStructuredTurn } from '../ui/lib/str
 import {
   assessScanCandidates, assessmentCandidatesForSelection, buildAssessmentPrompt, compactCandidates, createRankedDiscoveryStages, DEFAULT_CANDIDATE_LIMIT,
   coordinateScanArtifacts, durableScanProjection, inboxRecheckCandidates, promptCandidate, runScanPipeline, SCAN_ASSESSMENT_SCHEMA,
-  readVacancyDecisionHistory, verificationCandidates,
+  readRejectedVacancyMemory, readVacancyDecisionHistory, verificationCandidates,
 } from '../ui/lib/scanPipeline.mjs';
 import { loadPublishedSearchProfile, migrateSearchProfile } from '../ui/lib/searchProfile.mjs';
 import { partitionLiveCandidates } from '../ui/lib/advertLiveness.mjs';
@@ -846,6 +846,7 @@ export async function runScanWith(root, provider, mode, {
       tracker: trackerAtStart,
       learningPolicy: learningPolicyAtStart,
       decisionHistory: readVacancyDecisionHistory(root),
+      rejectionMemory: readRejectedVacancyMemory(root),
       limit: DEFAULT_CANDIDATE_LIMIT,
       relevanceThreshold: config.search?.relevanceThreshold ?? config.triage?.checkScore,
     })

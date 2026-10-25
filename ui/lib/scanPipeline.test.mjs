@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import {
   assessScanCandidates, assessmentCandidatesForSelection, buildAssessmentPrompt, compactCandidates, createRankedDiscoveryStages, DEFAULT_CANDIDATE_LIMIT, durableScanProjection, gateAssessment, inboxRecheckCandidates, prepareRankedDiscovery, promptCandidate,
-  filterVacancies, PipelineInterruptedError, readVacancyDecisionHistory, runScanPipeline, validateAssessments, validateWrittenScanArtifacts,
+  filterVacancies, PipelineInterruptedError, readRejectedVacancyMemory, readVacancyDecisionHistory, runScanPipeline, validateAssessments, validateWrittenScanArtifacts,
   verificationCandidates, writeScanArtifacts,
 } from './scanPipeline.mjs';
 import { claimNextScanRequest, enqueueScanRequest, projectScanQueue } from './scanQueue.mjs';
@@ -761,6 +761,65 @@ test('ranked discovery records why each repeat vacancy was skipped or re-ranked'
   const relearned = run('learning-b');
   assert.deepEqual(byCompany(relearned), { 'Already Reviewed': 'unchanged:scoring-change' });
   assert.deepEqual(relearned.selection.assessmentSkipped.map((item) => item.company), ['Already Reviewed']);
+});
+
+test('an unchanged rejection stays remembered after newer assessments push it out of the recent history window', () => {
+  const profile = {
+    version: 1, status: 'published', id: 'profile-current',
+    target: { primaryTitles: [{ value: 'Ideal Role', strength: 'strong-preference', provenance: 'explicit' }] },
+    negative: {},
+    compensation: {
+      currency: null, period: 'year', minimum: null, minimumStrength: 'neutral', unknownPolicy: 'include',
+    },
+  };
+  const sources = { ats: { count: 2, jobs: [
+    { company: 'Already Reviewed', title: 'Ideal Role', url: 'https://example.test/rejected', providerId: 'rejected', description: 'Deliver the ideal role responsibilities.' },
+    { company: 'Fresh Candidate', title: 'Ideal Role', url: 'https://example.test/fresh', providerId: 'fresh', description: 'Deliver the ideal role responsibilities.' },
+  ] } };
+  const rejected = prepareRankedDiscovery({
+    sources, profile, tracker: { opportunities: [] }, runId: 'initial', limit: 2,
+  }).ranked.find((item) => item.company === 'Already Reviewed');
+  const review = (vacancyId, company, outcome, extra = {}) => ({
+    vacancyId, company, role: 'Ideal Role', source: 'ats', sourceUrl: `https://example.test/${vacancyId}`,
+    outcome, profileId: profile.id, ...extra,
+  });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-rejection-memory-'));
+  fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+  const runs = [
+    { timestamp: '2026-07-01T09:00:00.000Z', profile_id: profile.id, reviewed: [
+      review('vacancy-rejected', rejected.company, 'below_threshold', { sourceUrl: rejected.url, contentFingerprint: rejected.contentFingerprint }),
+      review('vacancy-later-kept', 'Reopened Co', 'below_threshold'),
+      review('vacancy-rejected-twice', 'Twice Co', 'mandatory_unmet'),
+    ] },
+    { timestamp: '2026-07-02T09:00:00.000Z', profile_id: profile.id, reviewed: [
+      review('vacancy-later-kept', 'Reopened Co', 'kept'),
+      review('vacancy-rejected-twice', 'Twice Co', 'provider_discarded'),
+    ] },
+    ...Array.from({ length: 20 }, (_, run) => ({
+      timestamp: `2026-07-${String(run + 3).padStart(2, '0')}T09:00:00.000Z`, profile_id: profile.id,
+      reviewed: Array.from({ length: 30 }, (__, index) => review(`vacancy-filler-${run}-${index}`, `Filler ${run}-${index}`, 'kept')),
+    })),
+  ];
+  fs.writeFileSync(path.join(root, 'data', 'scan-runs.jsonl'), runs.map((run) => `${JSON.stringify(run)}
+`).join(''));
+
+  const recent = readVacancyDecisionHistory(root);
+  assert.equal(recent.some((item) => item.vacancyId === 'vacancy-rejected'), false);
+  const memory = readRejectedVacancyMemory(root);
+  assert.deepEqual(memory.map((item) => [item.vacancyId, item.outcome]), [
+    ['vacancy-rejected-twice', 'provider_discarded'], ['vacancy-rejected', 'below_threshold'],
+  ]);
+
+  const assess = (rejectionMemory) => prepareRankedDiscovery({
+    sources, profile, tracker: { opportunities: [] }, decisionHistory: recent, rejectionMemory,
+    runId: 'repeat', limit: 1,
+  });
+  assert.equal(assess([]).selection.assessmentSkipped.length, 0);
+  const remembered = assess(memory);
+  assert.deepEqual(remembered.selection.selected.map((item) => item.company), ['Fresh Candidate']);
+  assert.deepEqual(remembered.selection.assessmentSkipped.map((item) => item.lifecycle.reason), ['unchanged-rejection']);
+  // A long rejection memory must not bloat the 16 MiB select-stage artifact with full ranked objects.
+  assert.deepEqual(Object.keys(remembered.selection.assessmentSkipped[0]).sort(), ['company', 'lifecycle', 'role', 'vacancyId']);
 });
 
 test('published learning reranks unassessed jobs, reconsiders scoped exclusions and reuses prior decisions', () => {

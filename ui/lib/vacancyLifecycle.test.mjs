@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { sameUnderlyingJob } from './jobIdentity.mjs';
+import { vacancyContentFingerprint } from './vacancyCanonical.mjs';
 import { decideVacancyLifecycle, lifecycleRecords, partitionVacanciesForAssessment } from './vacancyLifecycle.mjs';
 
 const vacancy = {
@@ -193,4 +195,29 @@ test('lifecycle records give the change and reason for every vacancy with an ear
   assert.deepEqual(lifecycleRecords(partition), [
     { vacancyId: 'vacancy-1', change: 'unchanged', reason: 'unchanged-rejection' },
   ]);
+});
+
+test('indexed history lookup picks the same earliest matching decision as comparing every record', () => {
+  const byUrl = { ...vacancy, vacancyId: 'by-url', employer: { value: 'Different' }, title: { value: 'Different' }, description: '', canonicalUrl: 'https://example.test/job-1' };
+  const byProvider = { ...vacancy, vacancyId: 'by-provider', employer: { value: 'Another' }, title: { value: 'Another' }, description: '', sourceReferences: [{ source: 'ats', providerId: 'opening-9', url: '' }] };
+  const unmatched = { ...vacancy, vacancyId: 'unmatched', employer: { value: 'Nobody' }, title: { value: 'Nothing' }, description: '' };
+  // Each target record carries the fingerprint of the vacancy it should match, so a skip proves the right record was chosen.
+  const rejection = (extra) => ({ outcome: 'below_threshold', profileId: 'profile-current', ...extra });
+  const history = [
+    ...Array.from({ length: 1500 }, (_, index) => rejection({
+      vacancyId: `filler-${index}`, company: `Filler ${index}`, role: 'Unrelated Role',
+      url: `https://example.test/filler-${index}`,
+    })),
+    rejection({ vacancyId: 'same-employer-earlier', company: 'Acme', role: 'Platform Engineer', description: vacancy.description, contentFingerprint: vacancyContentFingerprint(vacancy) }),
+    rejection({ vacancyId: 'shared-url-later', company: 'Other', role: 'Other', url: 'https://example.test/job-1', contentFingerprint: vacancyContentFingerprint(byUrl) }),
+    rejection({ vacancyId: 'shared-provider', company: 'Elsewhere', role: 'Elsewhere', sourceReferences: [{ source: 'ats', providerId: 'opening-9', url: '' }], contentFingerprint: vacancyContentFingerprint(byProvider) }),
+  ];
+  const candidates = [vacancy, byUrl, byProvider, unmatched];
+
+  const expected = candidates.map((candidate) => history.find((entry) => sameUnderlyingJob(entry, candidate))?.vacancyId ?? null);
+  assert.deepEqual(expected, ['same-employer-earlier', 'shared-url-later', 'shared-provider', null]);
+
+  const { skipped, eligible } = partitionVacanciesForAssessment(candidates, history, { profileId: 'profile-current' });
+  assert.deepEqual(skipped.map((item) => item.vacancyId), ['vacancy-1', 'by-url', 'by-provider']);
+  assert.deepEqual(eligible.map((item) => [item.vacancyId, item.lifecycle.reason]), [['unmatched', 'new-vacancy']]);
 });

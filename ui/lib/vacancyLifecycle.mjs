@@ -1,5 +1,5 @@
 import { classifyVacancyChange } from './vacancyCanonical.mjs';
-import { sameUnderlyingJob } from './jobIdentity.mjs';
+import { jobIdentity, sameUnderlyingJob } from './jobIdentity.mjs';
 
 const REJECTED_OUTCOMES = new Set([
   'rejected',
@@ -10,7 +10,7 @@ const REJECTED_OUTCOMES = new Set([
   'hard_exclusion',
 ]);
 
-function rejected(previous) {
+export function rejected(previous) {
   return REJECTED_OUTCOMES.has(String(previous?.outcome || previous?.status || '').toLowerCase());
 }
 
@@ -107,15 +107,41 @@ export function decideVacancyLifecycle(previous, current, {
   };
 }
 
-function previousDecision(vacancy, history) {
-  return (history || []).find((previous) => sameUnderlyingJob(previous, vacancy)) || null;
+// sameUnderlyingJob is true only for a shared URL, a shared source and provider ID, or the same employer, so
+// those keys select every candidate worth comparing and a long rejection history stays cheap to search.
+function identityKeys(job) {
+  const { company, references } = jobIdentity(job);
+  return [
+    company && `company:${company}`,
+    ...references.flatMap(({ url, source, providerId }) => [
+      url && `url:${url}`, source && providerId && `ref:${source}|${providerId}`,
+    ]),
+  ].filter(Boolean);
+}
+
+function previousDecisionLookup(history) {
+  const entries = history || [];
+  const index = new Map();
+  entries.forEach((entry, position) => {
+    for (const key of identityKeys(entry)) {
+      if (index.has(key)) index.get(key).push(position);
+      else index.set(key, [position]);
+    }
+  });
+  return (vacancy) => {
+    const positions = [...new Set(identityKeys(vacancy).flatMap((key) => index.get(key) || []))]
+      .sort((left, right) => left - right);
+    const match = positions.find((position) => sameUnderlyingJob(entries[position], vacancy));
+    return match === undefined ? null : entries[match];
+  };
 }
 
 export function partitionVacanciesForAssessment(ranked, history, options = {}) {
   const eligible = [];
   const skipped = [];
+  const previousDecision = previousDecisionLookup(history);
   for (const vacancy of ranked || []) {
-    const lifecycle = decideVacancyLifecycle(previousDecision(vacancy, history), vacancy, options);
+    const lifecycle = decideVacancyLifecycle(previousDecision(vacancy), vacancy, options);
     const annotated = { ...vacancy, lifecycle };
     if (lifecycle.skipAssessment) skipped.push(annotated);
     else eligible.push(annotated);
