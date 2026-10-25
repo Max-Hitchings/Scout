@@ -1094,7 +1094,7 @@ const Scout = {
     const overlay = document.getElementById('scan-result-overlay');
     document.getElementById('scan-result-body').innerHTML = `
       <p><strong>${this.esc(scan.funnel?.assessed ?? scan.candidatesFound)} assessed, ${this.esc(scan.keepersAdded)} kept</strong>${this.discardBreakdown(scan) ? ` — ${this.esc(this.discardBreakdown(scan))}` : ''}.</p>
-      ${scan.automaticBroadened ? '<div class="setup-callout"><strong>Discovery widened automatically</strong><p>Scout ran one broader query pass but kept every approved salary, location, commute, exclusion and evidence gate.</p></div>' : ''}
+      ${scan.automaticBroadened ? '<div class="setup-callout"><strong>Discovery widened automatically</strong><p>Scout ran one broader query pass but kept every approved salary, location, exclusion and evidence gate. Commute preferences guide assessments and dashboard display; they do not filter ranked discovery.</p></div>' : ''}
       ${coverage}
       ${coverageDimensions}
       ${failureReasons}

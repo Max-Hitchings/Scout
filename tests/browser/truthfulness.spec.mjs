@@ -86,3 +86,13 @@ test('a delayed refresh cannot overwrite the opportunity the user just refreshed
   await expect(page.locator('#tab-jobs')).not.toContainText('Stale opportunity');
   await expect(page.locator('#discovery-mode-banner')).toBeHidden();
 });
+
+test('commute preferences explain their assessment and dashboard limits', async ({ page }) => {
+  await page.locator('#discovery-mode-banner').getByRole('button', { name: 'Review search profile' }).click();
+  await expect(page.locator('#setup-body')).toContainText('Review your search profile');
+  await page.evaluate(() => {
+    window.ScoutSetup.preferenceStep = 2;
+    window.ScoutSetup.renderPreferences();
+  });
+  await expect(page.locator('#setup-body')).toContainText('They do not filter newly discovered vacancies.');
+});

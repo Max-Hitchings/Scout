@@ -42,7 +42,7 @@ scout doctor
 - `locale`, `currency` and `timezone` are required strings. Use recognised BCP 47, ISO 4217 and IANA values.
 - `profile.tone` guides drafts; it never authorises sending.
 - Search arrays contain user-defined plain-text preferences. `salaryMinimum` is numeric or `null`; adverts with missing salary remain uncertain rather than passing automatically.
-- `commute.mode` records the user's policy; `maxMinutes` is the allowed journey time and `includeUnknown` controls whether unverified journeys remain visible.
+- `commute.mode` records the user's dashboard travel filter; `maxMinutes` is its journey-time limit and `includeUnknown` controls whether unverified journeys remain visible. These values also guide assessment context. They do not exclude vacancies from ranked discovery; review published location rules separately.
 - `ai.provider` is `codex`, `claude` or `null`. `ai.models` provides optional per-provider choices for job-specific questions, CV tailoring and interview preparation; leave a value null to use the provider's current supported default. `ai.model` is retained as a compatibility fallback for older workspaces. Explicit model identifiers may contain letters, digits, `.`, `_`, `:`, or `-` only.
 - Schedule job IDs use lower-case letters, numbers and hyphens. Time uses 24-hour `HH:MM`; `days` lists the weekdays the job runs on with Sunday as `0` (omit it or use an empty array for every day); provider is `codex` or `claude`; mode is `primary` or `second-pass`; and `model` is an optional per-scan override. Every enabled provider must be installed and authenticated on the host.
 - `setup.completedAt` is written by Scout when onboarding finishes. It prevents the first-run wizard reopening; use Settings to retune an existing workspace.
@@ -96,7 +96,7 @@ behaviour. They are not substitutes for published preference rules.
 | `sources` | Enables and bounds configured source adapters. Source configuration may change what is returned, but cannot alter deterministic rank directly. |
 | `ai.provider`, `ai.models` | Select the provider/model used after deterministic selection and for other bounded AI features. |
 | `schedule.jobs` | Selects provider, mode, model and logical run windows; it does not define preferences. |
-| `commute` | Remains legacy assessment/context configuration. It is not currently a structured ranked-discovery dimension. |
+| `commute` | Guides assessment context and filters the dashboard using recorded travel times. It does not filter or score ranked discovery. |
 
 ## Legacy compatibility inputs
 

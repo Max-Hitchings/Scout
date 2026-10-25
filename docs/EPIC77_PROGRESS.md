@@ -59,3 +59,24 @@ A2 line 50 is now done. These stay open: A10 line 172 (#76, see A), A11 lines 18
 
 ## Appending your own progress
 Work done after this snapshot goes in its own section below, signed with the author or agent and dated. Leave the "What is done" table above as the record of this snapshot.
+
+## 2026-10-25 — truth-docs (Codex)
+
+| Finding | Disposition and evidence |
+| --- | --- |
+| E-1 | Fixed: the opportunities API distinguishes publication-required, legacy and ranked discovery. Established legacy users see a persistent disclosure and profile-review action; publication clears it. Fresh-workspace gating is preserved. API and user-action regressions were observed RED, then GREEN. |
+| E-3 | Fixed current protocol and scan-skill authority guidance: installed execution uses renewable fenced leases, process identity and durable queueing, not a two-hour advisory-lock recovery rule. |
+| E-4 | Reproduced clipping at 381 px, then fixed status wrapping across 381–700 px, polite live announcements and complete title text. Chromium regression observed RED, then GREEN. |
+| E-5 | Reproduced out-of-order tracker rendering, then added request-generation admission before state/render updates. Production-function and browser regressions pass. |
+| E-6 | Fixed setup, scan-result and guide wording: commute affects assessment context and dashboard filtering, not ranked-discovery filtering. Browser copy regression observed RED, then GREEN. |
+| D-2 | Fixed one-way coexistence claims: current Scout rejects a legacy lock, but cannot make an older binary honour new fencing. Stop-old-process and disable-old-schedule instructions are explicit. Existing sentinel-shaped records remain compatibility input; no sentinel writer or refresh was introduced. |
+| D-3 | Deferred native long-path acceptance to the maintainer under Epic #77. No current application path-length threshold or `core.longpaths` consumer was found to justify a production change. This Linux environment cannot verify native Windows Git/filesystem limits. |
+| D-4 | Ported two existing Windows-bypassed snapshot escape tests to junction fixtures. Existing direct physical-path and mutation-junction coverage is retained. Linux focus: 62 passed, 2 Windows-only skips; native Windows remains unverified. |
+| PROV-2 | Fixed the production queue-to-public-status composition: historical scheduled `manual-discovery` compatibility purposes display as scheduled discovery without changing durable identity or deduplication. RED then GREEN. |
+| PROV-4 | Fixed with a real unchanged keeper outcome, reconciled at total and source level. Verification/history-only updates remain fresh without reporting changed job content. RED then GREEN. |
+| PROV-5 | Corrected semantic-fact documentation to describe stopword removal, duplicate elimination and bounded facts. No extra advert or profile body is retained. |
+
+PROV-3 was already done and was not repeated. F-1, D-1 and live operator
+acceptance remain outside this package. Package branches and PRs are review
+evidence, not merged-main or release acceptance. Exact-head full-suite, browser
+and privacy evidence is recorded in the draft package PR.
