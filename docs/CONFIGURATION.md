@@ -47,6 +47,28 @@ scout doctor
 - Schedule job IDs use lower-case letters, numbers and hyphens. Time uses 24-hour `HH:MM`; `days` lists the weekdays the job runs on with Sunday as `0` (omit it or use an empty array for every day); provider is `codex` or `claude`; mode is `primary` or `second-pass`; and `model` is an optional per-scan override. Every enabled provider must be installed and authenticated on the host.
 - `setup.completedAt` is written by Scout when onboarding finishes. It prevents the first-run wizard reopening; use Settings to retune an existing workspace.
 
+## Adzuna search country and salary currency
+
+Open **Settings → Sources**, choose **Adzuna search country**, then choose
+**Save search country**. Setup asks the same question beside the optional
+credentials. The country belongs to this workspace and does not change other
+people's searches. Existing workspaces retain their saved country; a missing
+country retains the existing `gb` compatibility default until you change it.
+
+`sources.adzuna.country` is a two-letter lower-case country code. Adzuna salary
+amounts use the queried country's currency, independently of the workspace's
+preferred `currency`. Scout records that currency's provenance as
+`queried-country`; an unrecognised country's currency remains unknown.
+No currency conversion is implied. A legacy `search.salaryMinimum` is sent to
+Adzuna only when its workspace currency matches the queried market. Otherwise
+Scout collects the source results without that minimum and leaves conservative
+compensation comparison to the published profile.
+
+Changing country does not rewrite old tracker decisions or assessments. Fresh
+source evidence uses the corrected currency and ordinary material-change rules.
+Verify the choice by reopening **Settings → Sources**. Credentials need not be
+re-entered to change country.
+
 The profile narrative and scoring precedents live in `profile/context.md` and `profile/calibration.md`. Search categories, ATS portals and employer lists live under `data/`. Preserve dated history instead of replacing it.
 
 ## Authoritative scan input
@@ -88,7 +110,7 @@ behaviour. They are not substitutes for published preference rules.
 | Field | Current effect |
 | --- | --- |
 | `locale` | Formats source results, CV checks and user-facing/provider language. It is not a relevance rule. |
-| `currency` | Supplies legacy source-normalisation and migration context. A published compensation rule must still provide its own currency and period. |
+| `currency` | Supplies legacy preference and migration context, not evidence about a source's salary currency. A published compensation rule must still provide its own currency and period. |
 | `timezone` | Calculates scheduled windows. It does not affect job location. |
 | `profile.displayName` | Supports onboarding/readiness and display copy; it has no scan-decision effect. |
 | `profile.tone` | Guides chat, CV and outreach drafts. It never changes eligibility and never authorises sending. |

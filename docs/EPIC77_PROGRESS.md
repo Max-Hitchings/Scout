@@ -59,3 +59,39 @@ A2 line 50 is now done. These stay open: A10 line 172 (#76, see A), A11 lines 18
 
 ## Appending your own progress
 Work done after this snapshot goes in its own section below, signed with the author or agent and dated. Leave the "What is done" table above as the record of this snapshot.
+
+## 2026-10-25 — discovery correctness (Codex agent)
+
+Branch: `friend/discovery-correctness`, based on `integration/epic77-progress`
+at `93048fd`. No issue acceptance boxes or earlier progress entries were changed.
+
+- **B-1:** Adzuna uses queried-country salary currencies with explicit currency
+  provenance; unsupported currencies remain unknown. Cross-currency legacy
+  source minimums are omitted. Setup and Sources settings expose the country;
+  existing saved/default countries and historical assessments are preserved.
+- **B-2:** Shared URL, provider-reference and employer/title-token indexes block
+  grouping and durable-ID comparisons before the unchanged complete predicate.
+  First compatible groups and all-member agreement remain authoritative. The
+  5,000-vacancy bounded regression failed before the fix (10-second timeout) and
+  passed after it (about 1.03 seconds including prior reconciliation).
+  Separate synthetic 2,500 and 10,000 measurements took about 0.65 and 2.05
+  seconds. These are development-container measurements, not VPS evidence.
+  Thirty deterministic 80-observation differential batches matched pre-fix
+  production grouping and durable reconciliation exactly.
+- **B-3:** Generated onboarding profile/CV instructions use the workspace locale.
+- **B-4:** Small plural pools try soft diversity before recorded relaxation;
+  above-threshold vacancies still fill spare capacity. Recommended policy:
+  keep relaxation explicit rather than letting a small pool bypass diversity.
+- **B-5:** History readers normalise hyphenated rejection aliases to persisted
+  underscore outcomes. A production-reader/lifecycle regression covers the
+  mixed 384-assessed/128-pre-assessment history boundary and 600 remembered
+  rejections with version-triggered reassessment beyond it.
+
+Every new regression was observed failing before its fix, including the
+country Settings browser action. Focused checks passed; full Node verification
+passed 1,509 total, 1,503 passed, 0 failed, 6 platform skips. Chromium Settings
+passed 29/29 using the installed system browser. Firefox and native Windows
+execution were not performed. Tests used only synthetic workspaces and stubbed
+source/provider boundaries. A scoped child-subreaper wrapper outside the
+repository is needed in this container because its PID 1 does not reap orphan
+children; neither Scout nor its tests were weakened for that environment.

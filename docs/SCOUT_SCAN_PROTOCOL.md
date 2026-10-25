@@ -62,6 +62,37 @@ Each ranked vacancy is compared with its earlier decision for the same underlyin
 
 Each scan that assesses vacancies records its assessment version (prompt, schema, provider and model) in its run record. When the version differs, earlier rejections are re-assessed in the background: at most 6 per scan, the highest-ranked first, so a prompt or model change cannot use up assessment capacity. The rest are reported as `assessment-change-deferred` and are picked up by later scans. A rejection recorded before versions were stored has nothing to compare and is not re-assessed for this reason; it is assessed again when its advert, the profile or the learning version changes.
 
+Persisted rejection outcomes use underscores (`below_threshold`,
+`provider_discarded`, `mandatory_unmet`, `hard_exclusion`); readers accept their
+hyphenated equivalents too. Lifecycle and public explanation reasons retain
+their hyphenated vocabulary. An unassessed `below-relevance-threshold` decision
+is not an assessed rejection and cannot suppress a later assessment.
+
+Recent decision history is bounded to 512 records. When both kinds of evidence
+are plentiful, 384 places hold assessed decisions and 128 hold pre-assessment
+decisions; unused places are backfilled. The separate rejection reader retains
+up to 4,096 latest assessed rejections, including their assessment versions, so
+crossing that 384-record mixed-history horizon does not lose rejection memory
+or prevent version-triggered reassessment. These are bounded policies, not an
+unlimited historical search.
+
+Soft diversity caps apply whenever at least two groups exist in a dimension,
+including small pools. Caps use the smaller of the assessment budget and the
+eligible pool. Scout tries diversity first, then relaxes lane, source,
+role-family, location and employer limits in that order only when no permitted
+candidate remains. The recorded `constraintsRelaxed` explains each relaxation.
+Every above-threshold vacancy in a small pool can therefore fill spare capacity;
+diversity never creates a guarantee for a below-threshold vacancy.
+
+Duplicate grouping and durable ID reconciliation use shared URL, provider
+reference and employer/title-token indexes before the unchanged complete
+identity predicate. They preserve first-compatible-group order and all-member
+agreement, rather than treating a chain of partial matches as one vacancy.
+The synthetic scale fixture can be rerun on a disposable development host with
+`node ui/lib/fixtures/canonical-scale.mjs 2500` or `10000`; it prints timings and
+whether reversed input plus prior identities produces the same result. These
+measurements do not establish live-host performance.
+
 ## Search coverage and health
 
 Scout runs configured ATS, Adzuna and hiring.cafe sources. Missing optional configuration is reported as not configured. A successful empty response is healthy; partial query/portal failure is degraded; a blocked or failed configured source is unavailable. Sources may omit, delay, duplicate or ambiguously format salary, location, working pattern and advert status; Scout preserves that uncertainty instead of guessing. Hiring.cafe retryable network/HTTP failures receive at most three bounded attempts, and Scout refreshes its build ID once after a 404 or endpoint-shape change.
