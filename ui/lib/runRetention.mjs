@@ -4,8 +4,9 @@ import path from 'node:path';
 import { atomicWriteFile } from './atomicWrite.mjs';
 import { projectRunManifest } from './runArtifacts.mjs';
 import { validateRunJournal } from './runJournal.mjs';
+import { readRecoverySelections } from './runRecovery.mjs';
 import {
-  assertCurrentFence, assertScanLeaseScope, synchronousFenceCallback,
+  assertCurrentFence, assertScanLeaseScope, readScanLease, synchronousFenceCallback,
 } from './scanLease.mjs';
 import { projectScanQueue, recoverScanQueueTail } from './scanQueue.mjs';
 import {
@@ -144,27 +145,34 @@ function digestFiles(files) {
   return hash.digest('hex');
 }
 
-function recoveryReferencedRunIds(root) {
-  const file = path.join(path.resolve(root), '.scout', 'recovery-selections.jsonl');
-  if (!fs.existsSync(file)) return new Set();
-  validatePhysicalWorkspacePath(root, file, 'recovery selection journal');
-  const contents = fs.readFileSync(file, 'utf8');
-  if (contents && !contents.endsWith('\n')) throw new Error('recovery selection journal is truncated');
-  const ids = new Set();
-  for (const line of contents.split('\n')) {
-    if (!line) continue;
-    let record;
-    try {
-      record = JSON.parse(line);
-    } catch {
-      throw new Error('recovery selection journal is invalid');
+function recoveryDispositions(root) {
+  const dispositions = new Map();
+  for (const record of readRecoverySelections(root)) {
+    for (const skipped of record.skipped) {
+      dispositions.set(skipped.runId, { ...skipped, recordedAt: record.recordedAt });
     }
-    if (typeof record.selectedRunId === 'string') ids.add(record.selectedRunId);
-    for (const skipped of Array.isArray(record.skipped) ? record.skipped : []) {
-      if (typeof skipped?.runId === 'string') ids.add(skipped.runId);
-    }
+    if (record.selectedRunId) dispositions.set(record.selectedRunId, { selected: true });
   }
-  return ids;
+  return dispositions;
+}
+
+function hasUnreceiptedMutation(run) {
+  const receipted = new Set(run.manifest?.receipts?.map((receipt) => receipt.reference?.id));
+  return run.events.some((event) => event.type === 'mutation.prepared'
+    && !receipted.has(event.payload?.reference?.id));
+}
+
+function recoveryProtection(run, dispositions, queued, lease, now) {
+  if (run.invalid || hasUnreceiptedMutation(run)) return 'recovery-critical';
+  if (queued.has(run.runId)) return 'queued';
+  if (lease?.runId === run.runId && lease.lastTerminalSequence === null
+    && Date.parse(lease.expiresAt) > now.getTime()) return 'active';
+  const disposition = dispositions.get(run.runId);
+  if (run.outcome === 'complete') return null;
+  if (disposition?.selected) return 'recovery-referenced';
+  // A newer journal entry is new work, not the immutable historical skip.
+  if (disposition && Date.parse(disposition.recordedAt) >= Date.parse(run.updatedAt)) return null;
+  return 'recovery-critical';
 }
 
 function queuedRunIds(root, now) {
@@ -183,7 +191,14 @@ function isArtifactFile(file) {
 
 export function measureRunStorage(root) {
   const inventory = runInventory(root);
-  const referenced = recoveryReferencedRunIds(root);
+  const dispositions = recoveryDispositions(root);
+  const now = new Date();
+  let queued;
+  try { queued = queuedRunIds(root, now); } catch {
+    // Inventory remains available for diagnosis; ambiguous queue state protects every run.
+    queued = new Set(inventory.map((run) => run.runId));
+  }
+  const lease = readScanLease(root);
   let runBytes = 0;
   let artifactBytes = 0;
   let artifactCount = 0;
@@ -197,7 +212,7 @@ export function measureRunStorage(root) {
         runBytes += file.size;
       }
     }
-    if (run.invalid || run.outcome !== 'complete' || referenced.has(run.runId)) critical.push(run);
+    if (recoveryProtection(run, dispositions, queued, lease, now)) critical.push(run);
   }
   const queueFile = path.join(path.resolve(root), '.scout', 'scan-queue.jsonl');
   const queueFileBytes = fs.existsSync(queueFile) ? fs.statSync(queueFile).size : 0;
@@ -305,8 +320,9 @@ export function planRunCleanup(root, inputPolicy = {}) {
     throw new TypeError('retention policy bounds must be non-negative whole numbers');
   }
   const inventory = runInventory(root, { contentDigests: true });
-  const referenced = recoveryReferencedRunIds(root);
+  const dispositions = recoveryDispositions(root);
   const queued = queuedRunIds(root, now);
+  const lease = readScanLease(root);
   const ordered = [...inventory].sort((left, right) => (
     String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))
       || right.runId.localeCompare(left.runId)
@@ -317,13 +333,10 @@ export function planRunCleanup(root, inputPolicy = {}) {
   const candidates = [];
   const protectedReasons = new Map();
   for (const run of inventory) {
-    let reason = null;
+    let reason = recoveryProtection(run, dispositions, queued, lease, now);
     const updated = Date.parse(run.updatedAt || '');
-    if (run.invalid || run.outcome !== 'complete') reason = 'recovery-critical';
-    else if (referenced.has(run.runId)) reason = 'recovery-referenced';
-    else if (queued.has(run.runId)) reason = 'queued';
-    else if (newest.has(run.runId)) reason = 'newest-retained';
-    else if (!Number.isFinite(updated) || updated >= recentBoundary) reason = 'recent-retained';
+    if (!reason && newest.has(run.runId)) reason = 'newest-retained';
+    if (!reason && (!Number.isFinite(updated) || updated >= recentBoundary)) reason = 'recent-retained';
     if (reason) {
       protectedReasons.set(run.runId, reason);
       continue;
@@ -331,10 +344,10 @@ export function planRunCleanup(root, inputPolicy = {}) {
     candidates.push({
       runId: run.runId,
       updatedAt: run.updatedAt,
-      outcome: run.outcome,
+      outcome: run.outcome === 'in-progress' ? dispositions.get(run.runId).outcome : run.outcome,
       bytes: run.bytes,
       digest: run.digest,
-      summary: compactSummary(run),
+      summary: compactSummary({ ...run, outcome: run.outcome === 'in-progress' ? dispositions.get(run.runId).outcome : run.outcome }),
     });
   }
   candidates.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt)
@@ -400,7 +413,7 @@ function checkedCompactSummary(value) {
     || value.schemaVersion !== 1
     || typeof value.runId !== 'string'
     || typeof value.updatedAt !== 'string'
-    || value.outcome !== 'complete'
+    || !['complete', 'partial', 'abandoned', 'failed'].includes(value.outcome)
     || !Array.isArray(value.completedStages)
     || value.completedStages.some((stage) => typeof stage !== 'string')
     || !Number.isSafeInteger(value.recoveryCount) || value.recoveryCount < 0) {
