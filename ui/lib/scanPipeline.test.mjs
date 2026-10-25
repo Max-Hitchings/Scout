@@ -4022,3 +4022,44 @@ test('a provider health preflight exception records a bounded blocked run and re
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('hyphenated rejection outcomes remain authoritative beyond the 384-assessment mixed-history horizon', async () => {
+  const { vacancyContentFingerprint } = await import('./vacancyCanonical.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-reassessment-horizon-'));
+  try {
+    fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+    const oldVersion = { promptVersion: 'old-prompt', assessmentSchemaVersion: 'schema-1', provider: 'codex', model: 'synthetic-model' };
+    const vacancy = {
+      vacancyId: 'historical-0', company: 'Synthetic Employer 0', role: 'Synthetic Role',
+      url: 'https://jobs.example.test/historical-0', description: 'Deliver reliable synthetic systems.', preRankScore: 80,
+    };
+    const reviewed = Array.from({ length: 600 }, (_, index) => ({
+      vacancyId: `historical-${index}`, company: `Synthetic Employer ${index}`, role: 'Synthetic Role',
+      sourceUrl: `https://jobs.example.test/historical-${index}`, outcome: 'below-threshold',
+      contentFingerprint: vacancyContentFingerprint({ ...vacancy, company: `Synthetic Employer ${index}` }),
+    }));
+    const explanations = Array.from({ length: 128 }, (_, index) => ({
+      vacancy_id: `unassessed-${index}`, company: `Unassessed Employer ${index}`, role: 'Synthetic Role',
+      reason_code: 'below-relevance-threshold', stages: { assessed: false },
+    }));
+    fs.writeFileSync(path.join(root, 'data', 'scan-runs.jsonl'), `${JSON.stringify({
+      timestamp: '2026-10-25T12:00:00.000Z', profile_id: 'profile-current',
+      assessment_version: oldVersion, reviewed, explanations,
+    })}\n`);
+    const history = readVacancyDecisionHistory(root);
+    assert.equal(history.length, 512);
+    assert.equal(history.filter(item => item.assessmentVersion !== null).length, 384);
+    assert.equal(history.some(item => item.vacancyId === vacancy.vacancyId), false);
+    assert.equal(history.find(item => item.assessmentVersion)?.outcome, 'below_threshold');
+    const memory = readRejectedVacancyMemory(root);
+    assert.equal(memory.length, 600);
+    const remembered = memory.find(item => item.vacancyId === vacancy.vacancyId);
+    assert.deepEqual(remembered.assessmentVersion, oldVersion);
+    const unchanged = partitionVacanciesForAssessment([vacancy], [...memory, ...history], { profileId: 'profile-current', assessmentVersion: oldVersion });
+    assert.equal(unchanged.skipped[0].lifecycle.reason, 'unchanged-rejection');
+    const changed = partitionVacanciesForAssessment([vacancy], [...memory, ...history], {
+      profileId: 'profile-current', assessmentVersion: { ...oldVersion, promptVersion: 'new-prompt' },
+    });
+    assert.equal(changed.eligible[0].lifecycle.reason, 'assessment-change');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
