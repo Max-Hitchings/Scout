@@ -185,6 +185,9 @@ export function buildVacancyExplanations({
   const skipped = new Map((selectionDecision?.assessmentSkipped || []).map((item) => [
     idOf(item), code(item?.lifecycle?.reason, 'unchanged-prior-assessment'),
   ]).filter(([id]) => id));
+  const lifecycleByVacancy = new Map((selectionDecision?.lifecycle || []).map((item) => [
+    idOf(item), { change: code(item?.change, 'unknown'), reason: code(item?.reason, 'unknown') },
+  ]).filter(([id]) => id));
   const exclusionCodes = new Map();
   for (const item of deterministicExclusions || []) {
     const id = idOf(item);
@@ -244,6 +247,8 @@ export function buildVacancyExplanations({
         negative: compactContributions(value, false),
       },
       reason_code: reasonCode,
+      lifecycle: lifecycleByVacancy.get(vacancyId)
+        || (selectionDecision?.lifecycle && !excluded ? { change: 'new', reason: 'new-vacancy' } : null),
       selection_reason: selectionReason,
       deterministic_exclusion: deterministicExclusion,
       deterministic_exclusions: deterministicExclusionsForVacancy,

@@ -728,6 +728,41 @@ test('ranked discovery backfills assessment capacity instead of re-assessing an 
   assert.equal(result.funnel.selected, 1);
 });
 
+test('ranked discovery records why each repeat vacancy was skipped or re-ranked', () => {
+  const profile = {
+    version: 1, status: 'published', id: 'profile-current',
+    target: { primaryTitles: [{ value: 'Ideal Role', strength: 'strong-preference', provenance: 'explicit' }] },
+    negative: {},
+    compensation: {
+      currency: null, period: 'year', minimum: null, minimumStrength: 'neutral', unknownPolicy: 'include',
+    },
+  };
+  const sources = { ats: { count: 2, jobs: [
+    { company: 'Already Reviewed', title: 'Ideal Role', url: 'https://example.test/rejected', providerId: 'rejected', description: 'Deliver the ideal role responsibilities.' },
+    { company: 'Fresh Candidate', title: 'Ideal Role', url: 'https://example.test/fresh', providerId: 'fresh', description: 'Deliver the ideal role responsibilities.' },
+  ] } };
+  const rejected = prepareRankedDiscovery({
+    sources, profile, tracker: { opportunities: [] }, runId: 'initial', limit: 2,
+  }).ranked.find((item) => item.company === 'Already Reviewed');
+  const run = (learningVersionId) => prepareRankedDiscovery({
+    sources, profile, tracker: { opportunities: [] }, runId: 'repeat', limit: 2,
+    learningPolicy: { id: learningVersionId, changes: [] },
+    decisionHistory: [{
+      company: rejected.company, role: rejected.role, url: rejected.url, source: rejected.source,
+      outcome: 'below_threshold', profileId: profile.id, learningVersionId: 'learning-a',
+      contentFingerprint: rejected.contentFingerprint,
+    }],
+  });
+  const byCompany = (result) => Object.fromEntries(result.selection.lifecycle.map((item) => [
+    result.ranked.find((vacancy) => vacancy.vacancyId === item.vacancyId).company, `${item.change}:${item.reason}`,
+  ]));
+
+  assert.deepEqual(byCompany(run('learning-a')), { 'Already Reviewed': 'unchanged:unchanged-rejection' });
+  const relearned = run('learning-b');
+  assert.deepEqual(byCompany(relearned), { 'Already Reviewed': 'unchanged:scoring-change' });
+  assert.deepEqual(relearned.selection.assessmentSkipped.map((item) => item.company), ['Already Reviewed']);
+});
+
 test('published learning reranks unassessed jobs, reconsiders scoped exclusions and reuses prior decisions', () => {
   const profile = {
     version: 1, status: 'published', id: 'profile-learning-flow',
@@ -1169,7 +1204,7 @@ test('scan artifact exposes a reconciled funnel without claiming all jobs were a
   assert.equal(artifacts.run.explanations.length, 61);
   assert.deepEqual(Object.keys(artifacts.run.explanations[0]).sort(), [
     'above_threshold', 'assessment_status', 'company', 'deterministic_exclusion',
-    'deterministic_exclusions', 'dimensions', 'outcome', 'pre_rank', 'reason_code',
+    'deterministic_exclusions', 'dimensions', 'lifecycle', 'outcome', 'pre_rank', 'reason_code',
     'role', 'selection_reason', 'source', 'sourceReferences', 'sourceUrl', 'stages', 'tracker_outcome',
     'vacancy_id',
   ].sort());

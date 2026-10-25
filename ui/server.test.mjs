@@ -1665,6 +1665,7 @@ test('latest scan API exposes reconciled metrics and bounded explanations only',
       above_threshold: true,
       pre_rank: { score: 82, positive: [{ code: 'title', score: 4, dimension: 'title', evidence: 'matched: Data Analyst', raw: 'private payload' }], negative: [{ code: 'negative', score: -1, path: 'C:\\private' }] },
       reason_code: 'diversity-limit', selection_reason: null, assessment_status: 'not-selected',
+      lifecycle: { change: 'material', reason: 'material-change', raw: 'private payload' },
       source: 'ats', sourceUrl: 'https://example.test/job?private=query#fragment',
       raw: 'private payload', path: 'C:\\private',
     }],
@@ -1678,6 +1679,7 @@ test('latest scan API exposes reconciled metrics and bounded explanations only',
   assert.equal(latest.funnel.bySource.ats.uniqueVacancies, 120);
   assert.equal(latest.coverage.source[0].found, 120);
   assert.equal(latest.explanations[0].reasonCode, 'diversity-limit');
+  assert.deepEqual(latest.explanations[0].lifecycle, { change: 'material', reason: 'material-change' });
   assert.equal(latest.explanations[0].sourceUrl, 'https://example.test/job');
   assert.deepEqual(latest.explanations[0].preRank.positive, [
     { code: 'title', score: 4, dimension: 'title', evidence: 'matched: Data Analyst' },

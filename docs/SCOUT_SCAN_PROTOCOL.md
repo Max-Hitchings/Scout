@@ -46,6 +46,20 @@ Only grandfathered established workspaces without a published profile retain the
 
 A `second-pass` run is a verification pass, not a repeat of discovery. It re-examines the roles today's primary scan kept, plus those close enough to the threshold that a second opinion could change the outcome, rather than re-scoring every candidate. When there is nothing from today to verify it falls back to the full set, so a standalone second-pass run still does useful work.
 
+Each ranked vacancy is compared with its earlier decision for the same underlying job (shared URL, provider reference or employer and title evidence), and its explanation records one `lifecycle` change and reason. Every existing vacancy is revalidated against the current advert; the reason decides what happens next:
+
+| Reason | When | Re-ranked | Assessed |
+| --- | --- | --- | --- |
+| `new-vacancy` | No earlier decision | Yes | Yes |
+| `reopened-vacancy` | The earlier advert was closed and is open again | Yes | Yes |
+| `material-change` | The advert content fingerprint differs (wording-only edits are `minor` and do not count) | Yes | Yes |
+| `profile-change`, `legacy-profile-rerank` | The earlier decision used a different or no published profile | Yes | Yes |
+| `scoring-change` | The learning version differs from the one recorded with the decision | Yes | Only if the earlier outcome was not a rejection |
+| `unchanged-rejection` | Same advert, profile and learning version, and the earlier outcome was `rejected`, `ignore`, `below_threshold`, `provider_discarded`, `mandatory_unmet` or `hard_exclusion` | No | No: skipped, and the capacity is backfilled by the next ranked vacancy |
+| `unchanged-prior-assessment` | Same advert, profile and learning version; earlier outcome was not a rejection | No | Yes |
+
+A change to the assessment prompt, schema or model does not currently re-assess earlier rejections, because the decision history does not record assessment versions.
+
 ## Search coverage and health
 
 Scout runs configured ATS, Adzuna and hiring.cafe sources. Missing optional configuration is reported as not configured. A successful empty response is healthy; partial query/portal failure is degraded; a blocked or failed configured source is unavailable. Sources may omit, delay, duplicate or ambiguously format salary, location, working pattern and advert status; Scout preserves that uncertainty instead of guessing. Hiring.cafe retryable network/HTTP failures receive at most three bounded attempts, and Scout refreshes its build ID once after a 404 or endpoint-shape change.

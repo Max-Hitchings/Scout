@@ -516,6 +516,9 @@ function publicLatestScan() {
       positive: (Array.isArray(item?.pre_rank?.positive) ? item.pre_rank.positive : []).slice(0, 3).map(boundedContribution), negative: (Array.isArray(item?.pre_rank?.negative) ? item.pre_rank.negative : []).slice(0, 3).map(boundedContribution) },
     reasonCode: item?.reason_code ? String(item.reason_code).slice(0, 100) : 'unknown',
     selectionReason: item?.selection_reason ? String(item.selection_reason).slice(0, 100) : null,
+    lifecycle: item?.lifecycle
+      ? { change: String(item.lifecycle.change || '').slice(0, 40), reason: String(item.lifecycle.reason || '').slice(0, 60) }
+      : null,
     deterministicExclusion: item?.deterministic_exclusion ? String(item.deterministic_exclusion).slice(0, 100) : null,
     deterministicExclusions: (Array.isArray(item?.deterministic_exclusions) ? item.deterministic_exclusions : [])
       .map((value) => String(value).slice(0, 100)).slice(0, 8),

@@ -378,6 +378,9 @@ function safeRunRecord(record) {
         negative: (item?.pre_rank?.negative || []).map(rankContribution).filter(Boolean).slice(0, 3),
       },
       selection_reason: code(item?.selection_reason),
+      lifecycle: item?.lifecycle
+        ? { change: code(item.lifecycle.change, 'unknown'), reason: code(item.lifecycle.reason, 'unknown') }
+        : null,
       deterministic_exclusion: code(item?.deterministic_exclusion),
       deterministic_exclusions: (item?.deterministic_exclusions || []).map((value) => code(value)).filter(Boolean).slice(0, 8),
       reason_code: code(item?.reason_code, 'unknown'),

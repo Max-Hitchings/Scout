@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decideVacancyLifecycle, partitionVacanciesForAssessment } from './vacancyLifecycle.mjs';
+import { decideVacancyLifecycle, lifecycleRecords, partitionVacanciesForAssessment } from './vacancyLifecycle.mjs';
 
 const vacancy = {
   vacancyId: 'vacancy-1',
@@ -160,4 +160,37 @@ test('a distinct same-source provider reference cannot inherit an earlier reject
   });
   assert.equal(result.skipped.length, 0);
   assert.equal(result.eligible[0].lifecycle.reason, 'new-vacancy');
+});
+
+test('a different learning version re-ranks an unchanged rejection but never assesses it again', () => {
+  const previous = {
+    ...vacancy, outcome: 'below_threshold', profileId: 'profile-current', learningVersionId: 'learning-a',
+  };
+  const options = { profileId: 'profile-current' };
+
+  const changed = decideVacancyLifecycle(previous, vacancy, { ...options, learningVersionId: 'learning-b' });
+  assert.deepEqual(
+    [changed.reason, changed.rerank, changed.reassess, changed.skipAssessment],
+    ['scoring-change', true, false, true],
+  );
+  const same = decideVacancyLifecycle(previous, vacancy, { ...options, learningVersionId: 'learning-a' });
+  assert.equal(same.reason, 'unchanged-rejection');
+  const unrecorded = decideVacancyLifecycle(
+    { ...previous, learningVersionId: undefined }, vacancy, { ...options, learningVersionId: 'learning-b' },
+  );
+  assert.equal(unrecorded.reason, 'unchanged-rejection');
+});
+
+test('lifecycle records give the change and reason for every vacancy with an earlier decision', () => {
+  const rejected = {
+    ...vacancy, outcome: 'below_threshold', profileId: 'profile-current', learningVersionId: 'learning-a',
+  };
+  const fresh = { ...vacancy, vacancyId: 'vacancy-2', canonicalUrl: 'https://example.test/two', title: { value: 'Other Role' } };
+  const partition = partitionVacanciesForAssessment([vacancy, fresh], [rejected], {
+    profileId: 'profile-current', learningVersionId: 'learning-a',
+  });
+
+  assert.deepEqual(lifecycleRecords(partition), [
+    { vacancyId: 'vacancy-1', change: 'unchanged', reason: 'unchanged-rejection' },
+  ]);
 });

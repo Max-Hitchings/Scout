@@ -16,9 +16,15 @@ function rejected(previous) {
 
 export function decideVacancyLifecycle(previous, current, {
   profileId = null,
-  scoringChanged = false,
+  learningVersionId = null,
+  scoringChanged: scoringChangedOption = false,
   assessmentChanged = false,
 } = {}) {
+  // A different published learning version can re-rank a vacancy even when its advert and profile are unchanged.
+  const scoringChanged = scoringChangedOption || Boolean(
+    learningVersionId && previous?.learningVersionId
+      && String(learningVersionId) !== String(previous.learningVersionId),
+  );
   if (!previous) {
     return {
       change: 'new',
@@ -102,11 +108,7 @@ export function decideVacancyLifecycle(previous, current, {
 }
 
 function previousDecision(vacancy, history) {
-  return (history || []).find((previous) => (
-    previous?.vacancyId && vacancy?.vacancyId && previous.vacancyId === vacancy.vacancyId
-      ? sameUnderlyingJob(previous, vacancy)
-      : sameUnderlyingJob(previous, vacancy)
-  )) || null;
+  return (history || []).find((previous) => sameUnderlyingJob(previous, vacancy)) || null;
 }
 
 export function partitionVacanciesForAssessment(ranked, history, options = {}) {
@@ -119,4 +121,11 @@ export function partitionVacanciesForAssessment(ranked, history, options = {}) {
     else eligible.push(annotated);
   }
   return { eligible, skipped };
+}
+
+// One compact record per vacancy that has an earlier decision, so a report can say why it was skipped, revalidated,
+// re-ranked or reassessed. New vacancies are left out: they are most of a first scan and the stage artifact has a size limit.
+export function lifecycleRecords({ eligible = [], skipped = [] } = {}) {
+  return [...eligible, ...skipped].filter(({ lifecycle }) => lifecycle.reason !== 'new-vacancy')
+    .map(({ vacancyId, lifecycle }) => ({ vacancyId, change: lifecycle.change, reason: lifecycle.reason }));
 }

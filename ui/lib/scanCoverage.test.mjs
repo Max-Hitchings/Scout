@@ -275,3 +275,28 @@ test('explanations say why a vacancy ranked: dimension, score and evidence of th
   ]);
   assert.ok(explanation.pre_rank.positive.some(({ dimension }) => dimension === 'freshness'));
 });
+
+test('explanations carry the lifecycle change and reason for ranked vacancies only, treating an unrecorded one as new', () => {
+  const ranked = [vacancy('changed-advert'), vacancy('rejected-before'), vacancy('first-seen')];
+  const explanations = buildVacancyExplanations({
+    ranked,
+    exclusions: [vacancy('excluded', { score: 0 })],
+    candidates: [{ ...ranked[0], candidateId: 'candidate-001' }],
+    selectionDecision: {
+      threshold: 40,
+      selected: [ranked[0]],
+      lifecycle: [
+        { vacancyId: 'changed-advert', change: 'material', reason: 'material-change' },
+        { vacancyId: 'rejected-before', change: 'unchanged', reason: 'unchanged-rejection' },
+      ],
+      assessmentSkipped: [{ ...ranked[1], lifecycle: { reason: 'unchanged-rejection' } }],
+    },
+    deterministicExclusions: [{ vacancyId: 'excluded', code: 'mandatory-location-unmet' }],
+  });
+  const lifecycle = (id) => explanations.find(({ vacancy_id }) => vacancy_id === id).lifecycle;
+
+  assert.deepEqual(lifecycle('changed-advert'), { change: 'material', reason: 'material-change' });
+  assert.deepEqual(lifecycle('rejected-before'), { change: 'unchanged', reason: 'unchanged-rejection' });
+  assert.deepEqual(lifecycle('first-seen'), { change: 'new', reason: 'new-vacancy' });
+  assert.equal(lifecycle('excluded'), null);
+});

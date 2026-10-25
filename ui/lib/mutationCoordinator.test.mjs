@@ -1068,3 +1068,20 @@ test('run-log recipes keep each rank contribution score, dimension and evidence 
   assert.deepEqual(recipe.record.explanations[0].pre_rank.negative, [{ code: 'policy-location-unknown', score: -0.25 }]);
   assert.doesNotMatch(JSON.stringify(recipe), /private payload/);
 });
+
+test('run-log recipes keep the lifecycle change and reason as safe codes', () => {
+  const recipe = runLogAppendRecipe({
+    timestamp: '2026-07-31T09:00:00.000Z',
+    explanations: [
+      { vacancy_id: 'vacancy-a', company: 'Safe Company', role: 'Safe Role', lifecycle: { change: 'material', reason: 'material_change', raw: 'private payload' } },
+      { vacancy_id: 'vacancy-b', company: 'Safe Company', role: 'Safe Role', lifecycle: { change: 'C:\private path', reason: 'unchanged-rejection' } },
+      { vacancy_id: 'vacancy-c', company: 'Safe Company', role: 'Safe Role' },
+    ],
+  });
+  assert.deepEqual(recipe.record.explanations.map((item) => item.lifecycle), [
+    { change: 'material', reason: 'material-change' },
+    { change: 'unknown', reason: 'unchanged-rejection' },
+    null,
+  ]);
+  assert.doesNotMatch(JSON.stringify(recipe), /private payload|C:\\private/);
+});

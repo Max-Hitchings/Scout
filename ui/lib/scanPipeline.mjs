@@ -17,7 +17,7 @@ import {
 } from './vacancyObservation.mjs';
 import { rankVacancies, vacancyNoveltyComparison } from './vacancyRank.mjs';
 import { selectVacancies } from './vacancySelect.mjs';
-import { partitionVacanciesForAssessment } from './vacancyLifecycle.mjs';
+import { lifecycleRecords, partitionVacanciesForAssessment } from './vacancyLifecycle.mjs';
 import {
   buildCoverageRollups, buildVacancyExplanations, reconcileCoverageFunnel,
 } from './scanCoverage.mjs';
@@ -1334,7 +1334,9 @@ export function prepareRankedDiscovery({
   const discoveryCounts = laneDiscoveryCounts(vacancies, profile, reviewedHistory);
   const filtered = filterVacancies(vacancies, profile, { learningPolicy });
   const ranked = rankVacancies(filtered.eligible, profile, reviewedHistory, { learningPolicy });
-  const lifecycle = partitionVacanciesForAssessment(ranked, decisionHistory, { profileId: profile.id });
+  const lifecycle = partitionVacanciesForAssessment(ranked, decisionHistory, {
+    profileId: profile.id, learningVersionId: learningPolicy?.id || 'learning-baseline',
+  });
   const configuredThreshold = Number(relevanceThreshold ?? profile?.selection?.relevanceThreshold ?? 1);
   const threshold = Number.isFinite(configuredThreshold) ? Math.max(Number.EPSILON, configuredThreshold) : 1;
   const selection = selectVacancies(lifecycle.eligible, {
@@ -1344,6 +1346,7 @@ export function prepareRankedDiscovery({
     seed: runId,
   });
   selection.assessmentSkipped = lifecycle.skipped;
+  selection.lifecycle = lifecycleRecords(lifecycle);
   const funnel = assertDiscoveryFunnel(advanceDiscoveryFunnel(initialFunnel, 'selection', {
     parsed: initialFunnel.sourceRecords,
     normalised: observations.length,
@@ -1833,7 +1836,7 @@ export function createRankedDiscoveryStages({
       const lifecycle = partitionVacanciesForAssessment(
         priorArtifact.ranked,
         decisionHistory,
-        { profileId: profile.id },
+        { profileId: profile.id, learningVersionId: learningPolicy?.id || 'learning-baseline' },
       );
       const selection = selectVacancies(lifecycle.eligible, {
         limit,
@@ -1842,6 +1845,7 @@ export function createRankedDiscoveryStages({
         seed: run.runId,
       });
       selection.assessmentSkipped = lifecycle.skipped;
+      selection.lifecycle = lifecycleRecords(lifecycle);
       const funnel = assertDiscoveryFunnel(advanceDiscoveryFunnel(priorArtifact.initialFunnel, 'selection', {
         parsed: priorArtifact.initialFunnel.sourceRecords,
         normalised: priorArtifact.normalisedCount,
