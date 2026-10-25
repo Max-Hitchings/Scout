@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { atomicWriteFile } from './atomicWrite.mjs';
 import { serializeTracker } from './tracker.mjs';
 import { workspacePaths } from './workspace.mjs';
@@ -2263,6 +2264,7 @@ function mergeTracker(
   const reviewed = [];
   let keepersAdded = 0;
   let keepersUpdated = 0;
+  let keepersUnchanged = 0;
   for (const assessment of assessments) {
     const candidate = candidates.find((item) => item.candidateId === assessment.candidateId);
     if (!candidate) continue;
@@ -2301,7 +2303,6 @@ function mergeTracker(
     let id = previous?.id || baseId;
     for (let suffix = 2; !previous && byId.has(id); suffix += 1) id = `${baseId}-${suffix}`;
     const changedAdvert = Boolean(previous && advertMateriallyChanged(previous, candidate));
-    reviewed.push({ ...review, trackerOutcome: previous ? 'updated' : 'added' });
     const references = mergeSourceReferences(previous || {}, candidate);
     const urls = references.map((reference) => reference.url).filter(Boolean);
     const deterministicDimensions = Array.isArray(candidate.dimensions) ? candidate.dimensions : [];
@@ -2338,11 +2339,22 @@ function mergeTracker(
       lastChecked: date, foundVia: candidate.source, contacts: previous?.contacts || [], log: previous?.log || [],
       ...(changedAdvert ? { advertUpdate: { detectedAt: date, previousFingerprint: previous.jobIdentity?.advertFingerprint || '', currentFingerprint: jobIdentity(candidate).advertFingerprint } } : {}),
     };
-    if (previous) { Object.assign(previous, generated); keepersUpdated += 1; }
+    // Verification dates and ranking history advance even when the keeper's
+    // job content is unchanged; they are not a newly updated opportunity.
+    const changed = previous && Object.entries(durableScanProjection(generated)).some(([key, value]) => (
+      !['lastChecked', 'rankingHistory'].includes(key)
+      && !isDeepStrictEqual(previous[key], value)
+    ));
+    reviewed.push({ ...review, trackerOutcome: previous ? changed ? 'updated' : 'unchanged' : 'added' });
+    if (previous) {
+      Object.assign(previous, generated);
+      if (changed) keepersUpdated += 1;
+      else keepersUnchanged += 1;
+    }
     else { existing.opportunities.push(generated); byId.set(generated.id, generated); keepersAdded += 1; }
   }
   existing.updated = date;
-  return { tracker: existing, keepersAdded, keepersUpdated, discarded, reviewed };
+  return { tracker: existing, keepersAdded, keepersUpdated, keepersUnchanged, discarded, reviewed };
 }
 
 function reportText({ date, degraded, source_health, kept, discarded, reviewed, errors }) {
@@ -2422,7 +2434,7 @@ function buildScanArtifacts(root, {
     ...funnel,
     added: merged.keepersAdded,
     updated: merged.keepersUpdated,
-    unchanged: 0,
+    unchanged: merged.keepersUnchanged || 0,
     ...(error ? {
       assessed: Number(assessmentResult?.assessments?.length || 0),
       assessmentFailed: Math.max(
