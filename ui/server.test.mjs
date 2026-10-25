@@ -1663,7 +1663,7 @@ test('latest scan API exposes reconciled metrics and bounded explanations only',
       dimensions: { source: 'ats', employer: 'Acme', lane: 'primary', role_family: 'engineering', location: 'London' },
       stages: { found: true, ranked: true, selected: false, excluded: false, assessed: false },
       above_threshold: true,
-      pre_rank: { score: 82, positive: [{ code: 'title', score: 4, raw: 'private payload' }], negative: [{ code: 'negative', score: -1, path: 'C:\\private' }] },
+      pre_rank: { score: 82, positive: [{ code: 'title', score: 4, dimension: 'title', evidence: 'matched: Data Analyst', raw: 'private payload' }], negative: [{ code: 'negative', score: -1, path: 'C:\\private' }] },
       reason_code: 'diversity-limit', selection_reason: null, assessment_status: 'not-selected',
       source: 'ats', sourceUrl: 'https://example.test/job?private=query#fragment',
       raw: 'private payload', path: 'C:\\private',
@@ -1679,6 +1679,9 @@ test('latest scan API exposes reconciled metrics and bounded explanations only',
   assert.equal(latest.coverage.source[0].found, 120);
   assert.equal(latest.explanations[0].reasonCode, 'diversity-limit');
   assert.equal(latest.explanations[0].sourceUrl, 'https://example.test/job');
+  assert.deepEqual(latest.explanations[0].preRank.positive, [
+    { code: 'title', score: 4, dimension: 'title', evidence: 'matched: Data Analyst' },
+  ]);
   assert.doesNotMatch(response.text, /private payload|C:\\private/);
 });
 

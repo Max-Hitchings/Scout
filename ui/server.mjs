@@ -450,7 +450,11 @@ function publicLatestScan() {
     score: Number.isFinite(Number(item?.score)) ? Number(item.score) : null,
     reasons: (Array.isArray(item?.reasons) ? item.reasons : []).map((reason) => String(reason).slice(0, 220)).slice(0, 3),
   })).slice(0, 80) : [];
-  const boundedContribution = (item) => typeof item === 'string' ? item.slice(0, 100) : ({ code: String(item?.code || '').slice(0, 100), score: Number.isFinite(Number(item?.score)) ? Number(item.score) : null });
+  const boundedContribution = (item) => typeof item === 'string' ? item.slice(0, 100) : ({
+    code: String(item?.code || '').slice(0, 100), score: Number.isFinite(Number(item?.score)) ? Number(item.score) : null,
+    ...(item?.dimension ? { dimension: String(item.dimension).slice(0, 40) } : {}),
+    ...(item?.evidence ? { evidence: String(item.evidence).slice(0, 120) } : {}),
+  });
   const boundedFunnel = (value) => {
     const names = [
       'sourceRecords', 'sourceErrors', 'failedSourceRecords', 'parsed', 'normalised',

@@ -53,6 +53,20 @@ function identifier(value) {
   return SAFE_IDENTIFIER.test(text) ? text : null;
 }
 
+// A persisted rank contribution keeps its score, ranking dimension and a one-line evidence note so a report can say why.
+function rankContribution(value) {
+  const contributionCode = code(value?.code ?? value);
+  if (!contributionCode || typeof value !== 'object') return contributionCode;
+  const dimension = /^[A-Za-z][A-Za-z0-9]{0,39}$/.test(String(value.dimension || '')) ? value.dimension : null;
+  const evidence = boundedLabel(value.evidence, 120);
+  return {
+    code: contributionCode,
+    score: number(value.score),
+    ...(dimension ? { dimension } : {}),
+    ...(evidence ? { evidence } : {}),
+  };
+}
+
 function providerIdentifier(value) {
   const text = String(value || '').trim();
   if (!text) return null;
@@ -360,8 +374,8 @@ function safeRunRecord(record) {
       above_threshold: Boolean(item?.above_threshold),
       pre_rank: {
         score: Number.isFinite(Number(item?.pre_rank?.score)) ? Number(item.pre_rank.score) : null,
-        positive: (item?.pre_rank?.positive || []).map((value) => code(value?.code ?? value)).filter(Boolean).slice(0, 3),
-        negative: (item?.pre_rank?.negative || []).map((value) => code(value?.code ?? value)).filter(Boolean).slice(0, 3),
+        positive: (item?.pre_rank?.positive || []).map(rankContribution).filter(Boolean).slice(0, 3),
+        negative: (item?.pre_rank?.negative || []).map(rankContribution).filter(Boolean).slice(0, 3),
       },
       selection_reason: code(item?.selection_reason),
       deterministic_exclusion: code(item?.deterministic_exclusion),

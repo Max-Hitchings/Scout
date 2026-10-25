@@ -1044,3 +1044,27 @@ test('run-log recipes preserve URL vacancy IDs and full supported provider refer
   assert.equal(recipe.record.explanations[0].sourceReferences[0].providerId, providerId);
   assert.equal(recipe.record.reviewed[0].sourceReferences[0].providerId, providerId);
 });
+
+test('run-log recipes keep each rank contribution score, dimension and evidence note and drop anything unsafe', () => {
+  const recipe = runLogAppendRecipe({
+    timestamp: '2026-07-31T09:00:00.000Z',
+    explanations: [{
+      vacancy_id: 'vacancy-why',
+      company: 'Safe Company',
+      role: 'Safe Role',
+      pre_rank: {
+        score: 82,
+        positive: [{
+          code: 'target-primary-titles-abc123', score: 1, dimension: 'title', evidence: 'matched: Data Analyst',
+          raw: 'private payload',
+        }],
+        negative: [{ code: 'policy-location-unknown', score: -0.25, dimension: 'bad dimension!', evidence: 'x '.repeat(40) }],
+      },
+    }],
+  });
+  assert.deepEqual(recipe.record.explanations[0].pre_rank.positive, [{
+    code: 'target-primary-titles-abc123', score: 1, dimension: 'title', evidence: 'matched: Data Analyst',
+  }]);
+  assert.deepEqual(recipe.record.explanations[0].pre_rank.negative, [{ code: 'policy-location-unknown', score: -0.25 }]);
+  assert.doesNotMatch(JSON.stringify(recipe), /private payload/);
+});
