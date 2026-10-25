@@ -2513,10 +2513,25 @@ const Scout = {
     const body = document.getElementById('chat-body');
     if (!body || !this.chat) return;
     body.innerHTML = this.chat.data.messages.map((m) => this.chatBubble(m.role, m.text)).join('')
+      + this.chatRetryHtml()
       + this.cvLinkHtml()
       + this.interviewPrepPackHtml()
       + (this.chat.engine ? '' : this.chatPickerHtml());
     body.scrollTop = body.scrollHeight;
+  },
+
+  chatRetryHtml() {
+    const retry = this.chat?.data?.retry;
+    if (!retry?.id || !['codex', 'claude'].includes(retry.engine)) return '';
+    const name = retry.engine === 'codex' ? 'Codex' : 'Claude';
+    return `<div class="chat-msg system" role="status">Your failed message is saved. Reconnect ${name} in Settings, then resend it when you are ready. Scout never resends automatically.
+      <button class="act" data-action="resend-chat"${this.chat.streaming ? ' disabled' : ''}>Resend with ${name}</button></div>`;
+  },
+
+  resendChat() {
+    const retry = this.chat?.data?.retry;
+    if (!retry?.id || this.chat.streaming) return;
+    return this.sendChat({ retryId: retry.id });
   },
 
   chatNearBottom(body, threshold = 80) {
@@ -2614,19 +2629,22 @@ const Scout = {
     }
   },
 
-  async sendChat() {
+  async sendChat({ retryId = null } = {}) {
     const c = this.chat;
     if (!c || c.streaming) return;
     if (!c.engine) return alert('Pick an engine first.');
     const input = document.getElementById('chat-input');
-    const text = input.value.trim();
+    const retry = retryId ? c.data.retry : null;
+    const text = retryId
+      ? c.data.messages?.[retry?.messageIndex]?.text || ''
+      : input.value.trim();
     if (!text) return;
     c.streaming = true;
     this.setChatScoutState('thinking', 'I’m thinking…');
-    input.value = '';
+    if (!retryId) input.value = '';
     this.setChatBusy(true);
     const body = document.getElementById('chat-body');
-    body.insertAdjacentHTML('beforeend', this.chatBubble('user', text));
+    if (!retryId) body.insertAdjacentHTML('beforeend', this.chatBubble('user', text));
     body.insertAdjacentHTML('beforeend', `<div class="chat-row assistant">${scoutMarkup('explaining', 'scout-chat-avatar')}<div class="chat-msg assistant" id="chat-live">&hellip;</div></div>`);
     this.initScoutSprites(body);
     body.scrollTop = body.scrollHeight;
@@ -2637,7 +2655,7 @@ const Scout = {
       const resp = await fetch('/api/chat/send', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: c.id, purpose: c.purpose, engine: c.engine, model: c.model || null, text, mode: c.mode }),
+        body: JSON.stringify({ id: c.id, purpose: c.purpose, engine: c.engine, model: c.model || null, text, mode: c.mode, ...(retryId ? { retryId } : {}) }),
       });
       const ct = resp.headers.get('content-type') || '';
       if (!resp.ok || !ct.includes('event-stream')) {
@@ -2666,16 +2684,18 @@ const Scout = {
         if (event === 'done') {
           this.setChatScoutState('success', 'Done. Have a look.');
           c.data.messages.push(
-            { role: 'user', text },
+            ...(!retryId ? [{ role: 'user', text }] : []),
             ...(data.updates?.length ? data.updates : [data.text]).filter(Boolean).map((update) => ({ role: 'assistant', text: update })),
           );
+          delete c.data.retry;
           c.data.cliSessionId = data.sessionId;
           if (data.filesTouched) c.data.filesTouched = data.filesTouched;
         }
         if (event === 'error') {
           this.setChatScoutState('warning', 'I hit a problem, but your completed work is safe.');
           terminalError = data.message;
-          c.data.messages.push({ role: 'user', text }, { role: 'system', text: data.message });
+          c.data.messages.push(...(!retryId ? [{ role: 'user', text }] : []), { role: 'system', text: data.message });
+          if (data.retry) c.data.retry = data.retry;
           if (data.sessionId) c.data.cliSessionId = data.sessionId;
           if (data.filesTouched) c.data.filesTouched = data.filesTouched;
         }
@@ -2684,7 +2704,7 @@ const Scout = {
     } catch (e) {
       this.setChatScoutState('warning', 'I couldn’t complete that turn.');
       terminalError = e.message;
-      c.data.messages.push({ role: 'user', text }, { role: 'system', text: e.message });
+      c.data.messages.push(...(!retryId ? [{ role: 'user', text }] : []), { role: 'system', text: e.message });
     }
     c.streaming = false;
     c.mode = null;
@@ -2971,6 +2991,7 @@ const Scout = {
       case 'copy-codex-task': return this.copyCodexTask();
       case 'close-chat': return this.closeChat();
       case 'send-chat': return this.sendChat();
+      case 'resend-chat': return this.resendChat();
       case 'stop-chat': return this.stopChat();
       case 'pick-engine': return this.pickEngine(engine);
       case 'triage-yes': return this.triageYes(id);
