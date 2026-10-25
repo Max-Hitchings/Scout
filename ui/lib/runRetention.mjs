@@ -835,9 +835,13 @@ function finishSelectionCompaction(root, lease, operation, recoveryDataKey, afte
   const after = Buffer.from(files?.[1]?.data || '', 'base64').toString('utf8');
   if (archive.archiveId !== operation.archiveId || archive.reviewedSelectionDigest !== operation.operationId
     || archive.runs.length !== 1 || archive.runs[0].runId !== 'recovery-selection-history'
+    || archive.runs[0].digest !== operation.beforeDigest
     || !Array.isArray(files) || files.length !== 2
     || files[0].path !== 'before.jsonl' || files[1].path !== 'after.jsonl'
     || sha256(before) !== operation.beforeDigest || sha256(after) !== operation.afterDigest
+    || files[0].sha256 !== operation.beforeDigest || files[1].sha256 !== operation.afterDigest
+    || files[0].size !== Buffer.byteLength(before) || files[1].size !== Buffer.byteLength(after)
+    || operation.removedRecords !== before.split('\n').filter(Boolean).length - after.split('\n').filter(Boolean).length
     || operation.operationId !== sha256(stableJson({ beforeDigest: operation.beforeDigest, afterDigest: operation.afterDigest }))) {
     throw new Error('recovery selection archive conflicts with its prepared compaction');
   }

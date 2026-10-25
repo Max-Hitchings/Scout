@@ -392,6 +392,32 @@ test('selection compaction retains current terminal dispositions and rechecks th
   }
 });
 
+test('compaction rejects a prepared removal count that conflicts with its verified archive', () => {
+  const root = temp();
+  const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: 'compaction-corrupt-intent' });
+  try {
+    for (let index = 0; index < 260; index += 1) {
+      selectRecoverableRun([], { ...recoveryCompatibility(), promptVersion: `prompt-${index}` }, { root, lease });
+    }
+    const authority = archiveAuthority(root);
+    assert.throws(() => compactRecoverySelections(root, lease, {
+      recoveryDataKey: authority.dataKey, beforeReplace() { throw new Error('simulated prepared-intent crash'); },
+    }), /simulated prepared-intent crash/);
+    const file = path.join(root, '.scout', 'recovery-selections.jsonl');
+    const before = fs.readFileSync(file, 'utf8');
+    const manifestFile = path.join(root, '.scout', 'recovery-selection-compaction.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+    fs.writeFileSync(manifestFile, JSON.stringify({ ...manifest, removedRecords: manifest.removedRecords + 1 }));
+    assert.throws(() => compactRecoverySelections(root, lease, {
+      recoveryDataKey: authority.dataKey,
+    }), /conflict|invalid/i);
+    assert.equal(fs.readFileSync(file, 'utf8'), before, 'conflicting intent must not replace the selection journal');
+    assert.equal(fs.existsSync(path.join(root, '.scout', 'run-retention.jsonl')), false, 'conflicting intent must not create a false receipt');
+  } finally {
+    releaseScanLease(lease);
+  }
+});
+
 test('cleanup policy keeps newest twenty, thirty-day history and every recovery-critical run', () => {
   const root = temp();
   for (let index = 0; index < 24; index += 1) {

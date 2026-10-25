@@ -79,3 +79,7 @@ Work done after this snapshot goes in its own section below, signed with the aut
   scan projections; compaction/crash receipt and stale-fence replacement.
 - Full Node and final focused verification are recorded in the package PR.
   Linux execution only; no live workspace, provider, host or Windows/macOS check.
+
+Retention self-review also reproduced a corrupted prepared compaction count being
+accepted. The receipt now binds the removal count and archived file sizes/digests
+to the verified before/after bytes; the RED corruption composition is GREEN.
