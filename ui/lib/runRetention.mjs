@@ -85,7 +85,7 @@ function walkFiles(directory, relative = '', files = []) {
 
 function runInventory(root, { contentDigests = false } = {}) {
   const runsRoot = workspacePaths(root).runs;
-  if (!fs.existsSync(runsRoot)) return [];
+  if (!fs.existsSync(runsRoot)) return legacyScanInputInventory(root, { contentDigests });
   validatePhysicalWorkspacePath(root, runsRoot, 'retention run store');
   const inventory = [];
   for (const entry of fs.readdirSync(runsRoot, { withFileTypes: true })) {
@@ -131,7 +131,46 @@ function runInventory(root, { contentDigests = false } = {}) {
       ...(contentDigests ? { digest: digestFiles(files) } : {}),
     });
   }
-  return inventory;
+  const legacy = legacyScanInputInventory(root, { contentDigests });
+  if (legacy.some((input) => inventory.some((run) => run.runId === input.runId))) {
+    throw new Error('legacy scan-input identity conflicts with the run store');
+  }
+  return [...inventory, ...legacy];
+}
+
+function legacyScanInputInventory(root, { contentDigests }) {
+  const directory = path.join(path.resolve(root), '.scout', 'scan-input');
+  if (!fs.existsSync(directory)) return [];
+  validatePhysicalWorkspacePath(root, directory, 'legacy scan-input store');
+  return fs.readdirSync(directory, { withFileTypes: true }).map((entry) => {
+    const file = validatePhysicalWorkspacePath(root, path.join(directory, entry.name), 'legacy scan-input file');
+    if (!entry.isFile() || entry.isSymbolicLink()) throw new Error('legacy scan-input store contains an unsupported entry');
+    const stat = fs.lstatSync(file);
+    const files = walkFiles(file, 'artifacts/scan-input.json');
+    return {
+      runId: `legacy-input-${sha256(entry.name).slice(0, 32)}`,
+      legacyScanInput: entry.name,
+      directory: file, files, invalid: false, events: [], manifest: null,
+      outcome: 'complete', updatedAt: stat.mtime.toISOString(), bytes: stat.size,
+      ...(contentDigests ? { digest: digestFiles(files) } : {}),
+    };
+  });
+}
+
+function selectedSource(root, selected) {
+  if (!selected.legacyScanInput) return safeRunDirectory(root, selected.runId);
+  const name = selected.legacyScanInput;
+  if (typeof name !== 'string' || path.basename(name) !== name
+    || name.includes('/') || name.includes('\\')
+    || selected.runId !== `legacy-input-${sha256(name).slice(0, 32)}`) {
+    throw new Error('legacy scan-input selection is invalid');
+  }
+  return validatePhysicalWorkspacePath(root,
+    path.join(path.resolve(root), '.scout', 'scan-input', name), 'legacy scan-input selection');
+}
+
+function selectedFiles(root, selected) {
+  return walkFiles(selectedSource(root, selected), selected.legacyScanInput ? 'artifacts/scan-input.json' : '');
 }
 
 function digestFiles(files) {
@@ -247,7 +286,7 @@ export function measureRunStorage(root) {
   }
   const queueBytes = queueFileBytes + operationBytes;
   return {
-    runs: { bytes: runBytes, count: inventory.length },
+    runs: { bytes: runBytes, count: inventory.filter((run) => !run.legacyScanInput).length },
     artifacts: { bytes: artifactBytes, count: artifactCount },
     queue: {
       bytes: queueBytes,
@@ -327,7 +366,10 @@ export function planRunCleanup(root, inputPolicy = {}) {
     String(right.updatedAt || '').localeCompare(String(left.updatedAt || ''))
       || right.runId.localeCompare(left.runId)
   ));
-  const newest = new Set(ordered.slice(0, keepNewest).map((run) => run.runId));
+  const newest = new Set([
+    ...ordered.filter((run) => !run.legacyScanInput).slice(0, keepNewest),
+    ...ordered.filter((run) => run.legacyScanInput).slice(0, keepNewest),
+  ].map((run) => run.runId));
   const recentBoundary = now.getTime() - keepDays * DAY_MS;
   const summaryBoundary = now.getTime() - summaryDays * DAY_MS;
   const candidates = [];
@@ -343,6 +385,7 @@ export function planRunCleanup(root, inputPolicy = {}) {
     }
     candidates.push({
       runId: run.runId,
+      ...(run.legacyScanInput ? { legacyScanInput: run.legacyScanInput } : {}),
       updatedAt: run.updatedAt,
       outcome: run.outcome === 'in-progress' ? dispositions.get(run.runId).outcome : run.outcome,
       bytes: run.bytes,
@@ -388,9 +431,9 @@ function currentFence(lease, callback) {
 function checkedSelectedSources(plan) {
   const sources = [];
   for (const selected of plan.selected) {
-    const directory = safeRunDirectory(plan.root, selected.runId);
+    const directory = selectedSource(plan.root, selected);
     if (!fs.existsSync(directory)) throw new Error('selected run changed after review');
-    const files = walkFiles(directory);
+    const files = selectedFiles(plan.root, selected);
     if (digestFiles(files) !== selected.digest) throw new Error('selected run changed after review');
     sources.push({
       runId: selected.runId,
@@ -540,7 +583,7 @@ function assertPlanCurrent(plan, { allowMissing = false } = {}) {
   });
   const eligible = new Set(current.candidates.map((candidate) => candidate.runId));
   for (const selected of plan.selected) {
-    const directory = path.join(workspacePaths(plan.root).runs, selected.runId);
+    const directory = selectedSource(plan.root, selected);
     if (!fs.existsSync(directory) && allowMissing) continue;
     if (!eligible.has(selected.runId)) {
       throw new Error(`selected run became recovery-critical or otherwise ineligible: ${selected.runId}`);
@@ -680,9 +723,9 @@ export function archiveSelectedRuns(plan, lease, hooks = {}) {
     let removedNow = false;
     currentFence(lease, () => {
       assertPlanCurrent(plan, { allowMissing: true });
-      const directory = safeRunDirectory(plan.root, selected.runId);
+      const directory = selectedSource(plan.root, selected);
       if (!fs.existsSync(directory)) return;
-      if (digestFiles(walkFiles(directory)) !== selected.digest) {
+      if (digestFiles(selectedFiles(plan.root, selected)) !== selected.digest) {
         throw new Error('selected run changed after review');
       }
       fs.rmSync(directory, { recursive: true, force: false });

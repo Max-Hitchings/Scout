@@ -286,6 +286,39 @@ test('terminal skips cannot release an unreceipted mutation or a damaged journal
   ]);
 });
 
+test('legacy scan-input bundles count towards pressure and use reviewed encrypted cleanup', () => {
+  const root = temp();
+  const directory = path.join(root, '.scout', 'scan-input');
+  fs.mkdirSync(directory, { recursive: true });
+  const file = path.join(directory, '2024-01-01-codex-primary.json');
+  const bytes = JSON.stringify({ candidates: [{ id: 'synthetic-vacancy' }] });
+  fs.writeFileSync(file, bytes);
+  fs.utimesSync(file, new Date('2024-01-01T00:00:00Z'), new Date('2024-01-01T00:00:00Z'));
+  assert.equal(measureRunStorage(root).artifacts.bytes, Buffer.byteLength(bytes));
+  assert.throws(() => assertRunStorageWritable(root, {
+    maximumBytes: { artifacts: 1 }, reserveBytes: 0,
+  }), (error) => error.code === 'SCOUT_STORAGE_PRESSURE');
+  const candidate = planRunCleanup(root, {
+    now: new Date('2028-01-01T00:00:00.000Z'), keepNewest: 0,
+  }).candidates[0];
+  assert.equal(candidate.legacyScanInput, path.basename(file));
+  const authority = archiveAuthority(root);
+  const plan = planRunCleanup(root, {
+    now: new Date('2028-01-01T00:00:00.000Z'), keepNewest: 0,
+    selectedRunIds: [candidate.runId], recoveryDataKey: authority.dataKey,
+  });
+  const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: 'cleanup-legacy-input' });
+  try {
+    const result = archiveSelectedRuns(plan, lease);
+    const payload = verifyReviewedRunArchive(result.archiveFile, authority.dataKey);
+    assert.equal(Buffer.from(payload.runs[0].files[0].data, 'base64').toString(), bytes);
+    assert.equal(fs.existsSync(file), false);
+    assert.equal(measureRunStorage(root).artifacts.bytes, 0);
+  } finally {
+    releaseScanLease(lease);
+  }
+});
+
 test('cleanup policy keeps newest twenty, thirty-day history and every recovery-critical run', () => {
   const root = temp();
   for (let index = 0; index < 24; index += 1) {
