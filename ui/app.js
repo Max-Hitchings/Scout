@@ -380,13 +380,13 @@ const Scout = {
     const queuedCount = this.scanQueue.requests.filter((request) => request.status === 'queued').length;
     const status = document.getElementById('scan-status');
     if (status && !this.scanRunning) {
-      status.textContent = activeRun
+      this.setScanStatus(activeRun
         ? `${activeRun.label || 'Scan in progress'}${activeRun.assessment?.totalBatches ? ` · batch ${activeRun.assessment.currentBatch} of ${activeRun.assessment.totalBatchesExact ? '' : 'at least '}${activeRun.assessment.totalBatches}` : ''}`
         : queuedCount
         ? `${queuedCount} queued ${queuedCount === 1 ? 'request' : 'requests'}`
         : h?.lastRunAt
         ? `Last scan: ${Number(h.funnel?.assessed ?? h.candidatesFound ?? 0)} assessed · ${Number(h.keepersAdded || 0)} kept`
-        : 'Waiting to scan';
+        : 'Waiting to scan');
       status.dataset.action = h?.lastRunAt ? 'open-scan-result' : '';
       status.tabIndex = h?.lastRunAt ? 0 : -1;
       status.setAttribute('role', h?.lastRunAt ? 'button' : 'status');
@@ -409,12 +409,19 @@ const Scout = {
       : '';
   },
 
+  setScanStatus(message) {
+    const status = document.getElementById('scan-status');
+    if (!status) return;
+    status.textContent = message;
+    status.title = message;
+  },
+
   async scanNow({ provider } = {}) {
     if (this.scanRunning || this.chat?.streaming) return;
     const button = document.getElementById('scan-now');
     this.scanRunning = true;
     if (button) { button.disabled = true; button.textContent = 'Scanning…'; }
-    document.getElementById('scan-status').textContent = 'Scout is searching now…';
+    this.setScanStatus('Scout is searching now…');
     try {
       const response = await fetch('/api/scan', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -425,7 +432,7 @@ const Scout = {
       this.showOperation(result.operation);
       this.watchScanOperation(result.operation.id);
     } catch (error) {
-      document.getElementById('scan-status').textContent = error.message;
+      this.setScanStatus(error.message);
       this.scanRunning = false;
       if (button) { button.disabled = false; button.textContent = 'Scan now'; }
     }
@@ -453,10 +460,10 @@ const Scout = {
         remaining = lowMinutes < 1 ? `about ${highMinutes} min or less remaining` : `about ${lowMinutes}–${highMinutes} min remaining`;
       }
     }
-    status.textContent = operation.status === 'failed'
+    this.setScanStatus(operation.status === 'failed'
       ? `Scan needs attention: ${operation.error || 'unknown error'}`
       : operation.status === 'succeeded' ? 'Scan completed — refreshing results…'
-        : `${operation.phase || 'Scout is searching'} · ${step} · ${elapsed}${remaining ? ` · ${remaining}` : ''}`;
+        : `${operation.phase || 'Scout is searching'} · ${step} · ${elapsed}${remaining ? ` · ${remaining}` : ''}`);
   },
 
   discardBreakdown(scan = this.latestScan || this.state.data?.scanHealth) {

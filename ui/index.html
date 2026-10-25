@@ -871,7 +871,7 @@
       header b { align-self:center; }
       nav { order:3; width:calc(100% + 24px); height:46px; margin:0 -12px; padding:0 8px; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:thin; }
       nav button { flex:0 0 auto; min-height:44px; padding:4px 12px; }
-      #scan-status { margin-left:auto; max-width:65%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #scan-status { margin-left:0; flex:1 1 100%; max-width:100%; order:4; white-space:normal; overflow-wrap:anywhere; }
       main { padding:12px; }
       .card { padding:13px; }
       .card .top { align-items:center; flex-wrap:wrap; }
@@ -947,7 +947,7 @@
       <button data-tab="cv">CV</button>
       <button id="scout-settings" type="button">Settings</button>
     </nav>
-    <span id="scan-status"></span>
+    <span id="scan-status" role="status" aria-live="polite" aria-atomic="true"></span>
     <button id="sync-status" class="sync-status" type="button" data-state="disabled">Local only</button>
     <button id="scan-now" class="act" type="button">Scan now</button>
   </header>
