@@ -728,7 +728,11 @@ test('guided provider login supports code, failure, retry and cancel without bro
         ...establishedStatus,
         providers: {
           ...establishedStatus.providers,
-          claude: { installed: true, authenticated: false, capabilities: { structuredOutput: true } },
+          claude: {
+            installed: true, authenticated: session?.state === 'succeeded',
+            healthState: session?.state === 'succeeded' ? 'ready' : 'sign-in-required',
+            capabilities: { structuredOutput: true },
+          },
         },
       }),
     });
