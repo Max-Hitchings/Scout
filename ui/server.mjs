@@ -1040,6 +1040,7 @@ async function handleRead(req, res, url) {
     const providerStatuses = publicProviderStatuses(providers, WORKSPACE_ROOT);
     const env = loadEnv(WORKSPACE_ROOT);
     const readiness = setupReadiness(WORKSPACE_ROOT, config, providerStatuses, readTracker());
+    const health = readScanHealth();
     return sendJson(res, 200, {
       workspaceRoot: WORKSPACE_ROOT,
       appRoot: APP_ROOT,
@@ -1054,8 +1055,8 @@ async function handleRead(req, res, url) {
       searchProfilePublished: Boolean(loadPublishedSearchProfile(WORKSPACE_ROOT)),
       setupComplete: Boolean(config.setup?.completedAt),
       readiness: readiness.checks,
-      scanHealth: readScanHealth(),
-      schedule: readScheduleSummary(config),
+      scanHealth: health,
+      schedule: readScheduleSummary(config, health),
       doctor: publicDoctor(doctor(WORKSPACE_ROOT, { appRoot: APP_ROOT, providers })),
       git: detectGit(),
       sync: syncStatus(WORKSPACE_ROOT),
@@ -1115,12 +1116,13 @@ async function handleRead(req, res, url) {
     const data = snapshot.data;
     const todayValue = today();
     const config = loadWorkspaceConfig(WORKSPACE_ROOT);
+    const health = readScanHealth();
     return sendJson(res, 200, {
       ...data,
       triage: triage(data, todayValue, config.triage),
       pipeline: pipeline(data, todayValue, config.triage),
-      scanHealth: readScanHealth(),
-      schedule: readScheduleSummary(config),
+      scanHealth: health,
+      schedule: readScheduleSummary(config, health),
       categories: readCategories(),
       workspaceConfig: config,
       trackerRevision: snapshot.revision,

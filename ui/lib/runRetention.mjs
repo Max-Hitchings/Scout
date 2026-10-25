@@ -82,7 +82,7 @@ function walkFiles(directory, relative = '', files = []) {
   return files;
 }
 
-function runInventory(root) {
+function runInventory(root, { contentDigests = false } = {}) {
   const runsRoot = workspacePaths(root).runs;
   if (!fs.existsSync(runsRoot)) return [];
   validatePhysicalWorkspacePath(root, runsRoot, 'retention run store');
@@ -127,7 +127,7 @@ function runInventory(root) {
       outcome: manifest?.outcome || 'in-progress',
       updatedAt,
       bytes: files.reduce((sum, file) => sum + file.size, 0),
-      digest: digestFiles(files),
+      ...(contentDigests ? { digest: digestFiles(files) } : {}),
     });
   }
   return inventory;
@@ -304,7 +304,7 @@ export function planRunCleanup(root, inputPolicy = {}) {
   if (![keepNewest, keepDays, summaryDays].every((value) => Number.isSafeInteger(value) && value >= 0)) {
     throw new TypeError('retention policy bounds must be non-negative whole numbers');
   }
-  const inventory = runInventory(root);
+  const inventory = runInventory(root, { contentDigests: true });
   const referenced = recoveryReferencedRunIds(root);
   const queued = queuedRunIds(root, now);
   const ordered = [...inventory].sort((left, right) => (

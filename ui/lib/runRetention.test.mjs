@@ -155,6 +155,34 @@ test('measures journals, derived artifacts and the queue independently', () => {
   assert.equal(measured.totalBytes, measured.runs.bytes + measured.artifacts.bytes + measured.queue.bytes);
 });
 
+test('storage measurement counts 100 MiB without reading artifact bodies and stays fresh', (t) => {
+  const root = temp();
+  const directory = terminalRun(root, 'large-complete', '2026-01-01T00:00:00.000Z');
+  const artifact = path.join(directory, 'artifacts', 'result.json');
+  const descriptor = fs.openSync(artifact, 'w');
+  fs.ftruncateSync(descriptor, 100 * 1024 * 1024);
+  fs.closeSync(descriptor);
+  const originalRead = fs.readFileSync;
+  let artifactReads = 0;
+  fs.readFileSync = function read(file, ...args) {
+    if (String(file) === artifact) artifactReads += 1;
+    return originalRead.call(this, file, ...args);
+  };
+  try {
+    const started = performance.now();
+    const measured = measureRunStorage(root);
+    const elapsed = performance.now() - started;
+    assert.equal(measured.artifacts.bytes, 100 * 1024 * 1024);
+    assert.equal(artifactReads, 0, 'status measurement must not hash artifact content');
+    assert.ok(elapsed < 2_000, `100 MiB inventory exceeded 2 seconds: ${elapsed}`);
+    fs.truncateSync(artifact, 123);
+    assert.equal(measureRunStorage(root).artifacts.bytes, 123, 'measurement must not use a stale cache');
+    t.diagnostic(`100 MiB metadata measurement: ${elapsed.toFixed(1)} ms; artifact body reads: ${artifactReads}`);
+  } finally {
+    fs.readFileSync = originalRead;
+  }
+});
+
 test('cleanup policy keeps newest twenty, thirty-day history and every recovery-critical run', () => {
   const root = temp();
   for (let index = 0; index < 24; index += 1) {
