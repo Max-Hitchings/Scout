@@ -87,7 +87,7 @@ export async function fetchAdzuna(options, fetchImpl = globalThis.fetch) {
   const values = { ...DEFAULT_ADZUNA_OPTIONS, ...options };
   const currency = adzunaCountryCurrency(values.country);
   // There is no implicit FX conversion at the source-query boundary.
-  if (!currency || (options?.currency && options.currency !== currency)) values.salaryMin = null;
+  if (!currency || values.currency !== currency) values.salaryMin = null;
   values.currency = currency;
   const { appId, apiKey, queries = DEFAULT_ADZUNA_QUERIES } = values;
   if (!appId || !apiKey) return withSourceStatus({ jobs: [], sources: {}, errors: [], available: false }, { unavailableReason: 'Adzuna credentials are not configured' });

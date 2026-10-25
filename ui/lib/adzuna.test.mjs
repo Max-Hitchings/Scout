@@ -112,4 +112,10 @@ test('Adzuna compensation follows the queried country, never the workspace curre
     return response({ results: [] });
   });
   assert.equal(requested.searchParams.get('salary_min'), '50000');
+  await fetchAdzuna({ ...creds, country: 'us', salaryMin: 50000, queries: ['synthetic role'] }, async (url) => {
+    requested = new URL(url);
+    return response({ results: [] });
+  });
+  assert.equal(requested.searchParams.has('salary_min'), false,
+    'the compatibility GBP default must not become a USD salary filter');
 });
