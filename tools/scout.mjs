@@ -853,7 +853,7 @@ export async function runScanWith(root, provider, mode, {
       rejectionMemory: readRejectedVacancyMemory(root),
       assessmentVersion: assessmentVersionOf(compatibility),
       limit: modePolicy.resultCap,
-      relevanceThreshold: Math.max(config.search?.relevanceThreshold ?? 0, modePolicy.triage.checkScore),
+      relevanceThreshold: Math.max(config.search?.relevanceThreshold ?? 0, publishedAtStart.selection?.relevanceThreshold ?? 0, modePolicy.triage.checkScore),
     })
     : {
       collect,

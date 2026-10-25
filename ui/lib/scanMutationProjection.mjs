@@ -230,6 +230,13 @@ function safeIdentity(entry) {
   };
 }
 
+function safeNotificationState(value) {
+  if (!value || Object.keys(value).sort().join(',') !== 'episode,exceptional,qualified'
+    || typeof value.qualified !== 'boolean' || typeof value.exceptional !== 'boolean'
+    || !Number.isSafeInteger(value.episode) || value.episode < 0) return null;
+  return { qualified: value.qualified, exceptional: value.exceptional, episode: value.episode };
+}
+
 function safeOpportunity(entry, existed, prior = null) {
   const id = identifier(entry?.id);
   if (!id) throw new TypeError('tracker mutation upsert requires a bounded ID');
@@ -267,6 +274,7 @@ function safeOpportunity(entry, existed, prior = null) {
     profileId: identifier(entry?.profileId),
     learningVersionId: identifier(entry?.learningVersionId),
     rankingHistory: safeRankingHistory(entry?.rankingHistory),
+    ...(safeNotificationState(entry?.notificationState) ? { notificationState: safeNotificationState(entry.notificationState) } : {}),
     lastChecked: /^\d{4}-\d{2}-\d{2}$/.test(entry?.lastChecked || '') ? entry.lastChecked : null,
     foundVia: code(entry?.foundVia),
     ...(entry?.advertUpdate ? {
@@ -403,6 +411,7 @@ function safeRunRecord(record) {
       sourceReferences: safeReferences({ sourceReferences: item?.sourceReferences }),
     })),
     reviewed: (record?.reviewed || []).map((item) => ({
+      ...(identifier(item?.trackerId) ? { trackerId: identifier(item.trackerId) } : {}),
       vacancyId: durableVacancyId(item?.vacancyId),
       company: boundedLabel(item?.company, 120),
       role: boundedLabel(item?.role, 160),
@@ -520,6 +529,7 @@ function canonicalTrackerRecipe(recipe) {
       profileId: identifier(item?.profileId),
       learningVersionId: identifier(item?.learningVersionId),
       rankingHistory: safeRankingHistory(item?.rankingHistory),
+      ...(safeNotificationState(item?.notificationState) ? { notificationState: safeNotificationState(item.notificationState) } : {}),
       lastChecked: /^\d{4}-\d{2}-\d{2}$/.test(item?.lastChecked || '') ? item.lastChecked : null,
       foundVia: code(item?.foundVia),
       ...(item?.advertUpdate ? {
@@ -574,6 +584,7 @@ function renderTracker(currentContent, recipe) {
       profileId: upsert.profileId,
       learningVersionId: upsert.learningVersionId,
       rankingHistory: upsert.rankingHistory,
+      ...(safeNotificationState(upsert.notificationState) ? { notificationState: safeNotificationState(upsert.notificationState) } : {}),
       lastChecked: upsert.lastChecked,
       foundVia: upsert.foundVia,
       ...(upsert.advertUpdate ? { advertUpdate: upsert.advertUpdate } : {}),

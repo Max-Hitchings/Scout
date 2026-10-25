@@ -2293,16 +2293,16 @@ function mergeTracker(
       outcome, score: gate.score,
       reasons: reasons.map((reason) => boundedText(reason)).filter(Boolean).slice(0, REVIEW_REASON_LIMIT),
     };
+    const previous = existing.opportunities.find((entry) => sameUnderlyingJob(entry, candidate));
     if (!gate.keep) {
-      reviewed.push(review);
+      reviewed.push({ ...review, ...(previous ? { trackerId: previous.id } : {}) });
       continue;
     }
     const baseId = `${slug(candidate.company)}-${slug(candidate.role)}-${date.slice(0, 7)}`;
-    const previous = existing.opportunities.find((entry) => sameUnderlyingJob(entry, candidate));
     let id = previous?.id || baseId;
     for (let suffix = 2; !previous && byId.has(id); suffix += 1) id = `${baseId}-${suffix}`;
     const changedAdvert = Boolean(previous && advertMateriallyChanged(previous, candidate));
-    reviewed.push({ ...review, trackerOutcome: previous ? 'updated' : 'added' });
+    reviewed.push({ ...review, trackerId: id, trackerOutcome: previous ? 'updated' : 'added' });
     const references = mergeSourceReferences(previous || {}, candidate);
     const urls = references.map((reference) => reference.url).filter(Boolean);
     const deterministicDimensions = Array.isArray(candidate.dimensions) ? candidate.dimensions : [];
@@ -2623,8 +2623,11 @@ export function coordinateScanArtifacts(root, input, { run, lease, hooks = {} })
     const artifacts = buildScanArtifacts(root, { ...input, timestamp });
     const date = artifacts.run.timestamp.slice(0, 10);
     const notifications = input.notificationConfig ? notificationsForAssessment(
-      readNotifications(root), input.notificationConfig, artifacts.run.reviewed, timestamp,
+      readNotifications(root), input.notificationConfig, artifacts.run.reviewed, timestamp, { tracker: artifacts.tracker },
     ) : null;
+    if (notifications && artifacts.contents.tracker !== undefined) {
+      artifacts.contents.tracker = serializeTracker(artifacts.tracker);
+    }
     const hasTracker = artifacts.contents.tracker !== undefined;
     const selectedLanes = Array.isArray(input.lanes) ? input.lanes : [];
     const currentLanePlan = selectedLanes.length ? loadSearchLanePlan(root) : null;
@@ -2700,11 +2703,11 @@ export function coordinateScanArtifacts(root, input, { run, lease, hooks = {} })
       schemaVersion: 1,
       files: [
         ...(hasTracker ? [{ kind: 'tracker', key: 'tracker' }] : []),
-        ...(notifications ? [{ kind: 'json', key: 'notifications' }] : []),
         { kind: 'report', key: `report:${date}` },
         { kind: 'run-log', key: 'scan-log' },
         ...(updatedLanePlan ? [{ kind: 'json', key: 'search-lanes' }] : []),
         ...(updatedEmployerRegistry ? [{ kind: 'json', key: 'employers' }] : []),
+        ...(notifications ? [{ kind: 'json', key: 'notifications' }] : []),
       ],
     };
     plan = prepareMutation({ handle: run, lease }, target, {
