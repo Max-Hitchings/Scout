@@ -15,6 +15,7 @@ const SAFE_OUTCOME = new Set([
   'kept', 'hard_exclusion', 'mandatory_unmet', 'below_threshold',
   'provider_discarded', 'advert_closed',
 ]);
+const TRACKER_OUTCOMES = new Set(['added', 'updated', 'unchanged']);
 const DISCARDED_COUNTERS = [
   'hard_exclusion', 'mandatory_unmet', 'below_threshold',
   'provider_discarded', 'advert_closed',
@@ -398,6 +399,7 @@ function safeRunRecord(record) {
       reason_code: code(item?.reason_code, 'unknown'),
       assessment_status: code(item?.assessment_status, 'unknown'),
       outcome: code(item?.outcome),
+      ...(TRACKER_OUTCOMES.has(item?.tracker_outcome) ? { tracker_outcome: item.tracker_outcome } : {}),
       source: sourceIdentityLabel(item?.source),
       sourceUrl: canonicalUrl(item?.sourceUrl),
       sourceReferences: safeReferences({ sourceReferences: item?.sourceReferences }),
@@ -416,6 +418,7 @@ function safeRunRecord(record) {
       learningVersionId: identifier(item?.learningVersionId),
       categoryId: code(item?.categoryId),
       outcome: SAFE_OUTCOME.has(item?.outcome) ? item.outcome : 'below_threshold',
+      ...(TRACKER_OUTCOMES.has(item?.trackerOutcome) ? { trackerOutcome: item.trackerOutcome } : {}),
       score: number(item?.score),
       reasonCodes: item?.outcome === 'provider_discarded'
         ? ['provider-discarded']

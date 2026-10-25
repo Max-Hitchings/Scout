@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
-  assessScanCandidates, assessmentCandidatesForSelection, buildAssessmentPrompt, compactCandidates, createRankedDiscoveryStages, DEFAULT_CANDIDATE_LIMIT, durableScanProjection, gateAssessment, inboxRecheckCandidates, prepareRankedDiscovery, promptCandidate,
+  assessScanCandidates, assessmentCandidatesForSelection, buildAssessmentPrompt, compactCandidates, coordinateScanArtifacts, createRankedDiscoveryStages, DEFAULT_CANDIDATE_LIMIT, durableScanProjection, gateAssessment, inboxRecheckCandidates, prepareRankedDiscovery, promptCandidate,
   filterVacancies, PipelineInterruptedError, readRejectedVacancyMemory, readVacancyDecisionHistory, runScanPipeline, validateAssessments, validateWrittenScanArtifacts,
   verificationCandidates, writeScanArtifacts,
 } from './scanPipeline.mjs';
@@ -1336,7 +1336,7 @@ test('failed assessment reconciles selected candidates as assessment failures', 
   assert.equal(artifacts.run.selection_summary.assessmentFailed, 1);
 });
 
-test('repeated assessed keeper content reconciles as unchanged while verification dates advance', () => {
+function unchangedKeeperFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-unchanged-keeper-'));
   fs.mkdirSync(path.join(root, 'data'), { recursive: true });
   fs.writeFileSync(path.join(root, 'data', 'opportunities.json'), JSON.stringify({ opportunities: [] }));
@@ -1356,6 +1356,11 @@ test('repeated assessed keeper content reconciles as unchanged while verificatio
       bySource: { ats: { count: 1, failedRecords: 0, sourceErrors: 0 } },
     },
   };
+  return { root, candidate, input };
+}
+
+test('repeated assessed keeper content reconciles as unchanged while verification dates advance', () => {
+  const { root, candidate, input } = unchangedKeeperFixture();
   try {
     const first = writeScanArtifacts(root, { ...input, startedAt: '2026-10-23T10:00:00.000Z', timestamp: '2026-10-23T10:00:00.000Z' });
     assert.equal(first.run.funnel.added, 1);
@@ -1372,6 +1377,34 @@ test('repeated assessed keeper content reconciles as unchanged while verificatio
     });
     assert.equal(changed.run.funnel.updated, 1);
     assert.equal(changed.run.funnel.unchanged, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('receipted scan projection preserves an unchanged keeper through the next coordinated scan', () => {
+  const { root, input } = unchangedKeeperFixture();
+  const execute = (id) => {
+    const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: id });
+    const run = openRunJournal(root, id);
+    try {
+      appendRunEvent(run, {
+        type: 'run.started', stageId: 'initialise', idempotencyKey: `start-${id}`,
+        payload: { schemaVersion: 1, compatibility: RECOVERY_COMPATIBILITY },
+      }, lease);
+      return coordinateScanArtifacts(root, { ...input, startedAt: new Date().toISOString() }, { run, lease });
+    } finally {
+      releaseScanLease(lease);
+    }
+  };
+  try {
+    assert.equal(execute('synthetic-keeper-first').run.funnel.added, 1);
+    const second = execute('synthetic-keeper-second');
+    assert.equal(second.run.funnel.unchanged, 1);
+    assert.equal(second.run.funnel.bySource.ats.unchanged, 1);
+    assert.equal(second.run.explanations[0].tracker_outcome, 'unchanged');
+    assert.equal(second.run.reviewed[0].trackerOutcome, 'unchanged');
+    assert.ok(second.mutationReceipt);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

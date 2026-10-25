@@ -2250,6 +2250,13 @@ function sourceHealth(sources) {
   }]));
 }
 
+function keeperContent(entry) {
+  const encoded = JSON.stringify({ opportunities: [entry] });
+  const content = trackerMergeRecipe(encoded, encoded).upserts[0];
+  for (const key of ['lastChecked', 'rankingHistory', 'notificationState']) delete content[key];
+  return content;
+}
+
 function mergeTracker(
   existing,
   candidates,
@@ -2341,10 +2348,9 @@ function mergeTracker(
     };
     // Verification dates and ranking history advance even when the keeper's
     // job content is unchanged; they are not a newly updated opportunity.
-    const changed = previous && Object.entries(durableScanProjection(generated)).some(([key, value]) => (
-      !['lastChecked', 'rankingHistory'].includes(key)
-      && !isDeepStrictEqual(previous[key], value)
-    ));
+    const changed = previous && !isDeepStrictEqual(
+      keeperContent(previous), keeperContent({ ...previous, ...generated }),
+    );
     reviewed.push({ ...review, trackerOutcome: previous ? changed ? 'updated' : 'unchanged' : 'added' });
     if (previous) {
       Object.assign(previous, generated);

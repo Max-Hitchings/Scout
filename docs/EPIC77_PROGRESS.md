@@ -73,7 +73,7 @@ Work done after this snapshot goes in its own section below, signed with the aut
 | D-3 | Deferred native long-path acceptance to the maintainer under Epic #77. No current application path-length threshold or `core.longpaths` consumer was found to justify a production change. This Linux environment cannot verify native Windows Git/filesystem limits. |
 | D-4 | Ported two existing Windows-bypassed snapshot escape tests to junction fixtures. Existing direct physical-path and mutation-junction coverage is retained. Linux focus: 62 passed, 2 Windows-only skips; native Windows remains unverified. |
 | PROV-2 | Fixed the production queue-to-public-status composition: historical scheduled `manual-discovery` compatibility purposes display as scheduled discovery without changing durable identity or deduplication. RED then GREEN. |
-| PROV-4 | Fixed with a real unchanged keeper outcome, reconciled at total and source level. Verification/history-only updates remain fresh without reporting changed job content. RED then GREEN. |
+| PROV-4 | Fixed with a real unchanged keeper outcome, reconciled at total and source level. A self-review reproduced projection drift through the receipted writer, then bound comparison to the same production tracker projection and retained closed tracker-outcome fields in run recipes. Verification/history and notification bookkeeping remain fresh without reporting changed job content. Both compositions were RED then GREEN. |
 | PROV-5 | Corrected semantic-fact documentation to describe stopword removal, duplicate elimination and bounded facts. No extra advert or profile body is retained. |
 
 PROV-3 was already done and was not repeated. F-1, D-1 and live operator
