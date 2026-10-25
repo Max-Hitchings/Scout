@@ -39,6 +39,31 @@ const {
 } = await import('./lib/providerAuthMutation.mjs');
 const { readProviderHealth, recordProviderHealth } = await import('./lib/providerHealth.mjs');
 
+test('real setup status and doctor agree on a persisted remote authentication failure', async () => {
+  const original = providerDetection.detect;
+  const file = path.join(testWorkspace, '.scout', 'provider-health', 'v1', 'codex.json');
+  const prior = fs.existsSync(file) ? fs.readFileSync(file) : null;
+  providerDetection.detect = async () => ({
+    codex: { installed: true, authenticated: true, capabilities: { structuredOutput: true } },
+  });
+  try {
+    seedWorkspace(APP_ROOT, testWorkspace);
+    recordProviderHealth(testWorkspace, 'codex', {
+      kind: 'remote-auth-failure', source: 'provider-operation',
+    }, { purpose: 'manual-run' });
+    const response = await request({ path: '/api/setup/status' });
+    assert.equal(response.status, 200);
+    const status = JSON.parse(response.text);
+    assert.equal(status.providers.codex.authenticated, false);
+    assert.equal(status.doctor.checks.providers.codex.authenticated, false);
+    assert.equal(status.doctor.providerSetupRequired, true);
+  } finally {
+    providerDetection.detect = original;
+    if (prior) fs.writeFileSync(file, prior);
+    else fs.rmSync(file, { force: true });
+  }
+});
+
 test('server startup and periodic provider health use the configured runtime entry points', async () => {
   const config = {
     ai: { provider: 'codex' },

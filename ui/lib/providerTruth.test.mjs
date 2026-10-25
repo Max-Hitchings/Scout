@@ -9,6 +9,8 @@ import {
 import {
   acquireProviderAuthMutation, releaseProviderAuthMutation,
 } from './providerAuthMutation.mjs';
+import { publicProviderStatus } from './providerPresentation.mjs';
+import { providerCardPresentation, providerLoginPanelHtml } from '../setup.js';
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-provider-truth-'));
@@ -66,4 +68,17 @@ test('ordinary checking and login progress never create provider-failure alerts'
     assert.equal(current.alert, null, kind);
     assert.equal(current.shouldNotify, false, kind);
   }
+});
+
+test('real local credentials stay visibly unverified across the card and sign-in panel', (t) => {
+  const root = fixture(t);
+  const health = recordProviderHealth(root, 'codex', {
+    kind: 'local-credentials-present', source: 'startup',
+  }, { purpose: 'startup' });
+  const status = publicProviderStatus({
+    installed: true, authenticated: true, capabilities: { structuredOutput: true },
+  }, health);
+  assert.match(providerCardPresentation(status).label, /unverified|not.*verified/i);
+  assert.match(providerLoginPanelHtml('codex', status), /not.*verified|unverified/i);
+  assert.doesNotMatch(providerLoginPanelHtml('codex', status), /Codex is signed in\./);
 });

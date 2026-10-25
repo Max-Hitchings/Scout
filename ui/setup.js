@@ -1,3 +1,6 @@
+import { providerCardPresentation } from './lib/providerPresentation.mjs?v=__SCOUT_UI_BUILD__';
+export { providerCardPresentation };
+
 const STEPS = ['Welcome', 'AI provider', 'Your search', 'Adzuna', 'Import CV', 'AI hand-off', 'First scan'];
 // Keep the existing storage key so people who previously dismissed setup are
 // not forced back into it after upgrading. It now represents an intentional
@@ -6,8 +9,7 @@ const SETUP_DEFERRED_KEY = 'scout.setup.legacySkipped.v1';
 const SUPPORTED_CV = /\.(pdf|docx|md|markdown|txt)$/i;
 const DISMISSIBLE_VIEWS = new Set(['hub', 'section', 'retune', 'backup-details']);
 // Sunday = 0, matching ui/lib/scheduler.mjs. Kept as a literal here because
-// setup.js stays self-contained so a browser attached to a pre-update server
-// can still boot.
+// importing the scheduler would bring Node-specific code into the browser.
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
 // Alternating splits the week so the two providers never scan on the same day.
@@ -85,19 +87,30 @@ export function providerLoginPanelHtml(
   };
   const state = session?.provider === provider ? session.state : null;
   const active = ['starting', 'awaiting-code', 'authenticating', 'validating'].includes(state);
-  const retryable = ['failed', 'cancelled', 'expired'].includes(state);
-  const reauthenticationRequired = providerStatus.healthState === 'sign-in-required';
-  const authenticated = providerStatus.authenticated === true && !reauthenticationRequired;
+  const presentation = providerCardPresentation(providerStatus);
+  const authenticated = presentation.available;
+  const needsSignIn = providerStatus.healthState === 'sign-in-required'
+    || (providerStatus.authenticated !== true
+      && [undefined, 'ready', 'credentials-present-unverified'].includes(providerStatus.healthState));
+  const retryable = ['failed', 'cancelled', 'expired'].includes(state)
+    || (state === 'succeeded' && !authenticated);
   const canStart = providerStatus.installed === true
     && !authenticated
+    && needsSignIn
     && !state
     && !active
     && !retryable;
-  const statusText = stateLabels[state]
+  const statusText = (state === 'succeeded' && !authenticated
+    ? `Sign-in still needs verification. ${presentation.label}. ${presentation.help}`
+    : stateLabels[state])
     || (authenticated
-      ? `${name} is signed in.`
+      ? providerStatus.healthState === 'credentials-present-unverified'
+        ? `${name} sign-in was found but has not yet been verified with the provider.`
+        : `${name} is signed in.`
       : providerStatus.installed
-        ? `${name} needs sign-in.`
+        ? needsSignIn
+          ? `${name} needs sign-in. ${presentation.help}`
+          : `${name}: ${presentation.label}. ${presentation.help}`
         : `${name} is not installed.`);
   const sessionId = escapeProfileText(session?.sessionId || '');
   const disabled = pending ? ' disabled aria-disabled="true"' : '';
@@ -131,68 +144,10 @@ export function providerLoginPanelHtml(
     <p class="meta" role="status" aria-live="polite">${statusText}</p>
     ${device}${verification}
     <div class="provider-login-actions">${code}${start}${cancel}${retry}${clear}</div>
-    ${authenticated ? '' : `<p class="meta">Manual fallback: open your terminal and run <code>${command}</code>. <a href="${guide}" target="_blank" rel="noreferrer">Official ${name} login guide</a>. Retry only checks sign-in. After reconnecting, close Settings and use Run missed scan now on the dashboard.</p>`}
+    ${authenticated ? '' : `<p class="meta">Manual fallback: open your terminal and run <code>${command}</code>. <a href="${guide}" target="_blank" rel="noreferrer">Official ${name} login guide</a>. Retry starts a new sign-in attempt. After reconnecting, close Settings and choose which blocked work to retry.</p>`}
   </section>`;
 }
 
-export function providerCardPresentation(provider = {}) {
-  if (provider.installed !== true) {
-    return {
-      available: false,
-      label: 'Not installed',
-      help: 'Install this provider CLI from its official guide, then refresh provider status.',
-    };
-  }
-  const blocked = {
-    checking: {
-      label: 'Installed; checking provider status',
-      help: 'Wait for the bounded provider check to finish, then refresh if needed.',
-    },
-    'sign-in-required': {
-      label: 'Installed; sign-in required',
-      help: 'Sign in with Scout or use the manual provider command, then refresh.',
-    },
-    'login-in-progress': {
-      label: 'Installed; sign-in in progress',
-      help: 'Wait for the current sign-in flow to finish before selecting this provider.',
-    },
-    'network-unavailable': {
-      label: 'Installed; network unavailable',
-      help: 'Restore provider network access, then refresh. Scout will not replay blocked work automatically.',
-    },
-    'rate-limited': {
-      label: 'Installed; provider rate limited',
-      help: 'Wait for the provider rate limit to clear, then retry explicitly.',
-    },
-    'cli-update-required': {
-      label: 'Installed and signed in; CLI update required',
-      help: 'Update this CLI from its official installation guide, then refresh.',
-    },
-    'provider-error': {
-      label: 'Installed; provider error',
-      help: 'Resolve the provider error and refresh status before selecting it.',
-    },
-  };
-  if (Object.hasOwn(blocked, provider.healthState)) {
-    return { available: false, ...blocked[provider.healthState] };
-  }
-  if (!['ready', 'credentials-present-unverified'].includes(provider.healthState)) {
-    return {
-      available: false,
-      label: 'Installed; provider status unavailable',
-      help: 'Refresh provider status. Scout will keep this provider disabled until its state is known.',
-    };
-  }
-  if (provider.authenticated !== true) return { available: false, ...blocked['sign-in-required'] };
-  if (provider.capabilities?.structuredOutput === false) {
-    return { available: false, ...blocked['cli-update-required'] };
-  }
-  return {
-    available: true,
-    label: 'Installed, signed in and compatible',
-    help: '',
-  };
-}
 
 export function buildConfig(form, current = {}) {
   const salary = String(form.salaryMinimum || '').trim();

@@ -41,6 +41,9 @@ import {
 import {
   PROVIDER_HEALTH_STATES, acknowledgeProviderAlert, providerPreflight, readProviderHealth,
 } from './lib/providerHealth.mjs';
+import { publicProviderStatus } from './lib/providerPresentation.mjs';
+import { publicProviderStatuses } from './lib/providerStatuses.mjs';
+export { publicProviderStatus };
 import { providerRecoveryView } from './lib/providerRecovery.mjs';
 import {
   acquireProviderAuthMutation, acquireProviderWork, attachProviderAuthMutationChild,
@@ -111,7 +114,7 @@ export const APP_VERSION = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'packa
 // clients keep the previous `scout-shell-<id>` cache and the previous ?v= URL.
 export const UI_BUILD_FILES = [
   'index.html', 'app.js', 'setup.js', 'reportView.js', 'service-worker.js', 'manifest.webmanifest',
-  'lib/scoutCharacter.mjs', 'lib/chatDrawerState.mjs', 'lib/codexDeepLink.mjs', 'lib/durableRunStates.mjs',
+  'lib/scoutCharacter.mjs', 'lib/chatDrawerState.mjs', 'lib/codexDeepLink.mjs', 'lib/durableRunStates.mjs', 'lib/providerPresentation.mjs',
   'assets/scout-icon.ico', 'assets/scout-icon.png', 'assets/scout-idle.png',
   'assets/scout-thinking.png', 'assets/scout-searching.png', 'assets/scout-explaining.png',
   'assets/scout-found.png', 'assets/scout-warning.png',
@@ -747,43 +750,6 @@ function currentDeviceSettings() {
 
 export const providerDetection = { detect: detectProvidersAsync };
 
-const PUBLIC_PROVIDER_HEALTH_STATES = new Set(Object.values(PROVIDER_HEALTH_STATES));
-
-export function publicProviderStatus(value, health = null) {
-  const healthStateIsValid = health === null || PUBLIC_PROVIDER_HEALTH_STATES.has(health?.state);
-  const healthState = health === null ? null
-    : healthStateIsValid ? health.state : PROVIDER_HEALTH_STATES.PROVIDER_ERROR;
-  const authenticationBlocked = !healthStateIsValid
-    || health?.remoteAuthBarrier === true
-    || healthState === PROVIDER_HEALTH_STATES.SIGN_IN_REQUIRED;
-  return {
-    installed: value?.installed === true,
-    authenticated: value?.authenticated === true && !authenticationBlocked,
-    capabilities: {
-      structuredOutput: value?.capabilities?.structuredOutput === true,
-    },
-    ...(healthState === null ? {} : { healthState }),
-  };
-}
-
-function publicProviderStatuses(values, root) {
-  return Object.fromEntries(
-    ['codex', 'claude']
-      .filter((provider) => values?.[provider])
-      .map((provider) => {
-        let health;
-        try {
-          health = readProviderHealth(root, provider);
-        } catch {
-          health = {
-            state: PROVIDER_HEALTH_STATES.PROVIDER_ERROR,
-            remoteAuthBarrier: true,
-          };
-        }
-        return [provider, publicProviderStatus(values[provider], health)];
-      }),
-  );
-}
 
 const PROVIDER_LOGIN_OWNER_ID = randomUUID();
 const providerLoginCsrfTokens = new Map();
@@ -1056,7 +1022,7 @@ async function handleRead(req, res, url) {
       readiness: readiness.checks,
       scanHealth: readScanHealth(),
       schedule: readScheduleSummary(config),
-      doctor: publicDoctor(doctor(WORKSPACE_ROOT, { appRoot: APP_ROOT, providers })),
+      doctor: publicDoctor(doctor(WORKSPACE_ROOT, { appRoot: APP_ROOT, providers: providerStatuses, healthGated: true })),
       git: detectGit(),
       sync: syncStatus(WORKSPACE_ROOT),
       device: currentDeviceSettings(),
