@@ -402,3 +402,18 @@ test('5,000 distinct vacancies and their durable identities canonicalise within 
   assert.equal(measured.stable, true);
   assert.ok(measured.elapsedMs < 5000, `canonicalisation took ${measured.elapsedMs.toFixed(1)} ms; budget is 5000 ms`);
 });
+
+test('adding country-currency provenance preserves unchanged historical compensation fingerprints', () => {
+  const original = canonicaliseObservations([observation({
+    salaryMin: 60000, salaryMax: 70000, salaryCurrency: 'GBP', salaryPeriod: 'year', salaryRateType: 'salary',
+  })]).vacancies[0];
+  const refreshed = canonicaliseObservations([observation({
+    salaryMin: 60000, salaryMax: 70000, salaryCurrency: 'GBP', salaryPeriod: 'year', salaryRateType: 'salary',
+    salaryCurrencyProvenance: 'queried-country',
+  })]).vacancies[0];
+  assert.equal(refreshed.compensation.value.currencyProvenance, 'queried-country');
+  assert.equal(classifyVacancyChange({ ...original, contentFingerprint: vacancyContentFingerprint(original) }, refreshed), 'unchanged');
+  assert.equal(classifyVacancyChange(original, {
+    ...refreshed, compensation: { ...refreshed.compensation, value: { ...refreshed.compensation.value, currency: 'USD' } },
+  }), 'material');
+});
