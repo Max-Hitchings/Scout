@@ -90,8 +90,14 @@ at `93048fd`. No issue acceptance boxes or earlier progress entries were changed
 Every new regression was observed failing before its fix, including the
 country Settings browser action. Focused checks passed; full Node verification
 passed 1,509 total, 1,503 passed, 0 failed, 6 platform skips. Chromium Settings
-passed 29/29 using the installed system browser. Firefox and native Windows
+passed 29/29 and first-run onboarding passed 6/6 using the installed system browser. Firefox and native Windows
 execution were not performed. Tests used only synthetic workspaces and stubbed
 source/provider boundaries. A scoped child-subreaper wrapper outside the
 repository is needed in this container because its PID 1 does not reap orphan
 children; neither Scout nor its tests were weakened for that environment.
+
+Self-review added a failing historical-fingerprint regression before excluding
+currency-provenance metadata from semantic change detection. The provenance
+still persists with salary evidence; a real amount or currency correction
+still counts as material. An unchanged old salary therefore does not consume
+assessment capacity merely because it acquired provenance on upgrade.
