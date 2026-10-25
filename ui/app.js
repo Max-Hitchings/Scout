@@ -349,6 +349,8 @@ const Scout = {
   },
 
   async loadOpportunities({ durableRuns: suppliedRuns, durableQueue: suppliedQueue } = {}) {
+    const generation = (this.opportunitiesGeneration || 0) + 1;
+    this.opportunitiesGeneration = generation;
     const [data, cvFiles, latest, durableRuns, durableQueue, feedbackLearning] = await Promise.all([
       this.api('/api/opportunities'),
       this.api('/api/cv'),
@@ -361,6 +363,7 @@ const Scout = {
         : Promise.resolve(suppliedQueue),
       this.api('/api/feedback-learning').catch(() => null),
     ]);
+    if (this.opportunitiesGeneration !== generation) return;
     this.state.data = data;
     this.state.cvFiles = cvFiles;
     this.latestScan = latest?.scan || null;

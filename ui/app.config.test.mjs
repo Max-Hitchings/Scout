@@ -33,6 +33,26 @@ function loadScout() {
   return { scout: context.window.Scout, context };
 }
 
+test('an earlier opportunities response cannot replace the latest rendered tracker', async () => {
+  const { scout, context } = loadScout();
+  context.document.getElementById = () => null;
+  const pending = [];
+  scout.api = (url) => url === '/api/opportunities'
+    ? new Promise((resolve) => pending.push(resolve))
+    : Promise.resolve({});
+  const rendered = [];
+  scout.renderJobs = () => rendered.push(scout.state.data.opportunities[0].notes);
+  for (const name of ['renderSpeculative', 'renderShortlist', 'renderPipeline', 'renderAll', 'queueStrongMatches', 'applyWorkspaceConfig']) scout[name] = () => {};
+  const older = scout.loadOpportunities();
+  const newer = scout.loadOpportunities();
+  pending[1]({ opportunities: [{ id: 'synthetic-role', notes: 'Latest saved note' }] });
+  await newer;
+  pending[0]({ opportunities: [{ id: 'synthetic-role', notes: 'Outdated note' }] });
+  await older;
+  assert.equal(scout.state.data.opportunities[0].notes, 'Latest saved note');
+  assert.deepEqual(rendered, ['Latest saved note']);
+});
+
 test('custom CV recommendations are preselected but remain optional', () => {
   const html = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   assert.match(html, /id="cv-option-xyz"[^>]*checked/);
