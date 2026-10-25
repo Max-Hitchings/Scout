@@ -101,6 +101,22 @@ export function invalidateJobIdentity(job) {
   if (job && typeof job === 'object') IDENTITY_CACHE.delete(job);
 }
 
+// Every successful sameUnderlyingJob path shares one of these keys. A fuzzy
+// title match has positive token overlap; blocking cannot invent a match and
+// callers must still apply the complete identity predicate.
+export function jobIdentityBlockingKeys(job) {
+  const identity = jobIdentity(job);
+  return [...new Set([
+    ...identity.references.flatMap(({ url, source, providerId }) => [
+      url && JSON.stringify(['url', url]),
+      source && providerId && JSON.stringify(['reference', source, providerId]),
+    ]),
+    ...identity.titleTokens.map((token) => (
+      identity.company && JSON.stringify(['company-title-token', identity.company, token])
+    )),
+  ].filter(Boolean))];
+}
+
 function locationsCompatible(a, b) {
   if (!a.location || !b.location) return true;
   if (a.location === b.location) return true;
