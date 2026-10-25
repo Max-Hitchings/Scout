@@ -2326,3 +2326,36 @@ test('a scan records its assessment version and a model change assesses an earli
   assert.equal(lastRun().assessment_version.model, 'model-b');
   assert.deepEqual(lastRun().explanations.map((item) => item.lifecycle.reason), ['assessment-change']);
 });
+
+test('persisted source country flows through collection and canonical compensation independently of workspace currency', async () => {
+  const { fetchAdzuna } = await import('../ui/lib/adzuna.mjs');
+  const { normaliseObservation } = await import('../ui/lib/vacancyObservation.mjs');
+  const root = scanRoot();
+  try {
+    const config = loadWorkspaceConfig(root);
+    config.currency = 'EUR';
+    config.locale = 'fr-FR';
+    config.search.salaryMinimum = 50000;
+    config.sources.adzuna.country = 'us';
+    writeWorkspaceConfig(root, config);
+    fs.writeFileSync(path.join(root, '.env'), 'ADZUNA_APP_ID=synthetic-id\nADZUNA_API_KEY=synthetic-key\n');
+    let queried;
+    const collected = await collectScanSources(root, loadWorkspaceConfig(root), {
+      queryPlan: { queries: ['synthetic role'], lanes: [] },
+      fetchAts: async () => ({ jobs: [], available: true }),
+      fetchCafe: async () => ({ jobs: [], available: true }),
+      fetchAdzunaFn: (options) => fetchAdzuna(options, async (url) => {
+        queried = new URL(url);
+        return { ok: true, json: async () => ({ results: [{
+          id: 'synthetic-country-role', title: 'Synthetic Role', company: { display_name: 'Synthetic Company' },
+          salary_min: 60000, salary_max: 70000, redirect_url: 'https://jobs.example.test/country-role',
+        }] }) };
+      }),
+    });
+    const observation = normaliseObservation(collected.sources.adzuna.jobs[0], { sourceName: 'adzuna' });
+    assert.match(queried.pathname, /\/us\/search\//);
+    assert.equal(observation.compensation.value.currency, 'USD');
+    assert.equal(observation.compensation.value.currencyProvenance, 'queried-country');
+    assert.equal(queried.searchParams.has('salary_min'), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
