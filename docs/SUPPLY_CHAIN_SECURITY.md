@@ -74,6 +74,13 @@ secret reference and reject mutable action references throughout it. Updating
 one of those SHAs requires a reviewed dependency change and another
 release-candidate rehearsal.
 
+Allowlisted application and public-source trees omit nested `node_modules`
+directories, including differently cased names. Production dependencies enter a
+release only through the separate top-level dependency staging pass, selected
+from the lockfile. That pass retains required nested production dependencies and
+the existing private-file filters; the staged-tree privacy audit still inspects
+their contents.
+
 Release staging refuses symbolic links for both copied trees and individually
 allowlisted inputs, including a link in any ancestor component, except for the
 single exact DMG layout entry `dmg-root/Applications -> /Applications`. Regular files
