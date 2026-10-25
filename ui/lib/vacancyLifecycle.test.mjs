@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { sameUnderlyingJob } from './jobIdentity.mjs';
 import { vacancyContentFingerprint } from './vacancyCanonical.mjs';
-import { decideVacancyLifecycle, lifecycleRecords, partitionVacanciesForAssessment } from './vacancyLifecycle.mjs';
+import {
+  ASSESSMENT_CHANGE_REASSESS_LIMIT, assessmentVersionOf, decideVacancyLifecycle, lifecycleRecords, partitionVacanciesForAssessment,
+} from './vacancyLifecycle.mjs';
 
 const vacancy = {
   vacancyId: 'vacancy-1',
@@ -220,4 +222,79 @@ test('indexed history lookup picks the same earliest matching decision as compar
   const { skipped, eligible } = partitionVacanciesForAssessment(candidates, history, { profileId: 'profile-current' });
   assert.deepEqual(skipped.map((item) => item.vacancyId), ['vacancy-1', 'by-url', 'by-provider']);
   assert.deepEqual(eligible.map((item) => [item.vacancyId, item.lifecycle.reason]), [['unmatched', 'new-vacancy']]);
+});
+
+const oldVersion = { promptVersion: 'assessment-prompt-v1', assessmentSchemaVersion: 2, provider: 'codex', model: 'model-a' };
+// Job identity ignores digits and one-letter words, so each job needs its own multi-letter name.
+const word = (index) => String.fromCharCode(96 + index).repeat(5);
+const job = (index, extra = {}) => ({
+  vacancyId: `vacancy-${index}`,
+  canonicalUrl: `https://example.test/jobs/${index}`,
+  title: { value: `Role ${word(index)}` },
+  employer: { value: `Employer ${word(index)}` },
+  description: `Own the duties of role ${word(index)}.`,
+  preRankScore: index,
+  ...extra,
+});
+const rejection = (index, extra = {}) => ({
+  ...job(index), outcome: 'below_threshold', profileId: 'profile-current', assessmentVersion: oldVersion, ...extra,
+});
+const partition = (indexes, historyExtra, options) => partitionVacanciesForAssessment(
+  indexes.map((index) => job(index)), indexes.map((index) => rejection(index, historyExtra)),
+  { profileId: 'profile-current', ...options },
+);
+
+test('a changed assessment prompt, schema or model re-assesses an earlier rejection, an unchanged one does not', () => {
+  assert.deepEqual(assessmentVersionOf({
+    promptVersion: 'assessment-prompt-v1', assessmentSchemaVersion: 2, provider: 'codex', model: 'model-a',
+  }), oldVersion);
+  assert.equal(assessmentVersionOf({ promptVersion: 'assessment-prompt-v1' }), null);
+
+  for (const changed of [{ promptVersion: 'assessment-prompt-v2' }, { assessmentSchemaVersion: 3 }, { provider: 'claude' }, { model: 'model-b' }]) {
+    const result = partition([1], undefined, { assessmentVersion: { ...oldVersion, ...changed } });
+    assert.deepEqual(result.eligible.map((item) => item.lifecycle.reason), ['assessment-change'], JSON.stringify(changed));
+  }
+  const same = partition([1], undefined, { assessmentVersion: { ...oldVersion } });
+  assert.deepEqual(same.skipped.map((item) => item.lifecycle.reason), ['unchanged-rejection']);
+  // A rejection recorded before versions were stored has nothing to compare, so it is not re-assessed for this reason.
+  const unrecorded = partition([1], { assessmentVersion: null }, { assessmentVersion: { ...oldVersion, model: 'model-b' } });
+  assert.deepEqual(unrecorded.skipped.map((item) => item.lifecycle.reason), ['unchanged-rejection']);
+  const unknownNow = partition([1], undefined, {});
+  assert.deepEqual(unknownNow.skipped.map((item) => item.lifecycle.reason), ['unchanged-rejection']);
+});
+
+test('an assessment change re-assesses only a bounded number of earlier rejections per scan, strongest first', () => {
+  const indexes = Array.from({ length: 20 }, (_, index) => index + 1);
+  const options = { assessmentVersion: { ...oldVersion, promptVersion: 'assessment-prompt-v2' } };
+
+  const byDefault = partition(indexes, undefined, options);
+  assert.equal(byDefault.eligible.length, ASSESSMENT_CHANGE_REASSESS_LIMIT);
+  assert.equal(ASSESSMENT_CHANGE_REASSESS_LIMIT, 6);
+
+  const bounded = partition(indexes, undefined, { ...options, assessmentChangeLimit: 3 });
+  assert.deepEqual(bounded.eligible.map((item) => [item.vacancyId, item.lifecycle.reason]), [
+    ['vacancy-18', 'assessment-change'], ['vacancy-19', 'assessment-change'], ['vacancy-20', 'assessment-change'],
+  ]);
+  assert.equal(bounded.skipped.length, 17);
+  assert.deepEqual(new Set(bounded.skipped.map((item) => item.lifecycle.reason)), new Set(['assessment-change-deferred']));
+  assert.deepEqual(
+    [bounded.skipped[0].lifecycle.reassess, bounded.skipped[0].lifecycle.skipAssessment],
+    [false, true],
+  );
+  assert.equal(lifecycleRecords(bounded).length, 20);
+});
+
+test('the assessment-change limit does not hold back vacancies that are assessed anyway', () => {
+  const indexes = [1, 2, 3, 4, 5];
+  const options = { assessmentVersion: { ...oldVersion, model: 'model-b' }, assessmentChangeLimit: 1 };
+
+  const kept = partition(indexes, { outcome: 'kept' }, options);
+  assert.deepEqual(kept.eligible.map((item) => item.lifecycle.reason), Array(5).fill('assessment-change'));
+  const rankedAgain = partitionVacanciesForAssessment(
+    indexes.map((index) => job(index, { description: 'The advert was rewritten.' })),
+    indexes.map((index) => rejection(index)),
+    { profileId: 'profile-current', ...options },
+  );
+  assert.deepEqual(new Set(rankedAgain.eligible.map((item) => item.lifecycle.reason)), new Set(['material-change']));
+  assert.equal(rankedAgain.eligible.length, 5);
 });

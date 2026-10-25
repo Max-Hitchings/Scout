@@ -55,10 +55,12 @@ Each ranked vacancy is compared with its earlier decision for the same underlyin
 | `material-change` | The advert content fingerprint differs (wording-only edits are `minor` and do not count) | Yes | Yes |
 | `profile-change`, `legacy-profile-rerank` | The earlier decision used a different or no published profile | Yes | Yes |
 | `scoring-change` | The learning version differs from the one recorded with the decision | Yes | Only if the earlier outcome was not a rejection |
+| `assessment-change` | The assessment prompt, schema, provider or model recorded with the earlier decision differs from this scan's | Only with a scoring change | Yes. An earlier rejection is re-assessed only within the per-scan limit below |
+| `assessment-change-deferred` | As `assessment-change`, for an earlier rejection beyond the per-scan limit | No | No: skipped until a later scan |
 | `unchanged-rejection` | Same advert, profile and learning version, and the earlier outcome was `rejected`, `ignore`, `below_threshold`, `provider_discarded`, `mandatory_unmet` or `hard_exclusion` | No | No: skipped, and the capacity is backfilled by the next ranked vacancy |
 | `unchanged-prior-assessment` | Same advert, profile and learning version; earlier outcome was not a rejection | No | Yes |
 
-A change to the assessment prompt, schema or model does not currently re-assess earlier rejections, because the decision history does not record assessment versions.
+Each scan that assesses vacancies records its assessment version (prompt, schema, provider and model) in its run record. When the version differs, earlier rejections are re-assessed in the background: at most 6 per scan, the highest-ranked first, so a prompt or model change cannot use up assessment capacity. The rest are reported as `assessment-change-deferred` and are picked up by later scans. A rejection recorded before versions were stored has nothing to compare and is not re-assessed for this reason; it is assessed again when its advert, the profile or the learning version changes.
 
 ## Search coverage and health
 

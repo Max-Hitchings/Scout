@@ -25,6 +25,7 @@ import {
   readRejectedVacancyMemory, readVacancyDecisionHistory, verificationCandidates,
 } from '../ui/lib/scanPipeline.mjs';
 import { loadPublishedSearchProfile, migrateSearchProfile } from '../ui/lib/searchProfile.mjs';
+import { assessmentVersionOf } from '../ui/lib/vacancyLifecycle.mjs';
 import { partitionLiveCandidates } from '../ui/lib/advertLiveness.mjs';
 import { isMainModule } from '../ui/lib/mainModule.mjs';
 import { runCvQuality } from '../ui/lib/cvQuality.mjs';
@@ -847,6 +848,7 @@ export async function runScanWith(root, provider, mode, {
       learningPolicy: learningPolicyAtStart,
       decisionHistory: readVacancyDecisionHistory(root),
       rejectionMemory: readRejectedVacancyMemory(root),
+      assessmentVersion: assessmentVersionOf(compatibility),
       limit: DEFAULT_CANDIDATE_LIMIT,
       relevanceThreshold: config.search?.relevanceThreshold ?? config.triage?.checkScore,
     })
@@ -1223,6 +1225,7 @@ export async function runScanWith(root, provider, mode, {
             runId: run.runId,
             discoveryEngine, profileId: publishedProfile?.id || null,
             learningVersionId: learningPolicyAtStart.id,
+            assessmentVersion: assessmentVersionOf(compatibility),
             staleInboxEntries, inboxRechecked,
           }, { run, lease, hooks: mutationHooks });
           result = { ok: true, status: artifacts.run.degraded ? 'degraded' : candidates.length ? 'completed' : 'healthy-empty', scan: artifacts.run, usage };

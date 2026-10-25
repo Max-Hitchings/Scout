@@ -1214,7 +1214,8 @@ export function assessmentCandidatesForSelection(selected) {
 const VACANCY_DECISION_HISTORY_LIMIT = 512;
 const REJECTION_MEMORY_LIMIT = 4096;
 
-function decisionRecord(item, run) {
+// `assessed` is false for a vacancy that never reached the assessment prompt, so it has no assessment version.
+function decisionRecord(item, run, assessed = true) {
   if (!item?.company || !item?.role || !item?.outcome) return null;
   return {
     vacancyId: boundedText(item.vacancyId, 160) || null,
@@ -1235,6 +1236,7 @@ function decisionRecord(item, run) {
       80,
     ),
     assessedAt: boundedText(run.timestamp, 80),
+    assessmentVersion: assessed ? run.assessment_version || null : null,
   };
 }
 
@@ -1301,12 +1303,12 @@ export function readVacancyDecisionHistory(root, { limit = VACANCY_DECISION_HIST
         sourceReferences: item.sourceReferences,
         outcome: item.reason_code || item.assessment_status,
       }));
-    const append = (item, records) => {
-      const record = decisionRecord(item, run);
+    const append = (item, records, assessedItem = true) => {
+      const record = decisionRecord(item, run, assessedItem);
       if (record && records.length < boundedLimit) records.push(record);
     };
     for (const item of [...assessed].reverse()) append(item, reviewedRecords);
-    for (const item of [...preAssessment].reverse()) append(item, preAssessmentRecords);
+    for (const item of [...preAssessment].reverse()) append(item, preAssessmentRecords, false);
     if (reviewedRecords.length >= boundedLimit && preAssessmentRecords.length >= boundedLimit) break;
   }
   if (!reviewedRecords.length) return preAssessmentRecords.slice(0, boundedLimit);
@@ -1369,7 +1371,7 @@ function skippedRecords(skipped) {
 // response order cannot leak into provider-facing identities.
 export function prepareRankedDiscovery({
   sources, profile, tracker = { opportunities: [] }, runId = '', limit = DEFAULT_CANDIDATE_LIMIT,
-  relevanceThreshold, decisionHistory = [], rejectionMemory = [], learningPolicy = null,
+  relevanceThreshold, decisionHistory = [], rejectionMemory = [], learningPolicy = null, assessmentVersion = null,
 } = {}) {
   if (!profile || profile.status !== 'published') throw new Error('ranked discovery requires a published search profile');
   const input = observationInputs(sources);
@@ -1382,7 +1384,7 @@ export function prepareRankedDiscovery({
   const filtered = filterVacancies(vacancies, profile, { learningPolicy });
   const ranked = rankVacancies(filtered.eligible, profile, reviewedHistory, { learningPolicy });
   const lifecycle = partitionVacanciesForAssessment(ranked, [...rejectionMemory, ...decisionHistory], {
-    profileId: profile.id, learningVersionId: learningPolicy?.id || 'learning-baseline',
+    profileId: profile.id, learningVersionId: learningPolicy?.id || 'learning-baseline', assessmentVersion,
   });
   const configuredThreshold = Number(relevanceThreshold ?? profile?.selection?.relevanceThreshold ?? 1);
   const threshold = Number.isFinite(configuredThreshold) ? Math.max(Number.EPSILON, configuredThreshold) : 1;
@@ -1797,6 +1799,7 @@ export function createRankedDiscoveryStages({
   decisionHistory = [],
   rejectionMemory = [],
   learningPolicy = null,
+  assessmentVersion = null,
   limit = DEFAULT_CANDIDATE_LIMIT,
   relevanceThreshold,
 } = {}) {
@@ -1884,7 +1887,7 @@ export function createRankedDiscoveryStages({
       const lifecycle = partitionVacanciesForAssessment(
         priorArtifact.ranked,
         [...rejectionMemory, ...decisionHistory],
-        { profileId: profile.id, learningVersionId: learningPolicy?.id || 'learning-baseline' },
+        { profileId: profile.id, learningVersionId: learningPolicy?.id || 'learning-baseline', assessmentVersion },
       );
       const selection = selectVacancies(lifecycle.eligible, {
         limit,
@@ -2380,7 +2383,7 @@ function buildScanArtifacts(root, {
   assessmentFailures = [],
   livenessSummary = { checked: 0, gone: 0, unverified: 0 }, verificationScoped = false,
   staleInboxEntries = [], inboxRechecked = 0, funnel = null, selection = [], discoveryEngine = 'legacy-discovery', profileId = null,
-  learningVersionId = 'learning-baseline',
+  learningVersionId = 'learning-baseline', assessmentVersion = null,
   ranked = [], selectionDecision = null, runId = null,
   timestamp: requestedTimestamp = null,
 }) {
@@ -2481,6 +2484,7 @@ function buildScanArtifacts(root, {
     adverts_unverified: livenessSummary.unverified, verification_scoped: verificationScoped,
     inbox_rechecked: inboxRechecked, inbox_archived: inboxArchived,
     profile_id: profileId, learning_version_id: learningVersionId,
+    ...(assessmentResult && assessmentVersion ? { assessment_version: assessmentVersion } : {}),
     discovery_engine: discoveryEngine,
     ...(reconciledFunnel ? { funnel: reconciledFunnel } : {}),
     ...(selection_summary ? { selection_summary } : {}),

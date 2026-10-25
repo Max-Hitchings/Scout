@@ -822,6 +822,56 @@ test('an unchanged rejection stays remembered after newer assessments push it ou
   assert.deepEqual(Object.keys(remembered.selection.assessmentSkipped[0]).sort(), ['company', 'lifecycle', 'role', 'vacancyId']);
 });
 
+test('decision history records the assessment version and a version change re-assesses an earlier rejection', () => {
+  const profile = {
+    version: 1, status: 'published', id: 'profile-current',
+    target: { primaryTitles: [{ value: 'Ideal Role', strength: 'strong-preference', provenance: 'explicit' }] },
+    negative: {},
+    compensation: {
+      currency: null, period: 'year', minimum: null, minimumStrength: 'neutral', unknownPolicy: 'include',
+    },
+  };
+  const sources = { ats: { count: 2, jobs: [
+    { company: 'Already Reviewed', title: 'Ideal Role', url: 'https://example.test/rejected', providerId: 'rejected', description: 'Deliver the ideal role responsibilities.' },
+    { company: 'Fresh Candidate', title: 'Ideal Role', url: 'https://example.test/fresh', providerId: 'fresh', description: 'Deliver the ideal role responsibilities.' },
+  ] } };
+  const rejected = prepareRankedDiscovery({
+    sources, profile, tracker: { opportunities: [] }, runId: 'initial', limit: 2,
+  }).ranked.find((item) => item.company === 'Already Reviewed');
+  const version = { promptVersion: 'assessment-prompt-v1', assessmentSchemaVersion: 2, provider: 'codex', model: 'model-a' };
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-assessment-version-'));
+  fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'data', 'scan-runs.jsonl'), `${JSON.stringify({
+    timestamp: '2026-07-01T09:00:00.000Z', profile_id: profile.id, assessment_version: version,
+    reviewed: [{
+      vacancyId: 'vacancy-rejected', company: rejected.company, role: rejected.role, source: 'ats',
+      sourceUrl: rejected.url, contentFingerprint: rejected.contentFingerprint, outcome: 'below_threshold', profileId: profile.id,
+    }],
+    explanations: [{
+      vacancy_id: 'vacancy-unassessed', company: 'Never Assessed', role: 'Ideal Role', source: 'ats',
+      sourceUrl: 'https://example.test/unassessed', reason_code: 'below_threshold', stages: { assessed: false },
+    }],
+  })}\n`);
+
+  const history = readVacancyDecisionHistory(root);
+  assert.deepEqual(history.map((item) => [item.company, item.assessmentVersion]), [
+    [rejected.company, version], ['Never Assessed', null],
+  ]);
+  const memory = readRejectedVacancyMemory(root);
+  assert.deepEqual(memory.map((item) => item.assessmentVersion), [version]);
+
+  const assess = (assessmentVersion) => prepareRankedDiscovery({
+    sources, profile, tracker: { opportunities: [] }, decisionHistory: history, rejectionMemory: memory,
+    assessmentVersion, runId: 'repeat', limit: 2,
+  });
+  const unchanged = assess({ ...version });
+  assert.deepEqual(unchanged.selection.assessmentSkipped.map((item) => item.lifecycle.reason), ['unchanged-rejection']);
+  const changed = assess({ ...version, model: 'model-b' });
+  assert.deepEqual(changed.selection.assessmentSkipped, []);
+  assert.deepEqual(changed.selection.selected.map((item) => item.company).sort(), ['Already Reviewed', 'Fresh Candidate']);
+  assert.deepEqual(changed.selection.lifecycle.map((item) => item.reason), ['assessment-change']);
+});
+
 test('published learning reranks unassessed jobs, reconsiders scoped exclusions and reuses prior decisions', () => {
   const profile = {
     version: 1, status: 'published', id: 'profile-learning-flow',
@@ -1319,7 +1369,7 @@ test('forty zero-keeper candidates produce a bounded sanitised audit without tra
   assert.equal(history[0].outcome, 'provider_discarded');
   assert.match(history[0].contentFingerprint, /^[a-f0-9]{64}$/);
   assert.deepEqual(Object.keys(history[0]).sort(), [
-    'assessedAt', 'company', 'contentFingerprint', 'learningVersionId', 'outcome', 'profileId',
+    'assessedAt', 'assessmentVersion', 'company', 'contentFingerprint', 'learningVersionId', 'outcome', 'profileId',
     'role', 'source', 'sourceReferences', 'url', 'vacancyId',
   ].sort());
 });

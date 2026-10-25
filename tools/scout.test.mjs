@@ -2287,3 +2287,42 @@ test('an unchanged rejection is not assessed again once newer assessments fill t
   assert.equal((await scan(jobs, 'discard')).ok, true);
   assert.deepEqual(assessedUrls, [jobs[0].url, jobs[1].url]);
 });
+
+test('a scan records its assessment version and a model change assesses an earlier rejection again', async () => {
+  const root = scanRoot();
+  enableRankedDiscovery(root);
+  const job = { company: 'Rejected Co', title: 'Ideal Role', url: 'https://example.test/jobs/rejected', providerId: 'rejected', description: 'Deliver the ideal role responsibilities.' };
+  const assessedUrls = [];
+  const scan = (model) => runScanWith(root, 'codex', 'primary', {
+    providerStatusFn: authenticated,
+    model,
+    collectSourcesFn: async () => ({ generatedAt: '2026-07-26T20:00:00Z', queries: [], sources: {
+      ats: { configured: true, status: 'healthy', count: 1, jobs: [job] },
+    } }),
+    runStructuredTurnFn: async ({ prompt, validate }) => {
+      const batch = JSON.parse(prompt.split('\n\n').at(-1)).candidates;
+      assessedUrls.push(...batch.map((item) => item.url));
+      const value = { assessments: batch.map((item) => nuancedAssessment(item.candidateId, { recommendation: 'discard' })) };
+      validate(value);
+      return { value, usage: {} };
+    },
+    checkLivenessFn: async (items) => ({ live: items, removed: [], summary: { checked: items.length, gone: 0, unverified: 0 } }),
+    acquireLockFn: () => ({ ok: true, lock: { token: fixtureToken('assessment-version-test') } }),
+    releaseLockFn: () => ({ ok: true }),
+    onProgress: () => {},
+  });
+  const lastRun = () => JSON.parse(fs.readFileSync(path.join(root, 'data', 'scan-runs.jsonl'), 'utf8').trim().split(/\r?\n/).at(-1));
+
+  assert.equal((await scan('model-a')).ok, true);
+  assert.equal(assessedUrls.length, 1);
+  assert.equal(lastRun().assessment_version.model, 'model-a');
+  assert.deepEqual(Object.keys(lastRun().assessment_version).sort(), ['assessmentSchemaVersion', 'model', 'promptVersion', 'provider']);
+
+  assert.equal((await scan('model-a')).ok, true);
+  assert.equal(assessedUrls.length, 1, 'the same assessment version leaves the rejection alone');
+
+  assert.equal((await scan('model-b')).ok, true);
+  assert.deepEqual(assessedUrls, [job.url, job.url], 'a different model assesses the rejection again');
+  assert.equal(lastRun().assessment_version.model, 'model-b');
+  assert.deepEqual(lastRun().explanations.map((item) => item.lifecycle.reason), ['assessment-change']);
+});

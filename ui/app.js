@@ -1039,6 +1039,7 @@ const Scout = {
       'below-relevance-threshold': 'Its deterministic relevance score was below the configured assessment threshold.',
       'diversity-limit': 'A stronger mix of employers, sources, role families, lanes or locations filled the assessment set.',
       'exploration-replacement': 'A seeded exploration place replaced this deterministic selection.',
+      'assessment-change-deferred': 'The assessment prompt, schema or model changed since its earlier rejection. Scout re-checks only a few earlier rejections per scan, strongest first, so this one waits for a later scan.',
       'unchanged-rejection': 'The advert and profile were unchanged since the previous rejection, so Scout did not repeat the assessment.',
       'unchanged-prior-assessment': 'The advert and profile were unchanged since the previous assessment.',
       'verification-scope': 'This verification pass was limited to vacancies requiring a second assessment.',

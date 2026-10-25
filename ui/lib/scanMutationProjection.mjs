@@ -301,6 +301,17 @@ export function trackerMergeRecipe(currentContent, intendedContent) {
   };
 }
 
+// The prompt, schema, provider and model that produced a scan's assessments, so a later change can be detected.
+function safeAssessmentVersion(value) {
+  const version = {
+    promptVersion: identifier(value?.promptVersion),
+    assessmentSchemaVersion: number(value?.assessmentSchemaVersion),
+    provider: identifier(value?.provider),
+    model: identifier(value?.model),
+  };
+  return Object.values(version).every(Boolean) ? version : null;
+}
+
 function safeRunRecord(record) {
   if ((record?.explanations || []).length > MAX_EXPLANATIONS) {
     throw new Error(`scan explanation capacity exceeded (${record.explanations.length} > ${MAX_EXPLANATIONS})`);
@@ -343,6 +354,7 @@ function safeRunRecord(record) {
     inbox_archived: number(record?.inbox_archived),
     profile_id: identifier(record?.profile_id),
     learning_version_id: identifier(record?.learning_version_id),
+    ...(safeAssessmentVersion(record?.assessment_version) ? { assessment_version: safeAssessmentVersion(record.assessment_version) } : {}),
     discovery_engine: code(record?.discovery_engine, 'legacy-discovery'),
     ...(record?.funnel ? { funnel: safeFunnel(record.funnel) } : {}),
     ...(record?.selection_summary ? { selection_summary: safeSelectionSummary(record.selection_summary) } : {}),
