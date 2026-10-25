@@ -223,6 +223,7 @@ test('a full match outbox cannot prevent authoritative remote-auth failure or pe
     const preflight = await providerPreflight(root, 'codex', 'manual-run', { now: new Date(later), probe: async () => ({ kind: 'local-credentials-present', source: 'manual-preflight' }) });
     assert.equal(preflight.ok, false, 'local credential presence must not erase a remote-auth barrier when alerts are full');
     assert.equal(n.notificationView(n.readNotifications(root)).outbox.filter((item) => item.kind === 'provider').length, 1, 'provider warnings have capacity independent of match history');
+    assert.equal(n.notificationView(n.readNotifications(root)).outbox[0].kind, 'provider', 'a current blocking warning must not wait behind historical matches');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -299,7 +299,7 @@ export function prepareProviderNotificationUnderFence(root, current, record) {
   if (!events.length) return;
   // Superseded transitions are historical; retain the oldest unreported event
   // and newest state when an unavailable notification store spans many changes.
-  while (events.length > MAX_PROVIDER_ALERTS) events.splice(1, 1);
+  while (events.length > MAX_PROVIDER_ALERTS) events.splice(BLOCKING.has(events[0].state) ? 1 : 0, 1);
   const unchanged = existing && JSON.stringify(events) === JSON.stringify(existing.events)
     && state.providerEpisodes[provider]?.intentId !== existing.id;
   const intent = { schemaVersion: 1, id: unchanged ? existing.id : hash(randomUUID()), provider, events };
@@ -386,6 +386,8 @@ export function refreshNotificationDigest(root, config, at = new Date().toISOStr
 
 export function notificationView(input) {
   const state = validateNotifications(input);
+  const activeProviderIds = new Set(Object.entries(state.providerEpisodes).filter(([, value]) => value.state !== null)
+    .map(([name, value]) => hash(`provider:${name}:${value.episode}`)));
   const view = (item) => ({
     ...item,
     title: item.kind === 'provider' ? `${item.provider === 'claude' ? 'Claude' : 'Codex'} provider warning`
@@ -396,6 +398,8 @@ export function notificationView(input) {
   });
   return {
     alerts: state.alerts.filter((item) => item.acknowledgedAt === null).map(view),
-    outbox: state.alerts.filter((item) => item.deliveredAt === null && item.acknowledgedAt === null).map(view),
+    outbox: state.alerts.filter((item) => item.deliveredAt === null && item.acknowledgedAt === null)
+      .sort((left, right) => Number(activeProviderIds.has(right.id)) - Number(activeProviderIds.has(left.id))
+        || right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id)).map(view),
   };
 }
