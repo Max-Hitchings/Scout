@@ -573,6 +573,7 @@ export function registerChatRoutes({
     }
 
     addFilesTouched(chat, r1.filesTouched);
+    delete chat.retry;
     recordHandoff(chat, to, nowIso());
     appendMessage(chat, 'system', `handoff summary:\n${r1.text}`, nowIso());
     try { saveChatFn(repoRoot, id, chat, purpose); } catch (e) {

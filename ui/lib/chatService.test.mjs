@@ -228,6 +228,28 @@ test('a handoff reserves chat admission before asynchronous preflight', async (t
   assert.equal(competing.statusCode, 409);
 });
 
+test('changing provider by handoff invalidates a stale saved resend action', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let calls = 0;
+  const routes = routeFixture(root, {
+    runTurnFn() {
+      calls += 1;
+      return { stop() {}, finished: Promise.resolve(calls === 1
+        ? { ok: false, reasonCode: 'authentication-required', sessionId: 'synthetic-old', filesTouched: [] }
+        : { ok: true, text: 'Summary or new session.', sessionId: 'synthetic-next', filesTouched: [] }) };
+    },
+  });
+  await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'codex', text: 'Keep this request.' }));
+  const retryId = loadChat(root, ID).retry.id;
+  recordProviderHealth(root, 'codex', { kind: 'remote-success', source: 'post-auth' }, { purpose: 'post-auth' });
+  await callRoute(routes['POST /api/chat/handoff'], JSON.stringify({ id: ID }));
+  assert.equal(loadChat(root, ID).retry, undefined);
+  const replay = await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, retryId }));
+  assert.equal(replay.statusCode, 409);
+  assert.equal(calls, 3);
+});
+
 async function callRoute(handler, body, { closeRequest = false } = {}) {
   const req = new EventEmitter();
   const res = new MockResponse();
