@@ -2338,7 +2338,7 @@ test('persisted source country flows through collection and canonical compensati
     config.search.salaryMinimum = 50000;
     config.sources.adzuna.country = 'us';
     writeWorkspaceConfig(root, config);
-    fs.writeFileSync(path.join(root, '.env'), 'ADZUNA_APP_ID=synthetic-id\nADZUNA_API_KEY=synthetic-key\n');
+    fs.writeFileSync(path.join(root, '.env'), ['ADZUNA_APP_ID=example', 'ADZUNA_API_KEY=example', ''].join('\n'));
     let queried;
     const collected = await collectScanSources(root, loadWorkspaceConfig(root), {
       queryPlan: { queries: ['synthetic role'], lanes: [] },
