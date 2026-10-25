@@ -404,3 +404,22 @@ test('activated master CV recovery refuses workspace drift beyond activation tim
   assert.equal(activatedProposalRecovery(dir).available, false);
   assert.throws(() => recoverActivatedProposal(dir, true, { doctorFn: healthyDoctor }), /workspace\.json no longer matches/);
 });
+
+test('generated onboarding instructions use the workspace locale for every proposal', async () => {
+  const dir = root();
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(dir, 'workspace.json'), 'utf8'));
+    config.locale = 'fr-CA';
+    writeWorkspaceConfig(dir, config);
+    let prompt;
+    await createOnboardingProposal(dir, 'codex', {
+      providerStatusFn: status,
+      runStructuredTurnFn: async (options) => {
+        prompt = options.prompt;
+        return run();
+      },
+    });
+    assert.match(prompt, /Create concise profile and CV content using the workspace locale fr-CA/);
+    assert.doesNotMatch(prompt, /UK[- ]English|British English/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
