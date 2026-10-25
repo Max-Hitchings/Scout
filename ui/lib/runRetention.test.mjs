@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
 import {
-  archiveSelectedRuns, assertRunStorageWritable, compactScanQueue, measureRunStorage,
+  archiveSelectedRuns, assertRunStorageWritable, compactRecoverySelections, compactScanQueue, measureRunStorage,
   planRunCleanup,
 } from './runRetention.mjs';
 import { acquireScanLease, currentLeaseOwner, releaseScanLease } from './scanLease.mjs';
@@ -314,6 +314,79 @@ test('legacy scan-input bundles count towards pressure and use reviewed encrypte
     assert.equal(Buffer.from(payload.runs[0].files[0].data, 'base64').toString(), bytes);
     assert.equal(fs.existsSync(file), false);
     assert.equal(measureRunStorage(root).artifacts.bytes, 0);
+  } finally {
+    releaseScanLease(lease);
+  }
+});
+
+test('reviewed cleanup compacts old recovery selections into a verified archive and resumes its receipt', () => {
+  const root = temp();
+  terminalRun(root, 'historical-selections', '2024-01-01T00:00:00.000Z');
+  const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: 'selection-compaction' });
+  try {
+    for (let index = 0; index < 270; index += 1) {
+      selectRecoverableRun([recoveryCandidate('historical-selections', 'complete')], {
+        ...recoveryCompatibility(), promptVersion: `prompt-${index}`,
+      }, { root, lease });
+    }
+    const file = path.join(root, '.scout', 'recovery-selections.jsonl');
+    const before = fs.readFileSync(file, 'utf8');
+    const authority = archiveAuthority(root);
+    const plan = planRunCleanup(root, {
+      now: new Date('2028-01-01T00:00:00.000Z'), keepNewest: 0,
+      selectedRunIds: ['historical-selections'], recoveryDataKey: authority.dataKey,
+    });
+    let interrupted = false;
+    try {
+      archiveSelectedRuns(plan, lease, {
+        afterSelectionReplace() { interrupted = true; throw new Error('simulated compaction receipt crash'); },
+      });
+    } catch (error) {
+      assert.match(error.message, /simulated compaction receipt crash/);
+    }
+    assert.equal(interrupted, true, 'reviewed cleanup must compact the historical selection journal');
+    assert.equal(fs.readFileSync(file, 'utf8').trim().split('\n').length, 256);
+    selectRecoverableRun([], { ...recoveryCompatibility(), promptVersion: 'after-compaction-crash' }, { root, lease });
+    const result = archiveSelectedRuns(plan, lease);
+    assert.equal(result.archivedRuns, 1);
+    assert.equal(fs.readFileSync(file, 'utf8').trim().split('\n').length, 257, 'preserve a valid append after replacement');
+    const receipts = fs.readFileSync(path.join(root, '.scout', 'run-retention.jsonl'), 'utf8')
+      .trim().split('\n').map(JSON.parse).filter((event) => event.type === 'recovery-selections-compacted');
+    assert.equal(receipts.length, 1, 'compaction recovery must not duplicate its receipt');
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, '.scout', 'recovery-selection-compaction.json'), 'utf8'));
+    const archived = verifyReviewedRunArchive(path.join(root, manifest.archiveFile), authority.dataKey);
+    assert.equal(Buffer.from(archived.runs[0].files[0].data, 'base64').toString(), before);
+  } finally {
+    releaseScanLease(lease);
+  }
+});
+
+test('selection compaction retains current terminal dispositions and rechecks the fence before replacement', () => {
+  const root = temp();
+  terminalRun(root, 'preserved-terminal', '2024-01-01T00:00:00.000Z', 'partial');
+  let lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: 'compact-current' });
+  try {
+    const initial = selectRecoverableRun([recoveryCandidate('preserved-terminal', 'partial')], recoveryCompatibility(), { root, lease });
+    for (let index = 0; index < 270; index += 1) {
+      selectRecoverableRun([], { ...recoveryCompatibility(), promptVersion: `prompt-${index}` }, { root, lease });
+    }
+    const file = path.join(root, '.scout', 'recovery-selections.jsonl');
+    const before = fs.readFileSync(file, 'utf8');
+    const authority = archiveAuthority(root);
+    assert.throws(() => compactRecoverySelections(root, lease, {
+      recoveryDataKey: authority.dataKey, beforeReplace() { releaseScanLease(lease); },
+    }), /lease|fence/i);
+    assert.equal(fs.readFileSync(file, 'utf8'), before, 'a stale owner cannot replace the selection journal');
+    lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: 'compact-successor' });
+    selectRecoverableRun([], { ...recoveryCompatibility(), promptVersion: 'after-prepared-compaction' }, { root, lease });
+    const result = compactRecoverySelections(root, lease, { recoveryDataKey: authority.dataKey });
+    assert.equal(result.changed, true);
+    const kept = fs.readFileSync(file, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(kept.length, 258, 'retain recent 256, the current run disposition and the post-intent append');
+    assert.equal(kept.some((record) => record.selectionId === initial.selectionId), true);
+    assert.equal(planRunCleanup(root, {
+      now: new Date('2028-01-01T00:00:00.000Z'), keepNewest: 0, selectedRunIds: ['preserved-terminal'],
+    }).selected.length, 1);
   } finally {
     releaseScanLease(lease);
   }

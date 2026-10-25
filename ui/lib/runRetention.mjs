@@ -33,6 +33,7 @@ const DEFAULT_RESERVE_BYTES = 64 * 1024;
 const RETENTION_INDEX_SCHEMA_VERSION = 1;
 const ARCHIVE_SCHEMA_VERSION = 1;
 const MAX_COMPLETED_QUEUE_COMPACTION_RECEIPTS = 20;
+const RECENT_RECOVERY_SELECTIONS = 256;
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -285,6 +286,14 @@ export function measureRunStorage(root) {
     }
   }
   const queueBytes = queueFileBytes + operationBytes;
+  for (const name of ['recovery-selections.jsonl', 'recovery-failures.jsonl',
+    'recovery-selection-compaction.json', 'run-retention.jsonl', 'run-retention-index.json']) {
+    const file = path.join(path.resolve(root), '.scout', name);
+    if (fs.existsSync(file)) {
+      validatePhysicalWorkspacePath(root, file, 'retention diagnostic storage');
+      runBytes += fs.statSync(file).size;
+    }
+  }
   return {
     runs: { bytes: runBytes, count: inventory.filter((run) => !run.legacyScanInput).length },
     artifacts: { bytes: artifactBytes, count: artifactCount },
@@ -606,13 +615,17 @@ export function archiveSelectedRuns(plan, lease, hooks = {}) {
     throw new Error('A protected archive sink with an unlocked recovery data key is required');
   }
   assertScanLeaseScope(lease, plan.root, lease?.runId);
+  const { operationId, file: operationManifest } = cleanupOperationFile(plan);
+  const completed = currentFence(lease, () => readCleanupOperation(plan.root, operationManifest));
+  if (completed?.status === 'completed') {
+    return completedCleanup(plan, lease, completed, operationManifest, hooks);
+  }
   currentFence(lease, () => assertPlanCurrent(plan, { allowMissing: true }));
   // Prove the supplied key belongs to the persisted recovery header before
   // creating cleanup intent or touching a source.
   const persistedHeader = path.join(plan.root, '.scout-backup', 'v1', 'header.json');
   validatePhysicalWorkspacePath(plan.root, persistedHeader, 'persisted recovery authority');
   assertPersistedRecoveryDataKey(plan.root, plan.recoveryDataKey);
-  const { operationId, file: operationManifest } = cleanupOperationFile(plan);
   let operation = currentFence(lease, () => {
     const existing = readCleanupOperation(plan.root, operationManifest);
     if (existing) {
@@ -763,13 +776,157 @@ export function archiveSelectedRuns(plan, lease, hooks = {}) {
     writeCleanupOperation(plan.root, operationManifest, next);
     return next;
   });
+  return completedCleanup(plan, lease, operation, operationManifest, hooks);
+}
+
+function completedCleanup(plan, lease, operation, operationManifest, hooks) {
+  if (planDigest(plan) !== plan.reviewedSelectionDigest
+    || operation.planDigest !== plan.reviewedSelectionDigest
+    || operation.operationId !== cleanupOperationFile(plan).operationId
+    || operation.runs.some((run) => run.status !== 'deleted')
+    || stableJson(operation.runs.map(({ runId, digest }) => ({ runId, digest })))
+      !== stableJson(plan.selected.map(({ runId, digest }) => ({ runId, digest })))) {
+    throw new Error('completed cleanup conflicts with the reviewed selection');
+  }
+  assertPersistedRecoveryDataKey(plan.root, plan.recoveryDataKey);
+  const archiveFile = validatePhysicalWorkspacePath(plan.root,
+    path.join(plan.root, operation.archiveFile), 'completed reviewed archive');
+  const payload = verifyReviewedRunArchive(archiveFile, plan.recoveryDataKey);
+  if (!archivePayloadMatchesPlan(payload, plan) || payload.archiveId !== operation.archiveId) {
+    throw new Error('completed cleanup archive conflicts with the reviewed selection');
+  }
+  compactRecoverySelections(plan.root, lease, {
+    recoveryDataKey: plan.recoveryDataKey, afterReplace: hooks.afterSelectionReplace,
+  });
   return {
-    archiveFile: written.file,
-    indexFile,
-    archiveId,
-    archivedRuns: operation.runs.filter((run) => run.status === 'deleted').length,
-    operationManifest,
+    archiveFile, indexFile: retentionIndexFile(plan.root), archiveId: operation.archiveId,
+    archivedRuns: operation.runs.length, operationManifest,
   };
+}
+
+function selectionCompactionFile(root) {
+  return path.join(path.resolve(root), '.scout', 'recovery-selection-compaction.json');
+}
+
+function readSelectionCompaction(root) {
+  const file = selectionCompactionFile(root);
+  if (!fs.existsSync(file)) return null;
+  validatePhysicalWorkspacePath(root, file, 'recovery selection compaction');
+  const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const keys = ['afterDigest', 'archiveFile', 'archiveId', 'beforeDigest', 'operationId',
+    'removedRecords', 'schemaVersion', 'status'];
+  if (!value || Object.keys(value).sort().join(',') !== keys.sort().join(',')
+    || value.schemaVersion !== 1 || !['prepared', 'completed'].includes(value.status)
+    || !['afterDigest', 'archiveId', 'beforeDigest', 'operationId'].every((key) => SHA256.test(value[key] || ''))
+    || typeof value.archiveFile !== 'string'
+    || !/^\.scout-backup\/v1\/run-archives\/[a-f0-9]{64}\.json$/.test(value.archiveFile)
+    || !Number.isSafeInteger(value.removedRecords) || value.removedRecords < 1) {
+    throw new Error('recovery selection compaction is invalid');
+  }
+  return value;
+}
+
+function finishSelectionCompaction(root, lease, operation, recoveryDataKey, afterReplace, beforeReplace) {
+  const archiveFile = validatePhysicalWorkspacePath(root,
+    path.join(root, operation.archiveFile), 'recovery selection archive');
+  const archive = verifyReviewedRunArchive(archiveFile, recoveryDataKey);
+  const files = archive.runs?.[0]?.files;
+  const before = Buffer.from(files?.[0]?.data || '', 'base64').toString('utf8');
+  const after = Buffer.from(files?.[1]?.data || '', 'base64').toString('utf8');
+  if (archive.archiveId !== operation.archiveId || archive.reviewedSelectionDigest !== operation.operationId
+    || archive.runs.length !== 1 || archive.runs[0].runId !== 'recovery-selection-history'
+    || !Array.isArray(files) || files.length !== 2
+    || files[0].path !== 'before.jsonl' || files[1].path !== 'after.jsonl'
+    || sha256(before) !== operation.beforeDigest || sha256(after) !== operation.afterDigest
+    || operation.operationId !== sha256(stableJson({ beforeDigest: operation.beforeDigest, afterDigest: operation.afterDigest }))) {
+    throw new Error('recovery selection archive conflicts with its prepared compaction');
+  }
+  const file = path.join(path.resolve(root), '.scout', 'recovery-selections.jsonl');
+  if (typeof beforeReplace === 'function') beforeReplace();
+  currentFence(lease, () => {
+    validatePhysicalWorkspacePath(root, file, 'recovery selection journal');
+    const current = fs.readFileSync(file, 'utf8');
+    // A successor may already have appended valid selections after the crash.
+    // Validate the complete journal and retain that suffix on either side of
+    // the atomic replacement; unrelated replacements still fail closed.
+    readRecoverySelections(root);
+    if (current.startsWith(before)) {
+      atomicWriteFile(file, after + current.slice(before.length), { mode: 0o600 });
+    } else if (!current.startsWith(after)) {
+      throw new Error('recovery selections changed during compaction');
+    }
+    readRecoverySelections(root);
+  });
+  if (typeof afterReplace === 'function') afterReplace();
+  currentFence(lease, () => {
+    appendAuditOnce(root, {
+      schemaVersion: 1, eventId: crypto.randomUUID(), type: 'recovery-selections-compacted',
+      operationId: operation.operationId, recordedAt: new Date().toISOString(),
+      leaseId: lease.leaseId, fencingGeneration: lease.generation,
+      archiveId: operation.archiveId, beforeDigest: operation.beforeDigest,
+      afterDigest: operation.afterDigest, removedRecords: operation.removedRecords,
+    });
+    atomicWriteFile(selectionCompactionFile(root), `${stableJson({ ...operation, status: 'completed' })}\n`, { mode: 0o600 });
+  });
+  return { changed: true, removedRecords: operation.removedRecords, archiveFile };
+}
+
+export function compactRecoverySelections(root, lease, { recoveryDataKey, afterReplace, beforeReplace } = {}) {
+  assertScanLeaseScope(lease, root, lease?.runId);
+  currentFence(lease, () => assertPersistedRecoveryDataKey(root, recoveryDataKey));
+  const pending = currentFence(lease, () => readSelectionCompaction(root));
+  if (pending?.status === 'prepared') {
+    return finishSelectionCompaction(root, lease, pending, recoveryDataKey, afterReplace, beforeReplace);
+  }
+  const records = currentFence(lease, () => readRecoverySelections(root));
+  if (records.length <= RECENT_RECOVERY_SELECTIONS) return { changed: false, removedRecords: 0 };
+  const currentRuns = new Set(runInventory(root).map((run) => run.runId));
+  const newest = new Map();
+  const terminal = new Map();
+  records.forEach((record, index) => {
+    if (currentRuns.has(record.selectedRunId)) newest.set(record.selectedRunId, index);
+    for (const skipped of record.skipped) {
+      if (currentRuns.has(skipped.runId)) {
+        newest.set(skipped.runId, index);
+        terminal.set(skipped.runId, index);
+      }
+    }
+  });
+  const retained = new Set([...newest.values(), ...terminal.values()]);
+  for (let index = Math.max(0, records.length - RECENT_RECOVERY_SELECTIONS); index < records.length; index += 1) retained.add(index);
+  const kept = records.filter((record, index) => retained.has(index));
+  if (kept.length === records.length) return { changed: false, removedRecords: 0 };
+  const file = path.join(path.resolve(root), '.scout', 'recovery-selections.jsonl');
+  const before = fs.readFileSync(file, 'utf8');
+  const after = kept.map(stableJson).join('\n') + '\n';
+  const beforeDigest = sha256(before);
+  const afterDigest = sha256(after);
+  const operationId = sha256(stableJson({ beforeDigest, afterDigest }));
+  const payload = {
+    schemaVersion: 1, archiveId: operationId, reviewedSelectionDigest: operationId,
+    runs: [{ runId: 'recovery-selection-history', digest: beforeDigest,
+      files: [before, after].map((data, index) => ({
+        path: index ? 'after.jsonl' : 'before.jsonl', size: Buffer.byteLength(data),
+        sha256: sha256(data), data: Buffer.from(data).toString('base64'),
+      })) }],
+  };
+  const archive = writeReviewedRunArchive(root, recoveryDataKey, payload, {
+    commitFence: (commit) => currentFence(lease, () => {
+      if (sha256(fs.readFileSync(file)) !== beforeDigest) throw new Error('recovery selections changed before compaction');
+      return commit();
+    }),
+  });
+  const operation = {
+    schemaVersion: 1, status: 'prepared', operationId, beforeDigest, afterDigest,
+    archiveFile: path.relative(root, archive.file).replaceAll('\\', '/'),
+    archiveId: archive.archiveId, removedRecords: records.length - kept.length,
+  };
+  currentFence(lease, () => {
+    if (sha256(fs.readFileSync(file)) !== beforeDigest) throw new Error('recovery selections changed before compaction intent');
+    validatePhysicalWorkspacePath(root, selectionCompactionFile(root), 'recovery selection compaction');
+    atomicWriteFile(selectionCompactionFile(root), `${stableJson(operation)}\n`, { mode: 0o600 });
+  });
+  return finishSelectionCompaction(root, lease, operation, recoveryDataKey, afterReplace, beforeReplace);
 }
 
 function queueEventIds(record) {

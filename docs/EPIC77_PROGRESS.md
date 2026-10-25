@@ -59,3 +59,23 @@ A2 line 50 is now done. These stay open: A10 line 172 (#76, see A), A11 lines 18
 
 ## Appending your own progress
 Work done after this snapshot goes in its own section below, signed with the author or agent and dated. Leave the "What is done" table above as the record of this snapshot.
+
+## 2026-10-25 — retention package (Codex)
+
+- A-1: real recovery selection no longer pins historical terminal skips or a
+  completed recovery forever. Current leases, queue claims, damaged journals and
+  unreceipted mutations remain protected. Reviewed encrypted cleanup retains the
+  selection audit. Bounded selection compaction preserves current dispositions
+  and full encrypted before/after evidence, including crash/successor recovery.
+- A-2: status measurement no longer reads artifact bodies; a synthetic 100 MiB
+  inventory took 2.5 ms with zero artifact body reads. Review/archive comparisons
+  still hash content. Setup/opportunity responses measure scan health once.
+- PROV-1: new diagnostic inputs are private run-owned artifacts. Legacy external
+  inputs count towards pressure and use the existing explicit reviewed archive
+  lifecycle; no silent deletion occurs.
+- Observed RED before fixes: historical terminal cleanup and completed-selection
+  release; mutation/damaged-journal composition; 100 MiB artifact-body read;
+  duplicate per-response inventory; legacy pressure/archive; two actual runtime
+  scan projections; compaction/crash receipt and stale-fence replacement.
+- Full Node and final focused verification are recorded in the package PR.
+  Linux execution only; no live workspace, provider, host or Windows/macOS check.
