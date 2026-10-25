@@ -1140,6 +1140,7 @@ async function handleRead(req, res, url) {
     return sendJson(res, 200, readScanHealth());
   }
   if (req.method === 'GET' && url.pathname === '/api/notifications') {
+    if (!fs.existsSync(WORKSPACE_ROOT)) return sendJson(res, 200, { alerts: [], outbox: [] });
     return sendJson(res, 200, notificationView(readNotifications(WORKSPACE_ROOT)));
   }
   if (req.method === 'GET' && url.pathname === '/api/provider-health') {
@@ -2447,7 +2448,10 @@ for (const [route, action] of [['delivered', 'delivered'], ['acknowledge', 'ackn
     const value = parseBody(body);
     if (!value) return replyJson(res, 400, { error: 'Notification request is invalid.' });
     try { return replyJson(res, 200, markNotification(WORKSPACE_ROOT, value.id, action)); }
-    catch { return replyJson(res, 409, { error: 'Notification could not be updated. Retry when the scan finishes.' }); }
+    catch (error) {
+      if (error?.message === 'notification is unavailable') return replyJson(res, 404, { error: 'Notification is no longer pending.' });
+      return replyJson(res, 409, { error: 'Notification could not be updated. Retry when the scan finishes.' });
+    }
   };
 }
 

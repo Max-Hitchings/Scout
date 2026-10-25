@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "mode": "background",
   "locale": "en-GB",
   "currency": "GBP",
   "timezone": "Europe/London",

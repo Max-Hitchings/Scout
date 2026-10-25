@@ -46,3 +46,22 @@ test('unacknowledged alerts remain visible until the user explicitly acknowledge
   expect(acknowledged).toBe(true);
   await expect(page.getByRole('region', { name: 'Scout notifications' })).toBeHidden();
 });
+
+test('the onboarding conversation asks whether to watch quietly or hunt actively and saves the choice', async ({ page }) => {
+  let saved;
+  await page.route('**/api/setup/config', async (route) => {
+    saved = route.request().postDataJSON();
+    await route.fulfill({ json: { ok: true, config: { ...config, ...saved } } });
+  });
+  await page.goto('/');
+  await page.locator('#scout-settings').click();
+  await page.getByRole('button', { name: 'Search & profile', exact: false }).click();
+  await page.getByRole('button', { name: 'Retune my search', exact: true }).click();
+  for (let index = 0; index < 5; index += 1) await page.getByRole('button', { name: 'Answer', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Are you looking for a new job now?' })).toBeVisible();
+  await page.getByLabel('How should Scout help you?').selectOption('active');
+  await page.getByRole('button', { name: 'Save my answers', exact: true }).click();
+  await expect.poll(() => saved?.mode).toBe('active');
+  expect(saved.locale).toBe('fr-CA');
+  expect(saved.currency).toBe('CAD');
+});
