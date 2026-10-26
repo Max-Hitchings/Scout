@@ -175,8 +175,10 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   checking and login progress do not create failure alerts. Chat, fit assessment
   and onboarding use the production preflight, and commit a settled provider's
   health evidence before releasing its provider-work exclusion. Saved failed
-  chat requests have an explicit, single-use resend action after reconnecting;
-  neither reconnection nor status refresh resends a message automatically.
+  chat requests, including local HTTP authentication failures, have an explicit,
+  single-use resend action after provider recovery; neither recovery nor status
+  refresh resends a message automatically. Local chat retains its provider when
+  reopened because its saved messages supply context without a CLI session.
 - Guided provider login is an owner-only, same-origin, CSRF-protected in-memory
   state machine. It uses only `codex login --device-auth` plus
   `codex login status`, or `claude auth login` with bounded code input when

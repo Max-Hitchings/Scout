@@ -2704,9 +2704,13 @@ const Scout = {
 
   chatRetryHtml() {
     const retry = this.chat?.data?.retry;
-    if (!retry?.id || !['codex', 'claude'].includes(retry.engine)) return '';
-    const name = retry.engine === 'codex' ? 'Codex' : 'Claude';
-    return `<div class="chat-msg system" role="status">Your failed message is saved. Reconnect ${name} in Settings, then resend it when you are ready. Scout never resends automatically.
+    const names = { codex: 'Codex', claude: 'Claude', local: 'Local model' };
+    if (!retry?.id || !Object.hasOwn(names, retry.engine)) return '';
+    const name = names[retry.engine];
+    const recovery = retry.engine === 'local'
+      ? 'Check the model server and API-key file in Settings → AI providers'
+      : `Reconnect ${name} in Settings`;
+    return `<div class="chat-msg system" role="status">Your failed message is saved. ${recovery}, then resend it when you are ready. Scout never resends automatically.
       <button class="act" data-action="resend-chat"${this.chat.streaming ? ' disabled' : ''}>Resend with ${name}</button></div>`;
   },
 

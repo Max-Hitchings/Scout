@@ -382,9 +382,10 @@ export function registerChatRoutes({
     if (!entry) return replyJson(res, 404, { error: 'no such opportunity' });
     let chat;
     try { chat = loadChat(repoRoot, id, purpose); } catch { return replyJson(res, 400, { error: 'Chat history could not be read.' }); }
-    // A failed cold start has no resumable CLI session. Keep its error history,
-    // but expose an unset engine so the other installed CLI remains selectable.
-    const visibleChat = chat && !chat.cliSessionId && !chat.bounded ? { ...chat, engine: null } : chat;
+    // A failed CLI cold start has no resumable session. Keep its error history,
+    // but leave another CLI selectable. Local conversations retain their engine:
+    // their saved messages provide context without a provider-owned session.
+    const visibleChat = chat && chat.engine !== 'local' && !chat.cliSessionId && !chat.bounded ? { ...chat, engine: null } : chat;
     const config = loadWorkspaceConfig(repoRoot);
     const cvOptions = {
       xyz: url.searchParams.get('xyz') !== '0',

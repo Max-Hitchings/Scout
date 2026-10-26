@@ -33,6 +33,13 @@ Configuration/key presence is labelled unverified. Startup, periodic scheduled c
 
 Local chat retains the conversation in the private workspace and sends bounded recent conversation context with each request. It answers questions and produces text drafts; it has no filesystem, tool or CLI session, so it cannot directly edit CV files or offer CLI-session handoff. Structured setup and scans use Scout's existing trusted write path.
 
+Reopening a local conversation keeps its selected provider and saved messages,
+so you can continue without choosing a provider again. If the model server rejects
+authentication, the failed message stays saved with **Resend with Local model**.
+Check the server and API-key file in **Settings → AI providers**, then click the
+resend button when ready. Opening the chat or restoring provider health never
+resends the message automatically. Each saved resend action can run only once.
+
 Run a local scan with `scout scan --provider local --mode primary`. Scheduled jobs accept `"provider": "local"`; a blank scan model uses `ai.local.model`. Exact namespaced model names are supported in the picker, queue, recovery and assessment provenance. Changing the local endpoint or configured model invalidates incompatible queued/recovered scan work.
 
 ## Codex and Claude
