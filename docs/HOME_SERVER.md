@@ -116,9 +116,9 @@ the synthetic result in the release gate. An error, a skipped invocation or a
 machine without a running systemd manager leaves this gate open. Do not remove
 `ProtectSystem`, change read-only mounts or expose sibling paths to pass it.
 
-This procedure has not been executed on a real managed systemd host in this
-change; runtime verification remains pending. Automated tests check its syntax
-and the required unit properties, not live mount isolation.
+Until a successful rehearsal is recorded for the intended host, runtime
+verification remains pending. Automated tests check the procedure syntax and
+required unit properties, not live mount isolation.
 
 ## Schedule scans without a desktop
 
