@@ -8,7 +8,7 @@ import { isMainModule } from '../ui/lib/mainModule.mjs';
 import {
   assertAuditedStage, auditStageBeforePackaging, authorizeArtifactPublication, copyVerifiedReleaseFile,
   createArtifactPublication, finishArtifactPublication, finishAuditedStageCleanup,
-  promoteArtifactPublication, sha256, stageRelease, verifiedReleaseFileDigest,
+  promoteArtifactPublication, sha256, stageRelease, normalisePublicStagePermissions, verifiedReleaseFileDigest,
   verifiedReleaseTreeDigest, writeArtifactChecksums,
 } from './build-release.mjs';
 
@@ -28,7 +28,7 @@ export function artifactNames(version = VERSION) {
 
 export function buildMac({ arch = process.arch, nodeExecutable = process.execPath } = {}) {
   if (process.platform !== 'darwin') throw new Error('macOS packages must be built on macOS');
-  const stage = path.join(ROOT, 'dist', 'release', `macos-${arch}`); stageRelease({ root: ROOT, stageDir: stage, nodeExecutable, platform: 'darwin' });
+  const stage = path.join(ROOT, 'dist', 'release', `macos-${arch}`); const staged = stageRelease({ root: ROOT, stageDir: stage, nodeExecutable, platform: 'darwin' });
   const packageInputs = path.join(stage, 'package-inputs');
   const launcherSource = path.join(packageInputs, 'ScoutLauncher.swift');
   copyVerifiedReleaseFile(path.join(ROOT, 'installer', 'macos', 'ScoutLauncher.swift'), launcherSource, { verifiedRoot: ROOT });
@@ -45,6 +45,7 @@ export function buildMac({ arch = process.arch, nodeExecutable = process.execPat
   const plist = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleName</key><string>Scout</string><key>CFBundleDisplayName</key><string>Scout</string><key>CFBundleIdentifier</key><string>app.scout.local</string><key>CFBundleVersion</key><string>${VERSION}</string><key>CFBundleShortVersionString</key><string>${VERSION}</string><key>CFBundleExecutable</key><string>Scout</string><key>CFBundlePackageType</key><string>APPL</string><key>LSMinimumSystemVersion</key><string>13.0</string><key>NSHighResolutionCapable</key><true/></dict></plist>`;
   fs.writeFileSync(path.join(contents, 'Info.plist'), plist);
   fs.symlinkSync('/Applications', path.join(stage, 'dmg-root', 'Applications'));
+  normalisePublicStagePermissions(stage, { expectedRecord: staged.stageRecord });
   const audit = auditStageBeforePackaging(stage, { authorizationRoot: ROOT });
   const auditedStage = audit.stageDir;
   let primaryError = null;
@@ -94,7 +95,7 @@ export function verifiedMacDmgRootDigest(root) {
 }
 export function buildLinux({ nodeExecutable = process.execPath } = {}) {
   if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('Linux x64 packages must be built on Linux x64');
-  const stage = path.join(ROOT, 'dist', 'release', 'linux-x64'); stageRelease({ root: ROOT, stageDir: stage, nodeExecutable, platform: 'linux' });
+  const stage = path.join(ROOT, 'dist', 'release', 'linux-x64'); const staged = stageRelease({ root: ROOT, stageDir: stage, nodeExecutable, platform: 'linux' });
   const packageInputs = path.join(stage, 'package-inputs');
   const launcherSource = path.join(packageInputs, 'ScoutLauncher.sh');
   copyVerifiedReleaseFile(path.join(ROOT, 'installer/unix/ScoutLauncher.sh'), launcherSource, { verifiedRoot: ROOT });
@@ -116,6 +117,7 @@ export function buildLinux({ nodeExecutable = process.execPath } = {}) {
   if (verifiedReleaseFileDigest(launcherSource, { verifiedRoot: stage }) !== launcherSourceDigest) {
     throw new Error('verified Linux package input changed during staging');
   }
+  normalisePublicStagePermissions(stage, { expectedRecord: staged.stageRecord });
   const audit = auditStageBeforePackaging(stage, {
     authorizationRoot: ROOT,
     sealedDirectoryModes: { 'deb/DEBIAN': 0o755 },

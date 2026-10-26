@@ -143,6 +143,15 @@ path and round-trips a staged file beyond MAX_PATH. Browser jobs cover Chromium,
 Firefox and WebKit on every supported runner. Service-worker lifecycle tests
 explicitly opt in; API-route fixtures block worker routing interference.
 
+Public payload permissions are prepared before the privacy audit, including
+platform-generated metadata. POSIX payload files use `0644`, executables `0755`
+and directories `0755`, independently of the build host's umask. The uninspected
+outer stage remains `0700` (a verified owner-only DACL on Windows), and the audit
+snapshot is private while inspected. Its subsequent read-only seal and complete
+authorization checks still apply. Permission preparation requires the stage's
+creation identity and refuses audited snapshots, shared file inodes, unexpected
+links and special files; it never traverses the macOS Applications link.
+
 F-1 sealed packaging in PR #84 remains a separate gate. A native package-build
 failure blocks the install smoke; never bypass its audit or copy a workaround
 into acceptance to obtain a green check. Hosted logs, rather than a Linux
