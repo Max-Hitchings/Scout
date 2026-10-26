@@ -180,3 +180,33 @@ test('actual cleanup CLI unlocks with a protected existing recovery secret witho
   assert.equal(fs.existsSync(path.join(root, '.scout/runs/synthetic-run-00')), false);
   assert.equal(`${applied.stdout}${applied.stderr}${planned.stdout}`.includes(key.recoveryKey), false);
 });
+
+test('cleanup plan publication uses the canonical checked parent after an alias retarget', async (t) => {
+  const { createRunCleanupReview } = await import('../ui/lib/runCleanup.mjs');
+  const { root, parent } = fixture(t);
+  const privateDirectory = path.join(parent, 'private-plans');
+  const publicApp = path.join(parent, 'synthetic-public-app');
+  const alias = path.join(parent, 'plan-alias');
+  fs.mkdirSync(privateDirectory);
+  fs.mkdirSync(publicApp);
+  fs.symlinkSync(privateDirectory, alias, 'junction');
+  const realpath = fs.realpathSync;
+  let retargeted = false;
+  const replacement = (file, ...options) => {
+    const canonical = realpath(file, ...options);
+    if (!retargeted && String(file) === alias) {
+      retargeted = true;
+      fs.unlinkSync(alias);
+      fs.symlinkSync(publicApp, alias, 'junction');
+    }
+    return canonical;
+  };
+  replacement.native = realpath.native;
+  fs.realpathSync = replacement;
+  t.after(() => { fs.realpathSync = realpath; });
+  createRunCleanupReview(root, { appRoot: publicApp, output: path.join(alias, 'review.json') });
+  fs.realpathSync = realpath;
+  assert.equal(retargeted, true);
+  assert.equal(fs.existsSync(path.join(publicApp, 'review.json')), false, 'private workspace paths must not be written into the application');
+  assert.equal(fs.existsSync(path.join(privateDirectory, 'review.json')), true);
+});
