@@ -281,7 +281,7 @@ const Scout = {
   },
   categoryIds() { return this.categories().map((category) => category.id); },
   categoryLabel(id) { return this.categories().find((category) => category.id === id)?.label || id; },
-  triagePolicy() { return { actionScore: 70, checkScore: 55, ...(this.workspaceConfig?.triage || {}) }; },
+  triagePolicy() { return this.workspaceConfig?.modePolicy?.triage || { actionScore: 70, checkScore: 55, ...(this.workspaceConfig?.triage || {}) }; },
   categoryOf(e) {
     const raw = String(e.category || e.jobCategory || '').toLowerCase();
     const ids = this.categoryIds();
@@ -350,6 +350,8 @@ const Scout = {
   },
 
   async loadOpportunities({ durableRuns: suppliedRuns, durableQueue: suppliedQueue } = {}) {
+    const generation = (this.opportunitiesGeneration || 0) + 1;
+    this.opportunitiesGeneration = generation;
     const [data, cvFiles, latest, durableRuns, durableQueue, feedbackLearning] = await Promise.all([
       this.api('/api/opportunities'),
       this.api('/api/cv'),
@@ -362,6 +364,7 @@ const Scout = {
         : Promise.resolve(suppliedQueue),
       this.api('/api/feedback-learning').catch(() => null),
     ]);
+    if (this.opportunitiesGeneration !== generation) return;
     this.state.data = data;
     this.state.cvFiles = cvFiles;
     this.latestScan = latest?.scan || null;
@@ -372,18 +375,19 @@ const Scout = {
       : { state: 'waiting', requests: [] };
     this.feedbackLearning = feedbackLearning;
     this.applyWorkspaceConfig(this.state.data.workspaceConfig, { render: false });
+    this.renderDiscoveryMode();
     const h = this.state.data.scanHealth;
     const activeRun = this.scanRuns.find((run) => !['complete', 'partial', 'abandoned', 'failed'].includes(run.state));
     const queuedCount = this.scanQueue.requests.filter((request) => request.status === 'queued').length;
     const status = document.getElementById('scan-status');
     if (status && !this.scanRunning) {
-      status.textContent = activeRun
+      this.setScanStatus(activeRun
         ? `${activeRun.label || 'Scan in progress'}${activeRun.assessment?.totalBatches ? ` · batch ${activeRun.assessment.currentBatch} of ${activeRun.assessment.totalBatchesExact ? '' : 'at least '}${activeRun.assessment.totalBatches}` : ''}`
         : queuedCount
         ? `${queuedCount} queued ${queuedCount === 1 ? 'request' : 'requests'}`
         : h?.lastRunAt
         ? `Last scan: ${Number(h.funnel?.assessed ?? h.candidatesFound ?? 0)} assessed · ${Number(h.keepersAdded || 0)} kept`
-        : 'Waiting to scan';
+        : 'Waiting to scan');
       status.dataset.action = h?.lastRunAt ? 'open-scan-result' : '';
       status.tabIndex = h?.lastRunAt ? 0 : -1;
       status.setAttribute('role', h?.lastRunAt ? 'button' : 'status');
@@ -393,7 +397,24 @@ const Scout = {
     this.renderShortlist();
     this.renderPipeline();
     this.renderAll();
-    this.queueStrongMatches();
+    this.loadNotifications();
+  },
+
+  renderDiscoveryMode() {
+    const banner = document.getElementById('discovery-mode-banner');
+    if (!banner) return;
+    const legacy = this.state.data?.discoveryEngine === 'legacy-discovery';
+    banner.classList.toggle('hidden', !legacy);
+    banner.innerHTML = legacy
+      ? '<p><strong>Earlier search settings are active.</strong> Scout can still scan using your earlier setup. It starts ranking the complete pool only after you review and publish your search profile.</p><button class="act" type="button" data-action="review-search-profile">Review search profile</button>'
+      : '';
+  },
+
+  setScanStatus(message) {
+    const status = document.getElementById('scan-status');
+    if (!status) return;
+    status.textContent = message;
+    status.title = message;
   },
 
   async scanNow({ provider } = {}) {
@@ -401,7 +422,7 @@ const Scout = {
     const button = document.getElementById('scan-now');
     this.scanRunning = true;
     if (button) { button.disabled = true; button.textContent = 'Scanning…'; }
-    document.getElementById('scan-status').textContent = 'Scout is searching now…';
+    this.setScanStatus('Scout is searching now…');
     try {
       const response = await fetch('/api/scan', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -412,7 +433,7 @@ const Scout = {
       this.showOperation(result.operation);
       this.watchScanOperation(result.operation.id);
     } catch (error) {
-      document.getElementById('scan-status').textContent = error.message;
+      this.setScanStatus(error.message);
       this.scanRunning = false;
       if (button) { button.disabled = false; button.textContent = 'Scan now'; }
     }
@@ -440,10 +461,10 @@ const Scout = {
         remaining = lowMinutes < 1 ? `about ${highMinutes} min or less remaining` : `about ${lowMinutes}–${highMinutes} min remaining`;
       }
     }
-    status.textContent = operation.status === 'failed'
+    this.setScanStatus(operation.status === 'failed'
       ? `Scan needs attention: ${operation.error || 'unknown error'}`
       : operation.status === 'succeeded' ? 'Scan completed — refreshing results…'
-        : `${operation.phase || 'Scout is searching'} · ${step} · ${elapsed}${remaining ? ` · ${remaining}` : ''}`;
+        : `${operation.phase || 'Scout is searching'} · ${step} · ${elapsed}${remaining ? ` · ${remaining}` : ''}`);
   },
 
   discardBreakdown(scan = this.latestScan || this.state.data?.scanHealth) {
@@ -1074,7 +1095,7 @@ const Scout = {
     const overlay = document.getElementById('scan-result-overlay');
     document.getElementById('scan-result-body').innerHTML = `
       <p><strong>${this.esc(scan.funnel?.assessed ?? scan.candidatesFound)} assessed, ${this.esc(scan.keepersAdded)} kept</strong>${this.discardBreakdown(scan) ? ` — ${this.esc(this.discardBreakdown(scan))}` : ''}.</p>
-      ${scan.automaticBroadened ? '<div class="setup-callout"><strong>Discovery widened automatically</strong><p>Scout ran one broader query pass but kept every approved salary, location, commute, exclusion and evidence gate.</p></div>' : ''}
+      ${scan.automaticBroadened ? '<div class="setup-callout"><strong>Discovery widened automatically</strong><p>Scout ran one broader query pass but kept every approved salary, location, exclusion and evidence gate. Commute preferences guide assessments and dashboard display; they do not filter ranked discovery.</p></div>' : ''}
       ${coverage}
       ${coverageDimensions}
       ${failureReasons}
@@ -2574,10 +2595,25 @@ const Scout = {
     const body = document.getElementById('chat-body');
     if (!body || !this.chat) return;
     body.innerHTML = this.chat.data.messages.map((m) => this.chatBubble(m.role, m.text)).join('')
+      + this.chatRetryHtml()
       + this.cvLinkHtml()
       + this.interviewPrepPackHtml()
       + (this.chat.engine ? '' : this.chatPickerHtml());
     body.scrollTop = body.scrollHeight;
+  },
+
+  chatRetryHtml() {
+    const retry = this.chat?.data?.retry;
+    if (!retry?.id || !['codex', 'claude'].includes(retry.engine)) return '';
+    const name = retry.engine === 'codex' ? 'Codex' : 'Claude';
+    return `<div class="chat-msg system" role="status">Your failed message is saved. Reconnect ${name} in Settings, then resend it when you are ready. Scout never resends automatically.
+      <button class="act" data-action="resend-chat"${this.chat.streaming ? ' disabled' : ''}>Resend with ${name}</button></div>`;
+  },
+
+  resendChat() {
+    const retry = this.chat?.data?.retry;
+    if (!retry?.id || this.chat.streaming) return;
+    return this.sendChat({ retryId: retry.id });
   },
 
   chatNearBottom(body, threshold = 80) {
@@ -2675,19 +2711,22 @@ const Scout = {
     }
   },
 
-  async sendChat() {
+  async sendChat({ retryId = null } = {}) {
     const c = this.chat;
     if (!c || c.streaming) return;
     if (!c.engine) return alert('Pick an engine first.');
     const input = document.getElementById('chat-input');
-    const text = input.value.trim();
+    const retry = retryId ? c.data.retry : null;
+    const text = retryId
+      ? c.data.messages?.[retry?.messageIndex]?.text || ''
+      : input.value.trim();
     if (!text) return;
     c.streaming = true;
     this.setChatScoutState('thinking', 'I’m thinking…');
-    input.value = '';
+    if (!retryId) input.value = '';
     this.setChatBusy(true);
     const body = document.getElementById('chat-body');
-    body.insertAdjacentHTML('beforeend', this.chatBubble('user', text));
+    if (!retryId) body.insertAdjacentHTML('beforeend', this.chatBubble('user', text));
     body.insertAdjacentHTML('beforeend', `<div class="chat-row assistant">${scoutMarkup('explaining', 'scout-chat-avatar')}<div class="chat-msg assistant" id="chat-live">&hellip;</div></div>`);
     this.initScoutSprites(body);
     body.scrollTop = body.scrollHeight;
@@ -2698,7 +2737,7 @@ const Scout = {
       const resp = await fetch('/api/chat/send', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: c.id, purpose: c.purpose, engine: c.engine, model: c.model || null, text, mode: c.mode }),
+        body: JSON.stringify({ id: c.id, purpose: c.purpose, engine: c.engine, model: c.model || null, text, mode: c.mode, ...(retryId ? { retryId } : {}) }),
       });
       const ct = resp.headers.get('content-type') || '';
       if (!resp.ok || !ct.includes('event-stream')) {
@@ -2727,16 +2766,18 @@ const Scout = {
         if (event === 'done') {
           this.setChatScoutState('success', 'Done. Have a look.');
           c.data.messages.push(
-            { role: 'user', text },
+            ...(!retryId ? [{ role: 'user', text }] : []),
             ...(data.updates?.length ? data.updates : [data.text]).filter(Boolean).map((update) => ({ role: 'assistant', text: update })),
           );
+          delete c.data.retry;
           c.data.cliSessionId = data.sessionId;
           if (data.filesTouched) c.data.filesTouched = data.filesTouched;
         }
         if (event === 'error') {
           this.setChatScoutState('warning', 'I hit a problem, but your completed work is safe.');
           terminalError = data.message;
-          c.data.messages.push({ role: 'user', text }, { role: 'system', text: data.message });
+          c.data.messages.push(...(!retryId ? [{ role: 'user', text }] : []), { role: 'system', text: data.message });
+          if (data.retry) c.data.retry = data.retry;
           if (data.sessionId) c.data.cliSessionId = data.sessionId;
           if (data.filesTouched) c.data.filesTouched = data.filesTouched;
         }
@@ -2745,7 +2786,7 @@ const Scout = {
     } catch (e) {
       this.setChatScoutState('warning', 'I couldn’t complete that turn.');
       terminalError = e.message;
-      c.data.messages.push({ role: 'user', text }, { role: 'system', text: e.message });
+      c.data.messages.push(...(!retryId ? [{ role: 'user', text }] : []), { role: 'system', text: e.message });
     }
     c.streaming = false;
     c.mode = null;
@@ -2993,6 +3034,7 @@ const Scout = {
   runAction(element) {
     const { action, id, key, tab, date, index, slug, prefill, prompt, engine } = element.dataset;
     switch (action) {
+      case 'review-search-profile': return window.ScoutSetup?.openSettings?.('search');
       case 'show-discovery': return this.showDiscovery();
       case 'dismiss-discoveries': return this.dismissDiscoveries();
       case 'sort': return this.setSort(key);
@@ -3032,7 +3074,10 @@ const Scout = {
       case 'open-codex-task': return this.openCodexTask();
       case 'copy-codex-task': return this.copyCodexTask();
       case 'close-chat': return this.closeChat();
+      case 'acknowledge-notification': return this.acknowledgeNotification(id);
+      case 'review-notification': this.showTab('jobs'); return this.loadOpportunities();
       case 'send-chat': return this.sendChat();
+      case 'resend-chat': return this.resendChat();
       case 'stop-chat': return this.stopChat();
       case 'pick-engine': return this.pickEngine(engine);
       case 'triage-yes': return this.triageYes(id);
@@ -3193,6 +3238,38 @@ const Scout = {
 
   providerName(provider) { return provider === 'claude' ? 'Claude' : 'Codex'; },
 
+  async loadNotifications() {
+    try {
+      const body = await this.api('/api/notifications');
+      this.renderNotifications(body.alerts || []);
+    } catch {
+      const container = document.getElementById?.('scout-notifications');
+      if (container) {
+        container.classList.remove('hidden');
+        container.textContent = 'Scout notifications could not be loaded. Refresh Scout to retry.';
+      }
+    }
+  },
+
+  renderNotifications(alerts) {
+    const container = document.getElementById?.('scout-notifications');
+    if (!container) return;
+    container.classList.toggle('hidden', alerts.length === 0);
+    container.innerHTML = alerts.map((alert) => `<div class="provider-health-row"><strong>${this.esc(alert.title)}</strong><p>${this.esc(alert.body)}</p><button class="act" type="button" data-action="review-notification">Review in Scout</button> <button class="act" type="button" data-action="acknowledge-notification" data-id="${this.esc(alert.id)}">Acknowledge notification</button></div>`).join('');
+  },
+
+  async acknowledgeNotification(id) {
+    try {
+      const response = await fetch('/api/notifications/acknowledge', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }),
+      });
+      if (!response.ok) throw new Error('notification acknowledgement failed');
+      this.renderNotifications((await response.json()).alerts || []);
+    } catch {
+      document.getElementById?.('scout-notifications')?.insertAdjacentHTML('afterbegin', '<p role="status">The notification is still pending. Retry when the scan finishes.</p>');
+    }
+  },
+
   async loadProviderHealth() {
     let providers;
     try {
@@ -3337,6 +3414,7 @@ const Scout = {
     window.setInterval?.(() => this.refreshSyncStatus(), 5 * 60 * 1000);
     window.setInterval?.(() => this.loadProviderHealth(), 5 * 60 * 1000);
     window.setInterval?.(() => { if (this.state.tab === 'cv') this.refreshLivingCv(); }, 30 * 1000);
+    window.setInterval?.(() => this.loadNotifications(), 60 * 1000);
     window.setInterval?.(() => {
       this.serviceWorkerRegistration?.update?.();
       this.checkUiBuild();

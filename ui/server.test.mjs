@@ -39,6 +39,31 @@ const {
 } = await import('./lib/providerAuthMutation.mjs');
 const { readProviderHealth, recordProviderHealth } = await import('./lib/providerHealth.mjs');
 
+test('real setup status and doctor agree on a persisted remote authentication failure', async () => {
+  const original = providerDetection.detect;
+  const file = path.join(testWorkspace, '.scout', 'provider-health', 'v1', 'codex.json');
+  const prior = fs.existsSync(file) ? fs.readFileSync(file) : null;
+  providerDetection.detect = async () => ({
+    codex: { installed: true, authenticated: true, capabilities: { structuredOutput: true } },
+  });
+  try {
+    seedWorkspace(APP_ROOT, testWorkspace);
+    recordProviderHealth(testWorkspace, 'codex', {
+      kind: 'remote-auth-failure', source: 'provider-operation',
+    }, { purpose: 'manual-run' });
+    const response = await request({ path: '/api/setup/status' });
+    assert.equal(response.status, 200);
+    const status = JSON.parse(response.text);
+    assert.equal(status.providers.codex.authenticated, false);
+    assert.equal(status.doctor.checks.providers.codex.authenticated, false);
+    assert.equal(status.doctor.providerSetupRequired, true);
+  } finally {
+    providerDetection.detect = original;
+    if (prior) fs.writeFileSync(file, prior);
+    else fs.rmSync(file, { force: true });
+  }
+});
+
 test('server startup and periodic provider health use the configured runtime entry points', async () => {
   const config = {
     ai: { provider: 'codex' },
@@ -312,10 +337,70 @@ function request({ method = 'GET', path = '/', headers = {}, body = '' }) {
   });
 }
 
+test('opportunities and setup status reuse one fresh scan-health measurement per response', async () => {
+  seedWorkspace(APP_ROOT, WORKSPACE_ROOT);
+  const runsRoot = path.join(WORKSPACE_ROOT, '.scout', 'runs');
+  fs.mkdirSync(runsRoot, { recursive: true });
+  const originalRead = fs.readdirSync;
+  const originalDetect = providerDetection.detect;
+  providerDetection.detect = async () => ({});
+  let reads = 0;
+  fs.readdirSync = function read(file, ...args) {
+    if (String(file) === runsRoot) reads += 1;
+    return originalRead.call(this, file, ...args);
+  };
+  try {
+    for (const endpoint of ['/api/opportunities', '/api/setup/status']) {
+      reads = 0;
+      const response = await request({ path: endpoint });
+      assert.equal(response.status, 200);
+      assert.equal(reads, 1, `${endpoint} must share the scan-health result with the schedule summary`);
+    }
+  } finally {
+    fs.readdirSync = originalRead;
+    providerDetection.detect = originalDetect;
+  }
+});
+
 const JSON_HEADERS = () => {
   const host = `127.0.0.1:${port}`;
   return { host, origin: `http://${host}`, 'content-type': 'application/json' };
 };
+
+test('notification HTTP flow preserves unacknowledged alerts after desktop delivery and rejects cross-origin acknowledgement', async () => {
+  seedWorkspace(APP_ROOT, testWorkspace);
+  const { notificationFile } = await import('./lib/notifications.mjs');
+  const file = notificationFile(testWorkspace);
+  const notificationFiles = [file, ...['notifications-runtime.json', 'notification-receipts.json', 'provider-notifications.json', 'notification-pending-codex.json', 'notification-pending-claude.json'].map((name) => path.join(testWorkspace, '.scout', name))];
+  const previousNotifications = notificationFiles.map((target) => fs.existsSync(target) ? fs.readFileSync(target) : null);
+  const healthFile = path.join(testWorkspace, '.scout', 'provider-health', 'v1', 'codex.json');
+  const previousHealth = fs.existsSync(healthFile) ? fs.readFileSync(healthFile) : null;
+  try {
+    for (const target of notificationFiles) fs.rmSync(target, { force: true });
+    recordProviderHealth(testWorkspace, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' });
+    const first = await request({ path: '/api/notifications', headers: JSON_HEADERS() });
+    assert.equal(first.status, 200);
+    const body = JSON.parse(first.text);
+    const id = body.alerts.find((item) => item.kind === 'provider' && item.provider === 'codex').id;
+    const crossOrigin = await request({ method: 'POST', path: '/api/notifications/acknowledge', headers: { ...JSON_HEADERS(), origin: 'https://example.invalid' }, body: JSON.stringify({ id }) });
+    assert.equal(crossOrigin.status, 403);
+    const delivered = await request({ method: 'POST', path: '/api/notifications/delivered', headers: JSON_HEADERS(), body: JSON.stringify({ id }) });
+    assert.equal(delivered.status, 200);
+    assert.ok(JSON.parse(delivered.text).alerts.some((item) => item.id === id));
+    assert.equal(JSON.parse(delivered.text).outbox.some((item) => item.id === id), false);
+    const acknowledged = await request({ method: 'POST', path: '/api/notifications/acknowledge', headers: JSON_HEADERS(), body: JSON.stringify({ id }) });
+    assert.equal(acknowledged.status, 200);
+    assert.equal(JSON.parse(acknowledged.text).alerts.some((item) => item.id === id), false);
+    assert.doesNotMatch(first.text, /provider-health:|\.scout|credential|token|\/tmp\//);
+  } finally {
+    if (previousHealth) fs.writeFileSync(healthFile, previousHealth);
+    else fs.rmSync(healthFile, { force: true });
+    notificationFiles.forEach((target, index) => {
+      if (previousNotifications[index]) fs.writeFileSync(target, previousNotifications[index]);
+      else fs.rmSync(target, { force: true });
+    });
+  }
+});
 
 test('provider health banner lists an expired session and "Remind me later" acknowledges it durably', async () => {
   const originalConfig = loadWorkspaceConfig(WORKSPACE_ROOT);
@@ -856,6 +941,7 @@ test('search-profile routes review a complete draft and publish only the current
   const setupStatus = await request({ method: 'GET', path: '/api/setup/status' });
   assert.equal(setupStatus.status, 200);
   assert.equal(JSON.parse(setupStatus.text).searchProfilePublished, false);
+  assert.equal(JSON.parse((await request({ path: '/api/opportunities' })).text).discoveryEngine, 'publication-required');
   const migrated = await request({ method: 'GET', path: '/api/search-profile' });
   assert.equal(migrated.status, 200);
   const migratedState = JSON.parse(migrated.text);
@@ -865,6 +951,14 @@ test('search-profile routes review a complete draft and publish only the current
     'deterministic-derivation',
   );
   assert.equal(fs.existsSync(paths.searchProfilePublished), false);
+
+  const originalTracker = fs.readFileSync(paths.tracker);
+  try {
+    fs.writeFileSync(paths.tracker, JSON.stringify({ opportunities: [{ id: 'synthetic-existing-role' }] }));
+    assert.equal(JSON.parse((await request({ path: '/api/opportunities' })).text).discoveryEngine, 'legacy-discovery');
+  } finally {
+    fs.writeFileSync(paths.tracker, originalTracker);
+  }
 
   const migratedPublication = await request({
     method: 'POST', path: '/api/search-profile/publish', headers: JSON_HEADERS(),
@@ -962,6 +1056,7 @@ test('search-profile routes review a complete draft and publish only the current
   const publishedStatus = await request({ method: 'GET', path: '/api/setup/status' });
   assert.equal(publishedStatus.status, 200);
   assert.equal(JSON.parse(publishedStatus.text).searchProfilePublished, true);
+  assert.equal(JSON.parse((await request({ path: '/api/opportunities' })).text).discoveryEngine, 'ranked-discovery');
   const lanePlan = JSON.parse(fs.readFileSync(paths.searchLanes, 'utf8'));
   assert.equal(lanePlan.profileId, result.published.id);
   assert.ok(lanePlan.lanes.some(({ profileFields }) => (
