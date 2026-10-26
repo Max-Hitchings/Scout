@@ -417,6 +417,14 @@ until the canonical changes are merged and verified.
 | Living CV approval/recovery, editable local-model drafts/PDFs, phone controls and first-run guidance | `friend/standalone-features` | #99 |
 | Windows-only temporary fixture rename contention | `friend/windows-guard-fixture` | #100 |
 | Patched production XML/schema dependencies and a production dependency-audit CI gate | `friend/dependency-hardening` | #101 |
+| Namespaced model assessment history and actual model-change reassessment | `friend/model-provenance` | #103 |
+| Explicit local-provider resend and provider retention when reopening chat | `friend/local-chat-recovery` | #104 |
+| Exact vendor metadata audit coverage for supported native packaging layouts | `friend/native-vendor-audit` | #105 |
+| Authentication/rate-limit status retained with oversized or stalled HTTP error bodies | `friend/local-http-status-truth` | #106 |
+| User mode/model input retained across delayed setup responses | `friend/settings-input-preservation` | #107 |
+| Unsaved draft transitions, busy-save exclusion and stale completion guards | `friend/draft-transition-preservation` | #108 |
+| Deterministic Windows setup-fixture ordering with the owned checkpoint drain | `friend/setup-acceptance-ordering` | #109 |
+| Open phone job cards and unfinished feedback retained while current facts update | `friend/card-refresh-preservation` | #110 |
 
 ### Feature inventory
 
@@ -479,10 +487,11 @@ workspaces; no live account acceptance or private-host deployment is claimed.
 ### Remaining owner boundaries and release gates
 
 - F-1 stays with PR #84's owner; D-1 stays with its separate owner. PR #84 received
-  a review comment without changes to its branch. Current native artifact builds
-  stop before installation at the F-1 privacy-authorised snapshot check. The
-  fresh-install harness exists, but installation/onboarding/uninstall success
-  must not be inferred while that gate fails.
+  a review comment without changes to its branch. Earlier native artifact builds
+  stopped before installation at the F-1 privacy-authorised snapshot check.
+  Final-head packaging findings and their repairs are also tracked on PR #92
+  and PR #85. The fresh-install harness exists, but installation/onboarding/
+  uninstall success must not be inferred until every packaging gate passes.
 - Canonical integration merges require upstream write access. Main must receive
   only the normal merge of PR #85 after a clean final independent review, every
   OS/browser/native job, full Node/process acceptance and the strict privacy

@@ -160,8 +160,9 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   active matches cleared by a switch to background watch. They never rewrite
   the scan's receipted notification target. Windows tray delivery polls
   only local endpoints and acknowledges delivery separately from dashboard
-  acknowledgement. No outbound notification service is configured. See
-  [Search modes and alerts](SEARCH_MODES_AND_ALERTS.md).
+  acknowledgement. Outbound notifications are off by default; an owner can
+  explicitly enable the [optional headless hook](HOME_SERVER.md#optional-outbound-notifications).
+  See [Search modes and alerts](SEARCH_MODES_AND_ALERTS.md).
 - Device-local provider health uses `checking`, `ready`,
   `credentials-present-unverified`, `sign-in-required`, `login-in-progress`,
   `network-unavailable`, `rate-limited`, `cli-update-required` and
