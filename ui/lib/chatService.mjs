@@ -1,3 +1,4 @@
+import { runLocalTurn } from './localProvider.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,6 +32,7 @@ import {
 export const ENGINES = {
   claude: { build: buildClaudeArgs, parse: parseClaudeLine },
   codex: { build: buildCodexArgs, parse: parseCodexLine },
+  local: { build: () => ({}), parse: () => null },
 };
 
 const running = new Map(); // opportunity id -> { stop() }
@@ -244,17 +246,33 @@ export function registerChatRoutes({
   function engineStatus(engine, modelOverride = null) {
     const config = loadWorkspaceConfig(repoRoot);
     assertProviderAuthIdleFn(repoRoot, engine);
-    const status = providerStatusFn(engine);
+    const status = providerStatusFn(engine, { local: config.ai?.local, root: repoRoot });
     if (!status.installed || !status.authenticated) throw new Error(`${engine} CLI is not installed and signed in`);
     return { config, status, model: modelOverride || modelForProvider(config, engine) };
   }
 
   function engineBuild(engine, resumeId, modelOverride = null) {
     const { status, model } = engineStatus(engine, modelOverride);
+    if (engine === 'local') return { localStatus: status, model };
     return ENGINES[engine].build(resumeId, {
       model, command: status.executable, env: status.env,
       ...(engine === 'codex' ? { reasoningEffort: 'medium' } : {}),
     });
+  }
+  function startChatProviderTurn(engine, { localStatus, ...options }) {
+    return engine === 'local' ? runLocalTurn({ ...options, status: localStatus }) : runTurnFn(options);
+  }
+  function localConversation(chat, latest) {
+    const prior = [];
+    let characters = latest.length;
+    for (const message of [...(chat.messages || [])].reverse()) {
+      if (!['user', 'assistant'].includes(message.role)) continue;
+      const content = String(message.text || '');
+      if (characters + content.length > 256_000 || prior.length >= 40) break;
+      prior.unshift({ role: message.role, content });
+      characters += content.length;
+    }
+    return [...prior, { role: 'user', content: latest }];
   }
   function turnStartMessage(error, fallback) {
     return error?.reasonCode === 'provider-auth-in-progress'
@@ -478,7 +496,7 @@ export function registerChatRoutes({
     try { chat = loadChat(repoRoot, id, purpose); } catch { return replyJson(res, 400, { error: 'Chat history could not be read.' }); }
     if (!chat || !chat.cliSessionId) return replyJson(res, 400, { error: 'no conversation to hand off yet' });
     const from = chat.engine;
-    if (!ENGINES[from]) return replyJson(res, 400, { error: 'saved chat engine must be claude or codex' });
+    if (!ENGINES[from] || from === 'local') return replyJson(res, 400, { error: 'saved chat engine must be claude, codex or local' });
     const to = from === 'claude' ? 'codex' : 'claude';
 
     sseStart(res);
@@ -630,7 +648,7 @@ export function registerChatRoutes({
     let chat;
     try { chat = loadChat(repoRoot, id, purpose); } catch { return replyJson(res, 400, { error: 'Chat history could not be read.' }); }
     const engine = chat && chat.cliSessionId ? chat.engine : b.engine;
-    if (!ENGINES[engine]) return replyJson(res, 400, { error: 'engine must be claude or codex' });
+    if (!ENGINES[engine]) return replyJson(res, 400, { error: 'engine must be claude, codex or local' });
     // The model is locked for the same reason the engine is: a resumed CLI
     // session is already bound to the model it started with.
     const requestedModel = b.model === null || b.model === undefined ? null : String(b.model).trim() || null;
@@ -668,13 +686,18 @@ export function registerChatRoutes({
     let lifecycleError = null;
     try {
       const execution = await runEditableProviderTurn(id, 'chat-edit', () => {
-        turn = runTurnFn({
+        const prompt = purpose === 'interview-prep'
+          ? `${selectedEntryContext(entry)}\n\n${interviewPrepAgentPrompt(entry, text)}`
+          : `${selectedEntryContext(entry)}\n\nUser request:\n${text}`;
+        const localContext = engine === 'local' ? JSON.stringify({
+          profile: boundedFile(path.join('profile', 'context.md')),
+          calibration: boundedFile(path.join('profile', 'calibration.md')),
+          masterCv: boundedFile(path.join('cv', 'master-cv.md')),
+        }) : '';
+        turn = startChatProviderTurn(engine, {
           ...built,
-          prompt: entry.id === ONBOARDING_CHAT_ID
-            ? text
-            : purpose === 'interview-prep'
-              ? `${selectedEntryContext(entry)}\n\n${interviewPrepAgentPrompt(entry, text)}`
-              : `${selectedEntryContext(entry)}\n\nUser request:\n${text}`,
+          ...(engine === 'local' ? { messages: localConversation(chat, `${localContext}\n\n${prompt}`) } : {}),
+          prompt,
           cwd: repoRoot,
           parseLine: ENGINES[engine].parse,
           onEvent: (ev) => {

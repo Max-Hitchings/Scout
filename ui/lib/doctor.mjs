@@ -36,7 +36,7 @@ export function doctor(workspaceRoot, {
   const typst = typstResolver({ appRoot });
   checks.git = { ok: git.available, ...git, optional: true };
   checks.typst = { ok: typst.available, ...typst, optional: false };
-  checks.providers = providers || providerDetector();
+  checks.providers = providers || providerDetector({ local: checks.config.value?.ai?.local, root: workspaceRoot });
   const env = { ...loadEnv(workspaceRoot), ...process.env };
   checks.adzuna = { ok: !!(env.ADZUNA_APP_ID && env.ADZUNA_API_KEY), optional: true };
   const providerReady = Object.values(checks.providers).some((p) => p.installed && p.authenticated);
@@ -54,7 +54,7 @@ function publicCheck(check) {
 export function publicDoctor(result) {
   const checks = result?.checks || {};
   const providers = {};
-  for (const provider of ['codex', 'claude']) {
+  for (const provider of ['codex', 'claude', 'local']) {
     const value = checks.providers?.[provider];
     if (!value) continue;
     providers[provider] = {

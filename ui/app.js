@@ -1,3 +1,4 @@
+import { isSafeModelId } from './lib/modelIdentifier.mjs?v=__SCOUT_UI_BUILD__';
 import { createChatDrawerState, reduceChatDrawer } from './lib/chatDrawerState.mjs?v=__SCOUT_UI_BUILD__';
 import { openCodexTask as codexTaskLaunchView } from './lib/codexDeepLink.mjs?v=__SCOUT_UI_BUILD__';
 import { DURABLE_RUN_STATES, TERMINAL_RUN_STATES } from './lib/durableRunStates.mjs?v=__SCOUT_UI_BUILD__';
@@ -2211,7 +2212,7 @@ const Scout = {
   },
 
   engineCardHtml(engine, info) {
-    const name = engine[0].toUpperCase() + engine.slice(1);
+    const name = engine === 'local' ? 'Local model' : engine[0].toUpperCase() + engine.slice(1);
     const models = info?.models || [];
     const selected = this.enginePicks?.[engine] ?? '';
     const effective = info?.effectiveModel || {
@@ -2226,7 +2227,7 @@ const Scout = {
       : effective.known ? `Provider default — ${effective.label}` : 'Provider default — model unknown';
     const option = (value, label, { disabled = false } = {}) =>
       `<option value="${this.esc(value)}" ${disabled ? 'disabled' : ''} ${String(selected) === String(value) ? 'selected' : ''}>${this.esc(label)}</option>`;
-    const catalogueLabel = info?.catalogue?.state === 'refreshed'
+    const catalogueLabel = engine === 'local' ? 'Your configured model · text chat' : info?.catalogue?.state === 'refreshed'
       ? 'refreshed catalogue'
       : 'bundled fallback · availability may be unknown';
     const modelLabel = (model) => [
@@ -2247,7 +2248,7 @@ const Scout = {
           ${option('__other__', 'Other…')}
         </select>
       </label>
-      <input class="engine-model-custom ${selected === '__other__' ? '' : 'hidden'}" data-engine-model-custom="${this.esc(engine)}" type="text" placeholder="Exact model id" maxlength="128" pattern="[A-Za-z0-9._:\-]{1,128}">
+      <input class="engine-model-custom ${selected === '__other__' ? '' : 'hidden'}" data-engine-model-custom="${this.esc(engine)}" type="text" placeholder="Exact model id" maxlength="128" pattern="[A-Za-z0-9._:/\-]{1,128}">
       <div class="engine-model-spend">${this.modelSpendHtml(engine, info?.usage, selected)}</div>
       ${unavailableExplanation}
       <div class="engine-model-status meta" role="status" aria-live="polite"></div>
@@ -2263,7 +2264,7 @@ const Scout = {
     return `<div class="chat-picker">
       <div class="label">choose an engine and model for ${onboarding ? 'setup' : prep ? 'interview prep' : 'this job'}</div>
       <div class="engine-cards">
-        ${['claude', 'codex'].map((engine) => this.engineCardHtml(engine, engines?.[engine])).join('')}
+        ${['claude', 'codex', 'local'].map((engine) => this.engineCardHtml(engine, engines?.[engine])).join('')}
       </div>
       ${engines ? '' : engineSlot?.status === 'error'
         ? '<p class="meta" role="status">Model choices unavailable. Provider defaults and safe custom IDs remain available.</p>'
@@ -2567,7 +2568,7 @@ const Scout = {
       return;
     }
     const model = this.selectedEngineModel(engine);
-    if (selection === '__other__' && !/^[A-Za-z0-9._:-]{1,128}$/.test(String(model || ''))) {
+    if (selection === '__other__' && !isSafeModelId(model)) {
       if (status) status.textContent = 'Enter a safe exact model ID.';
       return;
     }
@@ -3120,7 +3121,7 @@ const Scout = {
     banner.append(actions);
   },
 
-  providerName(provider) { return provider === 'claude' ? 'Claude' : 'Codex'; },
+  providerName(provider) { return provider === 'local' ? 'Local model' : provider === 'claude' ? 'Claude' : 'Codex'; },
 
   async loadProviderHealth() {
     let providers;

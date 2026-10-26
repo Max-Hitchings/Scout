@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFile } from './atomicWrite.mjs';
 import { doctor } from './doctor.mjs';
-import { loadWorkspaceConfig, validateWorkspaceConfig, workspacePaths } from './workspace.mjs';
+import { loadWorkspaceConfig, modelForProvider, validateWorkspaceConfig, workspacePaths } from './workspace.mjs';
 import { providerStatus } from './providers.mjs';
 import { runStructuredTurn } from './structuredTurn.mjs';
 import { recordProviderResultHealth } from './providerHealth.mjs';
@@ -120,7 +120,7 @@ function readActivationIntent(root) {
     || Object.keys(intent).sort().join('\0') !== keys.sort().join('\0')
     || intent.schemaVersion !== 1
     || typeof intent.proposalId !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(intent.proposalId)
-    || !['codex', 'claude'].includes(intent.provider)
+    || !['codex', 'claude', 'local'].includes(intent.provider)
     || Number.isNaN(Date.parse(intent.activatedAt || ''))
     || intent.backupDir !== expectedBackup
     || !exactMap(intent.existed, (value) => typeof value === 'boolean')
@@ -349,7 +349,7 @@ export async function createOnboardingProposal(root, provider, {
     'Never invent or infer a fact. Every factual output item must cite one or more supplied evidence IDs.',
     'Create concise UK-English profile and CV content, a 100-point rubric, mandatory gates, and distinct search lanes.',
     'Return only the required schema. Do not access files, run commands, browse, activate changes, apply for jobs, or send outreach.',
-    JSON.stringify({ config, evidence: input.evidence }),
+    JSON.stringify({ config: { ...config, ai: { provider: config.ai?.provider } }, evidence: input.evidence }),
   ].join('\n\n');
   onProgress({ phase: `Generating proposal with ${provider}`, current: 2, total: 4 });
   const observeProviderResult = async (result) => {
@@ -370,10 +370,10 @@ export async function createOnboardingProposal(root, provider, {
       release: releaseProviderWorkFn,
     });
     assertProviderAuthIdleFn(root, provider);
-    const status = providerStatusFn(provider);
+    const status = providerStatusFn(provider, { local: config.ai?.local, root });
     const operation = runStructuredTurnFn({
       provider, status, schema: ONBOARDING_SCHEMA, prompt,
-      model: config.ai?.provider === provider ? config.ai?.model : null,
+      model: modelForProvider(config, provider),
       validate: (value) => validateOnboardingProposal(value, input.evidence), maxInputTokens: 60_000,
     });
     const stopForAbort = () => operation.stop?.();
@@ -456,7 +456,7 @@ export function activateOnboardingProposal(root, proposalId, confirmed, {
   if (confirmed !== true) throw new Error('explicit proposal confirmation is required');
   const proposalPreview = readOnboardingProposal(root);
   const providerHealth = doctorFn === doctor && proposalPreview?.provider
-    ? providerStatus(proposalPreview.provider)
+    ? providerStatus(proposalPreview.provider, { local: loadWorkspaceConfig(root).ai?.local, root })
     : null;
   return withWorkspaceMutationAuthority(root, {
     kind: 'onboarding',
