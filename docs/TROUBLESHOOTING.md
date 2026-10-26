@@ -1,5 +1,27 @@
 # Troubleshooting
 
+## First-time setup is confusing
+
+Use the short [Getting started](GETTING_STARTED.md) walkthrough. Background watch is the quiet default; automatic scanning stays off until you enable a schedule. Language, currency and time zone are editable suggestions from the browser. Adzuna is optional and requires a chosen country; leave it off if your country is not supported. Existing workspace settings are preserved when you upgrade.
+
+## Living CV has changed or cannot be read
+
+Open **CV → Living CV → Check for changes**. The source path belongs to the computer running Scout. Check that the file exists, is readable by Scout, is outside the workspace and is Markdown or JSON containing only a `markdown` string. It must contain 500 bytes to 256 KiB of CV text. Scout keeps the saved CV if the source disappears, is incomplete or cannot be parsed.
+
+Review every added and removed line, tick the confirmation and approve the exact diff. If either file changed during review, refresh and review again. Save or discard unsaved editor changes first; retry after an active scan finishes. A damaged version digest fails closed: restore that version from your private backup, without editing the digest or deleting the only copy. See [Living CV](LIVING_CV.md) for history limits and rebuilding your profile.
+
+If an interrupted approval needs recovery, choose **Check for changes** again after any scan finishes. Scout can complete an unchanged approved replacement automatically. A post-crash edit is preserved and blocks automatic recovery; keep a private copy of that edit, restore the affected CV/configuration files from the approved version or a consistent private backup, then retry. Keep `cv/living-cv-approval.json` until recovery finishes; deleting it would discard the recovery boundary.
+
+## A cover-letter PDF is unavailable or stale
+
+Select the cover-letter draft in **CV**, save it, then choose **render PDF**. Cover letters use the same bundled Typst runtime as CVs and are always labelled **DRAFT**. An edit invalidates the old PDF until it is rendered again. If rendering fails, Scout keeps the previous file and shows the failure; repair or reinstall Scout if its Typst runtime is missing. Scout never sends the draft.
+
+If a local-model chat only returns text, use **Create reviewed CV draft** or **Create reviewed letter draft** in the CV library. Local models do not have file tools. The reviewed flow selects existing CV facts, lets you edit them, and requires confirmation before saving. If a preview expires or the CV/job/draft changes, generate it again. A source above 96 KiB or 128 evidence sections must be shortened before this bounded selection flow can run.
+
+## Feedback did not change the order of jobs
+
+Feedback stays with the job unless you request a ranking suggestion. Open **Settings → Feedback & learning**, inspect the pending suggestion and publish it explicitly. The effect applies to future deterministic ranking; historical assessment evidence remains unchanged. Undo restores the previous version; **Reset all learned ranking changes** restores your published search preferences and keeps the feedback history.
+
 Start with `scout doctor --workspace PATH`. Keep error reports synthetic and never attach a real workspace, `.env`, CV or provider log.
 
 ## Scout cannot find the workspace

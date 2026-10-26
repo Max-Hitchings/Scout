@@ -21,6 +21,7 @@ import { loadWorkspaceConfig, modelForProvider } from './workspace.mjs';
 import { detectProviderModelCataloguesAsync, providerFailureClassification, providerLocalHealthSignal, providerStatus } from './providers.mjs';
 import { runStructuredTurn } from './structuredTurn.mjs';
 import { withWorkspaceMutationAuthorityAsync } from './workspaceMutationAuthority.mjs';
+import { assertLivingCvReady } from './livingCv.mjs';
 import { providerPreflight, recordProviderResultHealth } from './providerHealth.mjs';
 import {
   acquireProviderWork, assertProviderAuthIdle, createProviderWorkSupervisor,
@@ -213,6 +214,7 @@ export function registerChatRoutes({
     const result = await withWorkspaceMutationAuthorityAsyncFn(repoRoot, {
       kind: 'chat-provider', phase,
     }, async ({ coordinator }) => {
+      assertLivingCvReady(repoRoot);
       let childOperation = coordinator.beginChild(phase);
       try {
         turn = start();
@@ -252,6 +254,7 @@ export function registerChatRoutes({
   // A conversation may pin its own model. Without one it follows the provider
   // default from settings, so existing chats keep working unchanged.
   async function engineStatus(engine, modelOverride = null) {
+    assertLivingCvReady(repoRoot);
     const config = loadWorkspaceConfig(repoRoot);
     assertProviderAuthIdleFn(repoRoot, engine);
     const status = providerStatusFn(engine, { local: config.ai?.local, root: repoRoot });
@@ -484,6 +487,8 @@ export function registerChatRoutes({
     if (!accepting) return replyJson(res, 503, { error: 'Scout is shutting down' });
     const b = parseBody(body);
     if (!b) return replyJson(res, 400, { error: 'bad json' });
+    try { assertLivingCvReady(repoRoot); }
+    catch { return replyJson(res, 409, { error: 'Recover the pending CV approval before starting chat or fit assessment.' }); }
     const id = b.id || '';
     if (pendingSends.has(id)) return replyJson(res, 409, { error: 'a turn is already running for this job' });
     const pending = { cancelled: false };
@@ -843,6 +848,7 @@ export function registerChatRoutes({
     let providerWork;
     let lifecycleError = null;
     try {
+      assertLivingCvReady(repoRoot);
       providerWork = superviseProviderWork(engine);
       const { status, model } = await engineStatus(engine);
       if (!accepting || pending.cancelled) throw Object.assign(new Error('Turn stopped.'), { reasonCode: 'stopped' });
@@ -850,6 +856,7 @@ export function registerChatRoutes({
         consumeChatRetry(repoRoot, id, retryId);
         delete chat.retry;
       }
+      assertLivingCvReady(repoRoot);
       const context = {
         selectedOpportunity: JSON.parse(selectedEntryContext(entry).split('\n').slice(1).join('\n')),
         profile: boundedFile(path.join('profile', 'context.md')),
@@ -863,6 +870,7 @@ export function registerChatRoutes({
       ].join('\n\n');
       let result;
       try {
+        assertLivingCvReady(repoRoot);
         operation = runStructuredTurnFn({
           provider: engine, status, schema: FIT_SCHEMA, prompt, model, maxInputTokens: 50_000,
         });

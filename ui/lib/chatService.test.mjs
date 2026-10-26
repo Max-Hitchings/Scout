@@ -59,6 +59,24 @@ function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'scout-chat-service-'));
 }
 
+test('pending CV approval blocks ordinary chat and fit assessment before any provider call', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'cv'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'cv/living-cv-approval.json'), '{}');
+  let calls = 0;
+  const routes = routeFixture(root, {
+    runTurnFn() { calls++; return { stop() {}, finished: Promise.resolve({ ok: true, text: 'Synthetic', filesTouched: [] }) }; },
+    runStructuredTurnFn() { calls++; return Promise.resolve({ ok: true, value: {} }); },
+  });
+  for (const mode of [undefined, 'fit-assessment']) {
+    const response = await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'codex', mode, text: 'Review this role using the CV.' }));
+    assert.equal(response.statusCode, 409);
+    assert.match(response.text(), /CV.*recover|recover.*CV/i);
+  }
+  assert.equal(calls, 0);
+});
+
 function routeFixture(root, overrides = {}) {
   const routes = {};
   registerChatRoutes({
@@ -932,6 +950,7 @@ test('tracker read failures do not expose private diagnostic details at the API 
 
 test('a CV writing turn triggers installed-app quality validation when evidence exists', { concurrency: false }, async () => {
   const root = tmpRoot();
+  writeWorkspaceConfig(root, mergeWorkspaceDefaults({ locale: 'en-NZ' }));
   const app = path.join(root, 'applications', 'acme-role-2026-07');
   fs.mkdirSync(app, { recursive: true });
   fs.writeFileSync(path.join(app, 'cv.typ'), '#show: cv.with(name: "Example")\n');
@@ -944,7 +963,7 @@ test('a CV writing turn triggers installed-app quality validation when evidence 
       runCvQualityFn: (repoRoot, slug, options) => qualityCalls.push({ repoRoot, slug, options }),
     });
     await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'claude', text: 'hello' }));
-    assert.deepEqual(qualityCalls, [{ repoRoot: root, slug: 'acme-role-2026-07', options: { locale: 'en-GB' } }]);
+    assert.deepEqual(qualityCalls, [{ repoRoot: root, slug: 'acme-role-2026-07', options: { locale: 'en-NZ' } }]);
     const saved = loadChat(root, ID);
     assert.ok(saved.filesTouched.includes('applications/acme-role-2026-07/cv-quality.json'));
     assert.ok(saved.filesTouched.includes('applications/acme-role-2026-07/cv.pdf'));

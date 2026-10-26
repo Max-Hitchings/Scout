@@ -473,10 +473,17 @@
       gap: 16px;
       align-items: start;
     }
+    #living-cv-panel { margin-bottom: 18px; min-width: 0; overflow-wrap: anywhere; }
+    .cv-diff, .cv-version-text { max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: monospace; border: 1px solid var(--line); padding: 10px; margin: 12px 0; }
+    .cv-diff-added { background: var(--good-bg); }
+    .cv-diff-removed { background: var(--warn-bg); }
+    .job-feedback { padding: 14px; border-top: 1px solid var(--line); display: grid; gap: 10px; min-width: 0; }
+    .job-feedback label { display: grid; gap: 4px; min-width: 0; }
+    .job-feedback input, .job-feedback select, .job-feedback textarea { width: 100%; max-width: 100%; box-sizing: border-box; padding: 10px; font: inherit; }
     .cv-sidebar .act { display: block; width: 100%; margin: 4px 0; text-align: left; }
     .cv-library-head { display:flex; gap:12px; align-items:center; justify-content:space-between; margin-bottom:14px; }
     .cv-library-head h2 { margin:0; }
-    .cv-create-panel { display:flex; gap:8px; align-items:end; padding:12px; margin-bottom:14px; border:1px solid var(--line); border-radius:var(--radius-card); background:var(--panel); }
+    .cv-create-panel { display:flex; flex-wrap:wrap; gap:8px; align-items:end; padding:12px; margin-bottom:14px; border:1px solid var(--line); border-radius:var(--radius-card); background:var(--panel); }
     .cv-create-panel label { display:grid; gap:5px; flex:1; color:var(--muted); font-size:12px; }
     .cv-create-panel select { min-height:40px; color:var(--fg); background:var(--card-bg); border:1px solid var(--line); border-radius:var(--radius-control); padding:8px 10px; }
     .cv-entry-label { display:block; font-weight:700; }
@@ -936,6 +943,7 @@
   <aside id="discovery-mode-banner" class="update-banner hidden" role="status" aria-live="polite"></aside>
   <section id="scout-notifications" class="hidden" role="region" aria-label="Scout notifications" aria-live="polite"></section>
   <div id="provider-health-banner" class="hidden" role="status" aria-live="polite"></div>
+  <div id="living-cv-notice" class="setup-callout hidden" role="status" aria-live="polite"></div>
   <header>
     <b>Scout</b>
     <nav>

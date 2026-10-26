@@ -4,7 +4,7 @@ Choose the path that matches what you are trying to do.
 
 ## I want to try Scout
 
-1. Read the [five-minute quick start](QUICK_START.md).
+1. Read [Getting started](GETTING_STARTED.md) for a short first-use guide, or the [full quick start](QUICK_START.md) for more detail.
 2. Follow the installer guide for [Windows](INSTALL_WINDOWS.md), [macOS](INSTALL_MACOS.md), or [Linux](INSTALL_LINUX.md).
 3. Complete the setup wizard and read [AI provider setup](AI_SETUP.md) if Scout cannot find your provider.
 4. Use [troubleshooting](TROUBLESHOOTING.md) if setup or a scan fails.
@@ -37,6 +37,7 @@ The [canonical VPS state and automatic backup guide](VPS_BACKUP_AND_STATE.md) co
 - [Upgrades and rollback](UPGRADES.md)
 - [Known issues](KNOWN_ISSUES.md)
 - [CV quality guidance](CV_QUALITY.md)
+- [Living CV, editable drafts, feedback and employer notes](LIVING_CV.md)
 
 ## I want to contribute
 

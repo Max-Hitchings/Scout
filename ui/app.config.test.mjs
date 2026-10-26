@@ -11,7 +11,7 @@ function loadScout() {
   const context = {
     URL,
     window: {},
-    document: { querySelectorAll: () => [] },
+    document: { querySelectorAll: () => [], getElementById: () => null },
     fetch: () => new Promise(() => {}),
     console,
     matchMedia: () => ({ matches: false }),
@@ -645,11 +645,16 @@ test('triage actions post the right status transitions', async () => {
 });
 
 test('explicit job feedback is separate from tracker status and carries the current ledger revision', async () => {
-  const { scout, context } = loadScout();
-  const answers = ['not-interested', 'location', 'The commute is too long.'];
-  context.window.prompt = () => answers.shift();
-  let alertText = '';
-  context.window.alert = (value) => { alertText = value; };
+  const { scout } = loadScout();
+  const status = { textContent: '' };
+  const fields = {
+    '[data-feedback-decision]': { value: 'not-interested' },
+    '[data-feedback-reason]': { value: 'location' },
+    '[data-feedback-explanation]': { value: 'The commute is too long.' },
+    '[data-feedback-scope]': { value: 'job' },
+    '[data-feedback-status]': status,
+  };
+  const form = { dataset: { feedbackForm: 'job-1' }, querySelector: (key) => fields[key] };
   scout.feedbackLearning = { revision: 'a'.repeat(64) };
   const calls = [];
   scout.api = async (pathname, options) => {
@@ -657,7 +662,7 @@ test('explicit job feedback is separate from tracker status and carries the curr
     return { ok: true, ledger: { revision: 'b'.repeat(64) } };
   };
 
-  const result = await scout.recordJobFeedback('job-1');
+  const result = await scout.saveJobFeedback({ closest: () => form });
 
   assert.equal(result.ok, true);
   assert.deepEqual(calls, [[
@@ -670,8 +675,11 @@ test('explicit job feedback is separate from tracker status and carries the curr
       explanation: 'The commute is too long.',
     },
   ]]);
-  assert.match(alertText, /Ranking did not change/);
+  assert.match(status.textContent, /ranking are unchanged/);
   assert.equal(scout.feedbackLearning.revision, 'b'.repeat(64));
+  scout.api = async () => ({ error: 'Feedback changed. Refresh and retry.' });
+  await scout.saveJobFeedback({ closest: () => form });
+  assert.match(status.textContent, /Refresh and retry/);
 });
 
 test('No removes a job immediately and restores it when persistence fails', async () => {
@@ -878,7 +886,7 @@ test('saveCv persists the source without rendering', async () => {
     querySelectorAll: () => [],
   };
   scout.cvState = { path: 'applications/acme-eng-2026-07/cv.typ', dirty: true };
-  scout.post = (p, payload) => { calls.push([p, payload]); return Promise.resolve({ ok: true }); };
+  scout.api = (p, options) => { if (options?.method === 'POST') calls.push([p, JSON.parse(options.body)]); return Promise.resolve(p === '/api/cv' ? { entries: [], letters: [] } : { ok: true }); };
   scout.renderCvPreview = () => { calls.push(['RENDER_PREVIEW']); };
   await scout.saveCv();
   assert.deepEqual(calls.map((c) => c[0]), ['/api/cv/save']);

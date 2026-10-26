@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { atomicWriteFile } from '../ui/lib/atomicWrite.mjs';
+import { assertLivingCvReady, hasPendingLivingCvApproval, recoverLivingCvApproval } from '../ui/lib/livingCv.mjs';
 import { workspaceModePolicy } from '../ui/lib/workspaceMode.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -512,6 +513,7 @@ export async function runScan(root, provider, mode, {
   queueWorkspaceSyncFn = queueWorkspaceSync,
 } = {}) {
   signal?.throwIfAborted();
+  if (hasPendingLivingCvApproval(root)) recoverLivingCvApproval(root);
   onProgress({ phase: 'Validating approved evidence', current: 1, total: 5 });
   assertScanReadyFn(root, provider, { deferProviderHealth: true });
   const initial = await runScanWithFn(root, provider, mode, {
@@ -699,6 +701,7 @@ export function scoringConfig(config = {}) {
 }
 
 function buildScanContext(paths, config, candidates) {
+  assertLivingCvReady(paths.root);
   const context = {
     config: scoringConfig(config),
     profile: readBounded(path.join(paths.profile, 'context.md'), 'profile/context.md'),
@@ -714,6 +717,7 @@ function buildScanContext(paths, config, candidates) {
 }
 
 function assessmentContextDigests(paths, config) {
+  assertLivingCvReady(paths.root);
   return Object.freeze({
     scoringConfigDigest: scanDigest(scoringConfig(config)),
     profileDigest: scanDigest(readBounded(path.join(paths.profile, 'context.md'), 'profile/context.md')),

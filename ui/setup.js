@@ -9,11 +9,12 @@ const SETUP_DEFERRED_KEY = 'scout.setup.legacySkipped.v1';
 const SUPPORTED_CV = /\.(pdf|docx|md|markdown|txt)$/i;
 const ADZUNA_COUNTRIES = ['at', 'au', 'be', 'br', 'ca', 'ch', 'de', 'es', 'fr', 'gb', 'in', 'it', 'mx', 'nl', 'nz', 'pl', 'sg', 'us', 'za'];
 
-function adzunaCountryField(config = {}) {
-  const selected = config.sources?.adzuna?.country || 'gb';
-  const countries = [...new Set([...ADZUNA_COUNTRIES, selected])];
-  const names = new Intl.DisplayNames([config.locale || 'en-GB'], { type: 'region' });
-  return `<label class="setup-field">Adzuna search country<select id="setup-adzuna-country">${countries.map((country) => `<option value="${escapeProfileText(country)}" ${selected === country ? 'selected' : ''}>${escapeProfileText(names.of(country.toUpperCase()) || country)}</option>`).join('')}</select></label><p class="meta">Adzuna searches this country's vacancies. Salary currencies come from that country, independently of your preferred currency.</p>`;
+export function adzunaCountryField(config = {}) {
+  const proposed = firstRunPreferenceDefaults(config, { locale: config.locale || globalThis.navigator?.language || 'en' }).country;
+  const selected = config.sources?.adzuna?.country || (ADZUNA_COUNTRIES.includes(proposed) ? proposed : '');
+  const countries = [...new Set([...ADZUNA_COUNTRIES, selected].filter(Boolean))];
+  const names = new Intl.DisplayNames([config.locale || 'en'], { type: 'region' });
+  return `<label class="setup-field">Adzuna search country<select id="setup-adzuna-country"><option value=""${selected ? '' : ' selected'}>Choose a country</option>${countries.map((country) => `<option value="${escapeProfileText(country)}" ${selected === country ? 'selected' : ''}>${escapeProfileText(names.of(country.toUpperCase()) || country)}</option>`).join('')}</select></label><p class="meta">Adzuna searches this country's vacancies. Salary currencies come from that country, independently of your preferred currency.</p>`;
 }
 const DISMISSIBLE_VIEWS = new Set(['hub', 'section', 'retune', 'backup-details']);
 // Sunday = 0, matching ui/lib/scheduler.mjs. Kept as a literal here because
@@ -166,13 +167,25 @@ export function searchModeQuestionHtml(mode = 'background') {
     <p class="meta">Background watch stays quiet unless an assessed match is exceptional. Active job hunt brings you a daily summary of new good matches and invites your feedback. Provider problems are reported in both modes. You can change this later in Settings.</p>`;
 }
 
+export function firstRunPreferenceDefaults(current = {}, {
+  locale = globalThis.navigator?.language || 'en',
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+  established = false,
+} = {}) {
+  if (established) return { locale: current.locale || 'en', currency: current.currency || '', timezone: current.timezone || 'UTC', country: current.sources?.adzuna?.country || '' };
+  let country = '';
+  try { country = new Intl.Locale(locale).region?.toLowerCase() || ''; } catch { locale = 'en'; }
+  const currencies = { us: 'USD', ca: 'CAD', au: 'AUD', nz: 'NZD', gb: 'GBP', jp: 'JPY', in: 'INR', sg: 'SGD', za: 'ZAR', ch: 'CHF', br: 'BRL', mx: 'MXN', pl: 'PLN', cn: 'CNY', se: 'SEK', no: 'NOK', dk: 'DKK', at: 'EUR', be: 'EUR', de: 'EUR', es: 'EUR', fi: 'EUR', fr: 'EUR', ie: 'EUR', it: 'EUR', nl: 'EUR', pt: 'EUR', gr: 'EUR' };
+  return { locale, currency: currencies[country] || '', timezone: timeZone, country };
+}
+
 export function buildConfig(form, current = {}) {
   const salary = String(form.salaryMinimum || '').trim();
   return {
     mode: form.mode || current.mode || 'background',
-    locale: String(form.locale || current.locale || 'en-GB').trim(),
-    currency: String(form.currency || current.currency || 'GBP').trim().toUpperCase(),
-    timezone: String(form.timezone || current.timezone || 'Europe/London').trim(),
+    locale: String(form.locale ?? current.locale ?? 'en').trim(),
+    currency: String(form.currency ?? current.currency ?? 'USD').trim().toUpperCase(),
+    timezone: String(form.timezone ?? current.timezone ?? 'UTC').trim(),
     profile: {
       ...(current.profile || {}),
       displayName: String(form.displayName || '').trim(),
@@ -428,6 +441,7 @@ export function employerRegistryHtml(registry = null) {
     )).join('') || '<li>No completed monitoring check yet.</li>';
     return `<section class="setup-callout" data-employer="${id}">
       <h3>${escapeProfileText(employer.canonicalName)}</h3>
+      <label class="setup-field wide">Private notes<textarea data-employer-notes="${id}" maxlength="4000" rows="3">${escapeProfileText(employer.notes || '')}</textarea></label>
       <p class="meta">Health: ${escapeProfileText(employer.health?.status || 'unknown')}
       ${employer.health?.reasonCode ? `(${escapeProfileText(employer.health.reasonCode)})` : ''}.
       Last checked: ${escapeProfileText(employer.monitoring?.lastCheckedAt || 'not yet')}.
@@ -556,6 +570,7 @@ export function feedbackLearningHtml(ledger = null) {
       <label class="setup-field wide">Undo explanation<textarea id="learning-undo-explanation" maxlength="1000"></textarea></label>
       <label><span><input id="learning-undo-confirm" type="checkbox"> I reviewed this rollback and want to restore the previous published behavior</span></label>
       <p><button id="learning-undo" class="act" type="button">Undo active learned version</button></p>
+      ${activeChanges.length ? '<p><button id="learning-reset" class="act" type="button">Reset all learned ranking changes</button></p><p class="meta">Reset returns to your published search preferences, keeps feedback and version history, and can be undone.</p>' : ''}
     </section>` : ''}
   </section>`;
 }
@@ -1263,6 +1278,7 @@ const Setup = {
       button.addEventListener('click', () => this.publishLearning(button.dataset.learningPublish));
     });
     this.el('learning-undo')?.addEventListener('click', () => this.undoLearning());
+    this.el('learning-reset')?.addEventListener('click', () => this.resetLearning());
     if (!this.feedbackLearning) void this.loadFeedbackLearning();
   },
 
@@ -1360,6 +1376,19 @@ const Setup = {
     }
   },
 
+  async resetLearning() {
+    if (!this.el('learning-undo-confirm')?.checked) return this.setMessage('Review and confirm the rollback before resetting learned ranking.', 'error');
+    try {
+      const result = await requestJson('/api/learning/reset', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ revision: this.feedbackLearning.revision, versionId: this.feedbackLearning.active.id, confirmed: true, explanation: this.el('learning-undo-explanation').value.trim() }),
+      });
+      this.feedbackLearning = result.ledger;
+      this.renderFeedbackLearningSettings();
+      this.setMessage('Learned ranking reset. Your search preferences and history are kept.', 'good');
+    } catch (error) { this.setMessage(error.message, 'error'); }
+  },
+
   async loadEmployerRegistry() {
     try {
       this.employerRegistry = await requestJson('/api/employers');
@@ -1385,6 +1414,7 @@ const Setup = {
     const employer = id ? {
       id,
       userPriority: read('priority').value,
+      notes: read('notes').value,
       reason: read('reason').value.trim() || null,
       careersUrl: read('url').value.trim() || null,
       aliases: list(read('aliases').value),
@@ -1948,12 +1978,13 @@ const Setup = {
 
   renderPreferences() {
     const c = this.status?.config || {};
+    const localDefaults = firstRunPreferenceDefaults(c, { established: this.status?.established === true });
     if (!this.preferenceDraft) this.preferenceDraft = {
       mode: c.mode || 'background',
       displayName: c.profile?.displayName || '', tone: c.profile?.tone || '',
       roleFamilies: (c.search?.roleFamilies || []).join(', '), sectors: (c.search?.sectors || []).join(', '),
       locations: (c.search?.locations || []).join(', '), exclusions: (c.search?.exclusions || []).join(', '),
-      salaryMinimum: c.search?.salaryMinimum ?? '', currency: c.currency || 'GBP', locale: c.locale || 'en-GB', timezone: c.timezone || 'Europe/London',
+      salaryMinimum: c.search?.salaryMinimum ?? '', currency: localDefaults.currency, locale: localDefaults.locale, timezone: localDefaults.timezone,
       commuteOrigin: c.commute?.origin || '', commuteMode: c.commute?.mode || 'either', commuteMax: c.commute?.maxMinutes ?? 180,
       includeUnknown: c.commute?.includeUnknown !== false,
     };
@@ -1961,9 +1992,9 @@ const Setup = {
     const option = (value, label) => `<option value="${value}" ${d.commuteMode === value ? 'selected' : ''}>${label}</option>`;
     const questions = [
       ['First, what should I call you?', 'I’ll also match the tone you want in CVs and outreach drafts.', `<label class="setup-field">Your name<input id="setup-name" autocomplete="name" value="${this.escape(d.displayName)}" required></label><label class="setup-field">Writing tone<input id="setup-tone" value="${this.escape(d.tone)}" placeholder="Natural, direct and evidence-led"></label>`],
-      ['What kind of work should I look for?', 'Use job titles or role families you would genuinely consider. These answers become search queries after you approve the setup.', `<label class="setup-field wide">Role families <span>comma-separated</span><input id="setup-roles" value="${this.escape(d.roleFamilies)}" placeholder="Software engineer, product manager, data analyst"></label><label class="setup-field wide">Sectors <span>comma-separated</span><input id="setup-sectors" value="${this.escape(d.sectors)}" placeholder="Developer tools, climate, healthcare"></label>`],
-      ['Where can the right role be?', 'Commute settings guide assessments and filter your dashboard. They do not filter newly discovered vacancies.', `<label class="setup-field wide">Locations <span>comma-separated</span><input id="setup-locations" value="${this.escape(d.locations)}"></label><label class="setup-field wide">Commute origin<input id="setup-commute-origin" value="${this.escape(d.commuteOrigin)}" placeholder="Town, city or postcode"></label><label class="setup-field">Mode<select id="setup-commute-mode">${option('either','Car or public transport')}${option('car','Car')}${option('public','Public transport')}${option('any','No filter')}</select></label><label class="setup-field">Maximum minutes<input id="setup-commute-max" type="number" min="0" max="1440" value="${this.escape(d.commuteMax)}"></label><label class="setup-field wide"><span><input id="setup-include-unknown" type="checkbox" ${d.includeUnknown ? 'checked' : ''}> Include roles with unknown commute</span></label>`],
-      ['What compensation makes a move worthwhile?', 'This guides the search; it is not inserted into applications.', `<label class="setup-field">Minimum base salary<input id="setup-salary" type="number" min="0" step="1000" value="${this.escape(d.salaryMinimum)}"></label><label class="setup-field">Currency<input id="setup-currency" maxlength="3" value="${this.escape(d.currency)}"></label>`],
+      ['What kind of work should I look for?', 'List job titles you would consider. Separate each answer with a comma. You review the search rules before Scout uses them.', `<label class="setup-field wide">Job titles<input id="setup-roles" value="${this.escape(d.roleFamilies)}" placeholder="Titles you would consider"></label><label class="setup-field wide">Industries (optional)<input id="setup-sectors" value="${this.escape(d.sectors)}" placeholder="Industries that interest you"></label>`],
+      ['Where can the right role be?', 'Travel settings guide assessments and filter your dashboard. They do not filter newly discovered jobs.', `<label class="setup-field wide">Locations <span>comma-separated</span><input id="setup-locations" value="${this.escape(d.locations)}"></label><label class="setup-field wide">Commute origin<input id="setup-commute-origin" value="${this.escape(d.commuteOrigin)}" placeholder="Town, city or postcode"></label><label class="setup-field">Mode<select id="setup-commute-mode">${option('either','Car or public transport')}${option('car','Car')}${option('public','Public transport')}${option('any','No filter')}</select></label><label class="setup-field">Maximum minutes<input id="setup-commute-max" type="number" min="0" max="1440" value="${this.escape(d.commuteMax)}"></label><label class="setup-field wide"><span><input id="setup-include-unknown" type="checkbox" ${d.includeUnknown ? 'checked' : ''}> Include roles with unknown commute</span></label>`],
+      ['What pay and local settings should I use?', 'Leave pay blank if you are unsure. Check the currency, language and time zone below; they are suggestions from this browser. The full review also supports hourly pay and other pay periods.', `<label class="setup-field">Preferred minimum yearly base pay (optional)<input id="setup-salary" type="number" min="0" step="any" value="${this.escape(d.salaryMinimum)}"></label><label class="setup-field">Currency code<input id="setup-currency" maxlength="3" value="${this.escape(d.currency)}" placeholder="Three-letter currency code"></label><label class="setup-field">Language and region<input id="setup-locale" value="${this.escape(d.locale)}"></label><label class="setup-field">Time zone<input id="setup-timezone" value="${this.escape(d.timezone)}"></label>`],
       ['What should I rule out immediately?', 'Keep these to genuine dealbreakers so I don’t hide an unusual but excellent role.', `<label class="setup-field wide">Hard exclusions <span>comma-separated</span><textarea id="setup-exclusions">${this.escape(d.exclusions)}</textarea></label>`],
     ];
     questions.push(['Are you looking for a new job now?', 'Choose how often Scout should bring matches to your attention.', searchModeQuestionHtml(d.mode)]);
@@ -1976,7 +2007,7 @@ const Setup = {
   capturePreferenceQuestion() {
     const d = this.preferenceDraft;
     const value = (id, key) => { const el = this.el(id); if (el) d[key] = el.value; };
-    [['setup-mode','mode'],['setup-name','displayName'],['setup-tone','tone'],['setup-roles','roleFamilies'],['setup-sectors','sectors'],['setup-locations','locations'],['setup-commute-origin','commuteOrigin'],['setup-commute-mode','commuteMode'],['setup-commute-max','commuteMax'],['setup-salary','salaryMinimum'],['setup-currency','currency'],['setup-exclusions','exclusions']].forEach(([id,key]) => value(id,key));
+    [['setup-mode','mode'],['setup-name','displayName'],['setup-tone','tone'],['setup-roles','roleFamilies'],['setup-sectors','sectors'],['setup-locations','locations'],['setup-commute-origin','commuteOrigin'],['setup-commute-mode','commuteMode'],['setup-commute-max','commuteMax'],['setup-salary','salaryMinimum'],['setup-currency','currency'],['setup-locale','locale'],['setup-timezone','timezone'],['setup-exclusions','exclusions']].forEach(([id,key]) => value(id,key));
     const unknown = this.el('setup-include-unknown'); if (unknown) d.includeUnknown = unknown.checked;
   },
 
@@ -1998,7 +2029,7 @@ const Setup = {
     const imported = this.imported;
     this.el('setup-body').innerHTML = `
       <h2>Import your existing CV (optional)</h2>
-      <p>Scout accepts PDF, DOCX, Markdown and plain text up to 10 MB. Text extraction happens locally. Scanned PDFs need OCR before they can be used.</p>
+      <p>Scout accepts PDF, DOCX, Markdown and plain text up to 10 MB. Text extraction happens locally. Scanned PDFs need OCR before they can be used. Importing another CV disconnects a Living CV source and keeps its saved versions.</p>
       <label class="setup-field"><span>CV file</span><input id="setup-cv-file" type="file" accept=".pdf,.docx,.md,.markdown,.txt"></label>
       ${imported ? `<h3>Extracted preview</h3><div id="setup-cv-preview" class="setup-preview"></div><p class="meta">Saved locally as ${this.escape(imported.extracted)}</p>` : ''}`;
     if (imported) this.el('setup-cv-preview').textContent = imported.text || '';
@@ -2576,14 +2607,15 @@ const Setup = {
         window.Scout?.applyWorkspaceConfig?.(result.config);
       }
       if (this.step === 3) {
-        const countryResult = await requestJson('/api/setup/config', {
-          method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ sources: { adzuna: { country: fieldValue('setup-adzuna-country') } } }),
-        });
-        this.status.config = countryResult.config;
+        const country = fieldValue('setup-adzuna-country');
         const appId = fieldValue('setup-adzuna-id').trim();
         const apiKey = fieldValue('setup-adzuna-key').trim();
         if ((appId && !apiKey) || (!appId && apiKey)) throw new Error('Enter both Adzuna values, or leave both blank to skip.');
+        if ((appId || this.status.adzunaConfigured) && !country) throw new Error('Choose the country to search before enabling Adzuna. You can skip this optional source.');
+        if (country) {
+          const result = await requestJson('/api/setup/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sources: { adzuna: { country } } }) });
+          this.status.config = result.config;
+        }
         if (appId && apiKey) {
           const result = await requestJson('/api/setup/credentials', {
             method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ appId, apiKey }),

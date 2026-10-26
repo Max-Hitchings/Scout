@@ -12,6 +12,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './lib/mainModule.mjs';
 import { atomicWriteFile } from './lib/atomicWrite.mjs';
+import { validatePhysicalWorkspacePath } from './lib/physicalPath.mjs';
+import { createApplicationDraft, saveApplicationDraft } from './lib/applicationDrafts.mjs';
 import {
   PROFILE_PUBLICATION_RUN_PREFIX, publishProfileGeneration,
   recoverPendingProfilePublications,
@@ -25,6 +27,7 @@ import { codexDeepLinkCapability } from './lib/codexDeepLink.mjs';
 import { triage } from './lib/derive.mjs';
 import { emptyTrackerView, pipeline } from './lib/pipeline.mjs';
 import { cvPdfPath, listCvFiles, renderCvTarget, safeCvPath } from './lib/cv.mjs';
+import { approveLivingCv, assertLivingCvReady, configureLivingCv, hasPendingLivingCvApproval, livingCvStatus, readLivingCvVersion, recoverLivingCvApproval, retireLivingCvSource } from './lib/livingCv.mjs';
 import { cvDownloadDecision, overrideCvQuality, readCvQuality, runCvQuality } from './lib/cvQuality.mjs';
 import {
   parseScanRuns, readPublicRunSummaries, readPublicScanQueue, readPublicStoragePressure,
@@ -102,7 +105,7 @@ import {
 import {
   activeLearningPolicy, createLearningLedger, learningLedgerRevision,
   loadLearningLedger, proposeLearningChange, publishLearningProposal,
-  recordFeedback, undoLearningVersion, writeLearningLedger,
+  recordFeedback, resetLearning, undoLearningVersion, writeLearningLedger,
 } from './lib/feedbackLearning.mjs';
 import {
   loadWorkspaceConfig, migrateWorkspace, resolveWorkspaceRoot, seedWorkspace, syncManagedInstructions,
@@ -122,6 +125,7 @@ export const APP_VERSION = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'packa
 export const UI_BUILD_FILES = [
   'index.html', 'app.js', 'setup.js', 'reportView.js', 'service-worker.js', 'manifest.webmanifest',
   'lib/scoutCharacter.mjs', 'lib/chatDrawerState.mjs', 'lib/codexDeepLink.mjs', 'lib/durableRunStates.mjs', 'lib/modelIdentifier.mjs', 'lib/providerPresentation.mjs',
+  'lib/standaloneUi.mjs',
   'assets/scout-icon.ico', 'assets/scout-icon.png', 'assets/scout-idle.png',
   'assets/scout-thinking.png', 'assets/scout-searching.png', 'assets/scout-explaining.png',
   'assets/scout-found.png', 'assets/scout-warning.png',
@@ -253,6 +257,18 @@ export function recoverOnboardingAtStartup({
 }
 
 recoverOnboardingAtStartup();
+
+export function recoverLivingCvAtStartup({ root = WORKSPACE_ROOT, initialised = workspaceInitialised, recover = recoverLivingCvApproval, pending = hasPendingLivingCvApproval, schedule = setTimeout, cancel = clearTimeout } = {}) {
+  if (!runtimeRecoveryAdmissionOpen || !initialised() || !pending(root)) return null;
+  try { return recover(root); }
+  catch (error) {
+    if (error?.reasonCode === 'mutation-busy') scheduleRuntimeRecovery(() => recoverLivingCvAtStartup({ root, initialised, recover, pending, schedule, cancel }), 1_000, schedule, cancel);
+    // Keep the UI available for a conflict; scans and profile generation remain gated.
+    return { state: 'recovery-needed' };
+  }
+}
+
+recoverLivingCvAtStartup();
 
 export function stageSearchProfileReviewAtStartup({
   initialised = workspaceInitialised,
@@ -577,6 +593,11 @@ function readScheduleSummary(config = loadWorkspaceConfig(WORKSPACE_ROOT), healt
 
 // Task 5 assigns handlers into this table: routes['POST /api/status'] = (req,res,body)=>{...}
 export const routes = {};
+const applicationDraftPreviews = new Map();
+function pruneApplicationDraftPreviews(reserve = false) {
+  for (const [id, entry] of applicationDraftPreviews) if (Date.now() - entry.createdAt > 60 * 60 * 1000) applicationDraftPreviews.delete(id);
+  while (applicationDraftPreviews.size > (reserve ? 15 : 16)) applicationDraftPreviews.delete(applicationDraftPreviews.keys().next().value);
+}
 
 function loopbackHost(hostHeader) {
   try {
@@ -978,7 +999,7 @@ async function handleRead(req, res, url) {
   }
   if (req.method === 'GET' && url.pathname === '/api/operations') {
     const type = url.searchParams.get('type');
-    if (type && !['proposal', 'scan', 'cv-render'].includes(type)) return sendJson(res, 400, { error: 'operation type must be proposal, scan or cv-render' });
+    if (type && !['proposal', 'scan', 'cv-render', 'application-draft'].includes(type)) return sendJson(res, 400, { error: 'operation type is invalid' });
     return sendJson(res, 200, { operation: operations.latest(type), operations: operations.list(type) });
   }
   if (req.method === 'GET' && url.pathname.startsWith('/api/operations/')) {
@@ -1183,9 +1204,25 @@ async function handleRead(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/cv') {
     return sendJson(res, 200, listCvFiles(WORKSPACE_ROOT));
   }
+  if (req.method === 'GET' && url.pathname === '/api/cv/drafts/preview') {
+    pruneApplicationDraftPreviews();
+    const entry = applicationDraftPreviews.get(url.searchParams.get('id'));
+    return entry ? sendJson(res, 200, entry.preview) : sendJson(res, 404, { error: 'This unsaved draft expired. Generate it again.' });
+  }
+  if (req.method === 'GET' && url.pathname === '/api/cv/living') {
+    try { if (hasPendingLivingCvApproval(WORKSPACE_ROOT)) recoverLivingCvApproval(WORKSPACE_ROOT); }
+    catch { /* Project the pending state below; never overwrite a conflicting edit. */ }
+    try { return sendJson(res, 200, livingCvStatus(WORKSPACE_ROOT)); }
+    catch { return sendJson(res, 409, publicApiError('Living CV history needs review. Your saved CV is unchanged.')); }
+  }
+  if (req.method === 'GET' && url.pathname === '/api/cv/living/version') {
+    try { return sendText(res, 200, 'text/plain; charset=utf-8', readLivingCvVersion(WORKSPACE_ROOT, url.searchParams.get('id'))); }
+    catch { return sendJson(res, 409, publicApiError('This saved CV version is unavailable or failed its digest check.')); }
+  }
   if (req.method === 'GET' && url.pathname === '/api/cv/file') {
     try {
       const abs = safeCvPath(WORKSPACE_ROOT, url.searchParams.get('path'));
+      validatePhysicalWorkspacePath(WORKSPACE_ROOT, abs, 'CV file');
       if (!fs.existsSync(abs)) return sendJson(res, 404, { error: 'no such file' });
       return sendText(res, 200, 'text/plain; charset=utf-8', fs.readFileSync(abs, 'utf8'));
     } catch { return sendJson(res, 400, publicApiError('CV file request is invalid.')); }
@@ -1195,7 +1232,7 @@ async function handleRead(req, res, url) {
     catch { return sendJson(res, 400, publicApiError('CV quality record could not be read.')); }
   }
   if (req.method === 'GET' && url.pathname === '/api/cv/pdf') {
-    const target = url.searchParams.get('target') === 'master' ? 'master' : 'application';
+    const target = ['master', 'cover-letter', 'draft-cv'].includes(url.searchParams.get('target')) ? url.searchParams.get('target') : 'application';
     const slug = url.searchParams.get('slug') || '';
     let pdf;
     try { pdf = cvPdfPath(WORKSPACE_ROOT, { target, slug }); }
@@ -1208,7 +1245,7 @@ async function handleRead(req, res, url) {
     }
     const buf = fs.readFileSync(pdf);
     const headers = { 'Content-Type': 'application/pdf', 'Content-Length': buf.length };
-    if (url.searchParams.get('download') === '1') headers['Content-Disposition'] = `attachment; filename="${target === 'master' ? 'master-cv-reference' : `${slug}-cv`}.pdf"`;
+    if (url.searchParams.get('download') === '1') headers['Content-Disposition'] = `attachment; filename="${target === 'master' ? 'master-cv-reference' : target === 'cover-letter' ? `${slug}-cover-letter-DRAFT` : target === 'draft-cv' ? `${slug}-cv-DRAFT` : `${slug}-cv`}.pdf"`;
     res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'self'");
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.writeHead(200, headers);
@@ -1661,7 +1698,7 @@ routes['POST /api/feedback'] = (req, res, body) => {
       const tracker = readTrackerSnapshot(TRACKER_FILE).data;
       const opportunity = findEntry(tracker, value.opportunityId);
       const profile = loadPublishedSearchProfile(WORKSPACE_ROOT);
-      const next = recordFeedback(ledger, {
+      let next = recordFeedback(ledger, {
         opportunityId: opportunity.id,
         vacancyId: opportunity.vacancyId
           || opportunity.jobIdentity?.vacancyId
@@ -1673,9 +1710,21 @@ routes['POST /api/feedback'] = (req, res, body) => {
         profileId: opportunity.profileId || profile?.id || 'legacy-profile',
         learningVersionId: opportunity.learningVersionId || ledger.activeVersionId,
       });
+      if (value.learning !== undefined) {
+        if (!['title', 'employer'].includes(value.learning?.field)) throw new TypeError('unsupported feedback learning field');
+        const field = value.learning.field;
+        const match = String(field === 'employer' ? opportunity.company || '' : opportunity.role || '').trim();
+        const positive = ['promising', 'saved', 'applied', 'interview'].includes(value.decision);
+        if (['duplicate', 'already-seen'].includes(value.decision)) throw new TypeError('duplicate or already-seen feedback cannot change fit ranking');
+        next = proposeLearningChange(next, {
+          sourceEventIds: [next.feedbackEvents.at(-1).id],
+          explanation: String(value.explanation || '').trim(),
+          change: { kind: 'rank-adjustment', field, value: match, weight: positive ? 3 : -3, scope: 'profile-wide' },
+        });
+      }
       writeLearningLedger(WORKSPACE_ROOT, next);
       void scheduleCheckpoint('ui: record job feedback');
-      return replyJson(res, 200, { ok: true, ledger: publicLearningLedger(next) });
+      return replyJson(res, 200, { ok: true, proposed: value.learning !== undefined, ledger: publicLearningLedger(next) });
     });
   } catch (error) {
     if (Object.hasOwn(error, 'currentRevision')) return replyLearningConflict(res, error);
@@ -1729,6 +1778,22 @@ routes['POST /api/learning/publish'] = (req, res, body) => {
   }
 };
 
+routes['POST /api/learning/reset'] = (req, res, body) => {
+  const value = parseBody(body);
+  if (!value || typeof value.revision !== 'string' || value.confirmed !== true || typeof value.versionId !== 'string') return replyJson(res, 400, { error: 'Review and confirm the current learning version before resetting.' });
+  try {
+    return withSearchPlanMutation(res, 'learning-reset', () => {
+      const next = resetLearning(learningLedgerForRevision(value.revision), value);
+      writeLearningLedger(WORKSPACE_ROOT, next);
+      void scheduleCheckpoint('ui: reset learned ranking');
+      return replyJson(res, 200, { ok: true, ledger: publicLearningLedger(next) });
+    });
+  } catch (error) {
+    if (Object.hasOwn(error, 'currentRevision')) return replyLearningConflict(res, error);
+    return replyJson(res, 400, publicApiError('Learned ranking could not be reset.'));
+  }
+};
+
 routes['POST /api/learning/undo'] = (req, res, body) => {
   const value = parseBody(body);
   if (!value || typeof value.revision !== 'string'
@@ -1760,6 +1825,7 @@ function publicEmployerRegistry(registry) {
     employers: registry.employers.map((employer) => ({
       id: employer.id,
       canonicalName: employer.canonicalName,
+      notes: employer.notes || '',
       aliases: employer.aliases,
       origins: employer.origins,
       careersUrl: employer.careersUrl,
@@ -2341,6 +2407,58 @@ routes['POST /api/stage/complete'] = async (req, res, body) => {
     (d) => `ui: complete stage - ${company(d, b.id)}`, b.trackerRevision);
 };
 
+routes['POST /api/cv/drafts/generate'] = (req, res, body) => {
+  const value = parseBody(body);
+  if (!value || typeof value.opportunityId !== 'string' || !['cv', 'cover-letter'].includes(value.kind)) return replyJson(res, 400, { error: 'Choose a tracked job and draft type.' });
+  try {
+    const operation = operations.start('application-draft', async (update, { signal }) => {
+      update({ phase: 'Selecting confirmed CV evidence', current: 1, total: 2 });
+      const preview = await createApplicationDraft(WORKSPACE_ROOT, value, { signal });
+      pruneApplicationDraftPreviews(true);
+      applicationDraftPreviews.set(operation.id, { preview, createdAt: Date.now() });
+      update({ phase: 'Draft ready for your review', current: 2, total: 2 });
+      return { draftId: operation.id };
+    }, { total: 2 });
+    return replyJson(res, 202, { operation });
+  } catch { return replyJson(res, 409, publicApiError('Another draft may be generating. Wait for it to finish, then retry.')); }
+};
+
+routes['POST /api/cv/drafts/save'] = (req, res, body) => {
+  const value = parseBody(body);
+  pruneApplicationDraftPreviews();
+  const entry = applicationDraftPreviews.get(value?.draftId);
+  if (!entry) return replyJson(res, 409, { error: 'This unsaved draft expired. Generate it again.' });
+  try {
+    const saved = saveApplicationDraft(WORKSPACE_ROOT, { ...entry.preview, markdown: value.markdown, confirmed: value.confirmed });
+    applicationDraftPreviews.delete(value.draftId);
+    void scheduleCheckpoint('ui: save reviewed application draft');
+    return replyJson(res, 200, saved);
+  } catch { return replyJson(res, 409, publicApiError('The draft could not be saved. Confirm review and regenerate if its CV, job or saved draft changed. Your text is still in the editor.')); }
+};
+
+routes['POST /api/cv/living/source'] = (req, res, body) => {
+  const value = parseBody(body);
+  if (!value || !(value.sourcePath === null || typeof value.sourcePath === 'string')) return replyJson(res, 400, { error: 'Choose a Markdown or JSON source file, or disconnect it.' });
+  try {
+    const status = configureLivingCv(WORKSPACE_ROOT, value.sourcePath);
+    void scheduleCheckpoint('ui: configure Living CV');
+    return replyJson(res, 200, status);
+  } catch {
+    return replyJson(res, 409, publicApiError('The source could not be connected. Choose an external Markdown file or JSON containing only a markdown string, 500 bytes to 256 KiB. A scan may also be using this workspace; retry when it finishes.'));
+  }
+};
+
+routes['POST /api/cv/living/approve'] = (req, res, body) => {
+  const value = parseBody(body);
+  try {
+    const status = approveLivingCv(WORKSPACE_ROOT, value || {});
+    void scheduleCheckpoint('ui: approve Living CV');
+    return replyJson(res, 200, status);
+  } catch {
+    return replyJson(res, 409, publicApiError('CV approval did not finish. Confirm the exact diff, refresh to recover or review any interrupted change, and retry when no scan is running. Existing versions and later edits are preserved.'));
+  }
+};
+
 routes['POST /api/cv/save'] = (req, res, body) => {
   const b = parseBody(body); if (!b) return replyJson(res, 400, { error: 'bad json' });
   let abs;
@@ -2352,7 +2470,11 @@ routes['POST /api/cv/save'] = (req, res, body) => {
   try {
     withWorkspaceMutationAuthority(WORKSPACE_ROOT, {
       kind: 'cv-save', phase: 'persist-cv',
-    }, () => atomicWriteFile(abs, b.content));
+    }, () => {
+      validatePhysicalWorkspacePath(WORKSPACE_ROOT, abs, 'CV file');
+      if (path.resolve(abs) === path.resolve(WORKSPACE.cv, 'master-cv.md')) assertLivingCvReady(WORKSPACE_ROOT);
+      atomicWriteFile(abs, b.content);
+    });
   } catch { return replyJson(res, 500, publicApiError('CV file could not be saved.')); }
   void scheduleCheckpoint(`edit cv - ${b.path}`);
   replyJson(res, 200, { ok: true, savedLocally: true, syncQueued: true });
@@ -2360,16 +2482,16 @@ routes['POST /api/cv/save'] = (req, res, body) => {
 
 routes['POST /api/cv/render'] = (req, res, body) => {
   const b = parseBody(body); if (!b) return replyJson(res, 400, { error: 'bad json' });
-  const target = b.target === 'master' ? 'master' : 'application';
-  const slug = target === 'application' ? String(b.slug || '') : '';
+  const target = ['master', 'cover-letter', 'draft-cv'].includes(b.target) ? b.target : 'application';
+  const slug = target === 'master' ? '' : String(b.slug || '');
   try {
     const operation = operations.start('cv-render', async (update, { signal }) => {
-      update({ phase: target === 'master' ? 'Preparing master reference PDF' : 'Preparing tailored PDF', current: 1, total: 3 });
+      update({ phase: target === 'master' ? 'Preparing master reference PDF' : target === 'cover-letter' ? 'Preparing cover-letter draft PDF' : 'Preparing tailored PDF', current: 1, total: 3 });
       const result = await renderCvTarget(WORKSPACE_ROOT, { target, slug }, {
         appRoot: APP_ROOT, signal,
       });
       update({ phase: 'Validating PDF', current: 2, total: 3 });
-      void scheduleCheckpoint(target === 'application' ? `render cv - ${slug}` : 'render master cv');
+      void scheduleCheckpoint(target === 'master' ? 'render master cv' : target === 'cover-letter' ? `render cover-letter draft - ${slug}` : `render cv - ${slug}`);
       update({ phase: 'PDF ready', current: 3, total: 3 });
       return result;
     }, { phase: 'Queued for rendering', total: 3 });
@@ -2693,6 +2815,7 @@ routes['POST /api/setup/import-cv'] = (req, res, body) => {
   void withWorkspaceMutationAuthorityAsync(WORKSPACE_ROOT, {
     kind: 'cv-import', phase: 'import-cv',
   }, async () => {
+    assertLivingCvReady(WORKSPACE_ROOT);
     fs.mkdirSync(WORKSPACE.imports, { recursive: true });
     const extracted = path.join(WORKSPACE.imports, `${name}.txt`);
     let completed = false;
@@ -2700,6 +2823,7 @@ routes['POST /api/setup/import-cv'] = (req, res, body) => {
       atomicWriteFile(imported, bytes, { mode: 0o600 });
       const text = await extractCvText(imported);
       atomicWriteFile(extracted, `${text}\n`, { mode: 0o600 });
+      retireLivingCvSource(WORKSPACE_ROOT);
       completed = true;
       return { text, extracted };
     } finally {

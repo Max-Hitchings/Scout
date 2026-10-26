@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { approvedLivingCvEvidence, assertLivingCvReady, livingCvEvidenceRevision } from './livingCv.mjs';
 import path from 'node:path';
 import { atomicWriteFile } from './atomicWrite.mjs';
 import { doctor } from './doctor.mjs';
@@ -177,7 +178,16 @@ export function buildOnboardingEvidence(root, config, limit = ONBOARDING_INPUT_L
   let importedCharacters = 0;
   const seenImportLines = new Set();
   const imports = workspacePaths(root).imports;
-  if (fs.existsSync(imports)) {
+  const approvedCv = approvedLivingCvEvidence(root);
+  if (approvedCv !== null) {
+    for (const [index, line] of approvedCv.split(/\r?\n/).entries()) {
+      const text = line.trim();
+      if (!text || seenImportLines.has(text)) continue;
+      seenImportLines.add(text);
+      importedCharacters += text.length;
+      evidence.push({ id: `cv-${String(index + 1).padStart(4, '0')}`, label: 'Approved Living CV version', text });
+    }
+  } else if (fs.existsSync(imports)) {
     validatePhysicalWorkspacePath(root, imports, 'onboarding import directory');
     const files = fs.readdirSync(imports).filter((name) => name.toLowerCase().endsWith('.txt')).sort();
     let lineNumber = 0;
@@ -257,7 +267,9 @@ function bullets(items) { return items.map((item) => `- ${item.text}\n  ${eviden
 export function renderOnboardingFiles(config, proposal, activatedAt = null) {
   const nextConfig = JSON.parse(JSON.stringify(config));
   nextConfig.triage = { ...nextConfig.triage, actionScore: proposal.calibration.actionScore, checkScore: proposal.calibration.checkScore };
-  nextConfig.schedule = { jobs: [] };
+  // Rebuilding career evidence does not authorise changing native scan jobs.
+  // Fresh workspaces already have an empty schedule; established jobs retain
+  // their exact provider, model, enabled flag, days and time.
   if (activatedAt) nextConfig.setup = { ...nextConfig.setup, completedAt: activatedAt };
   validateWorkspaceConfig(nextConfig);
   const context = [
@@ -343,8 +355,20 @@ export async function createOnboardingProposal(root, provider, {
 } = {}) {
   if (readActivationIntent(root)) throw new Error('an onboarding activation requires recovery');
   onProgress({ phase: 'Preparing approved evidence', current: 1, total: 4 });
-  const config = loadWorkspaceConfig(root);
-  const input = buildOnboardingEvidence(root, config);
+  const { config, initialTargetHashes, livingCvEvidenceDigest, livingCvSourceRevision, input } = withWorkspaceMutationAuthority(root, { kind: 'onboarding-input', phase: 'snapshot-evidence' }, () => {
+    if (readActivationIntent(root)) throw new Error('an onboarding activation requires recovery');
+    assertLivingCvReady(root);
+    const config = loadWorkspaceConfig(root);
+    const livingCvEvidence = approvedLivingCvEvidence(root);
+    return {
+      config,
+      initialTargetHashes: Object.fromEntries(ONBOARDING_FILES.map((relative) => [relative, sha256(targetPath(root, relative))])),
+      livingCvEvidenceDigest: livingCvEvidence === null ? null : crypto.createHash('sha256').update(livingCvEvidence).digest('hex'),
+      livingCvSourceRevision: livingCvEvidenceRevision(root),
+      input: buildOnboardingEvidence(root, config),
+    };
+  });
+  const initialEvidenceDigest = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
   const prompt = [
     'Create one evidence-only Scout onboarding proposal from the JSON input below.',
     'Never invent or infer a fact. Every factual output item must cite one or more supplied evidence IDs.',
@@ -413,11 +437,18 @@ export async function createOnboardingProposal(root, provider, {
     phase: 'stage-proposal',
   }, () => {
     if (readActivationIntent(root)) throw new Error('an onboarding activation requires recovery');
+    assertLivingCvReady(root);
+    if (ONBOARDING_FILES.some((relative) => sha256(targetPath(root, relative)) !== initialTargetHashes[relative])) throw new Error('Workspace or CV changed while generating the proposal; regenerate it using current evidence.');
+    if (crypto.createHash('sha256').update(JSON.stringify(buildOnboardingEvidence(root, config))).digest('hex') !== initialEvidenceDigest) throw new Error('Imported or approved CV evidence changed while generating the proposal; regenerate it.');
+    if (livingCvEvidenceRevision(root) !== livingCvSourceRevision) throw new Error('The selected CV source changed while generating the proposal; regenerate it.');
     writeStaged(root, files);
     const prepared = {
       schemaVersion: 1, proposalId, createdAt: now(), provider, summary: turn.value.summary, valid: true,
       unresolvedQuestions: turn.value.unresolvedQuestions, usage: turn.usage,
-      targetHashes: Object.fromEntries(ONBOARDING_FILES.map((relative) => [relative, sha256(targetPath(root, relative))])),
+      targetHashes: initialTargetHashes,
+      livingCvEvidenceDigest,
+      livingCvSourceRevision,
+      evidenceDigest: initialEvidenceDigest,
       stagedHashes: Object.fromEntries(ONBOARDING_FILES.map((relative) => [relative, sha256(stagePath(root, relative))])),
     };
     atomicWriteFile(path.join(root, '.scout', 'onboarding', 'proposal.json'), `${JSON.stringify(prepared, null, 2)}\n`);
@@ -472,8 +503,10 @@ export function activateOnboardingProposal(root, proposalId, confirmed, {
     kind: 'onboarding',
     phase: 'activate',
   }, ({ renew }) => {
+    assertLivingCvReady(root);
     const existingIntent = readActivationIntent(root);
     const proposal = readOnboardingProposal(root);
+    if (!existingIntent && proposal?.evidenceDigest && (crypto.createHash('sha256').update(JSON.stringify(buildOnboardingEvidence(root, loadWorkspaceConfig(root)))).digest('hex') !== proposal.evidenceDigest || livingCvEvidenceRevision(root) !== proposal.livingCvSourceRevision)) throw new Error('CV evidence or source changed after proposal generation; regenerate before activation.');
     if (!proposal || proposal.proposalId !== proposalId) {
       if (existingIntent?.proposalId === proposalId && completedActivation(root, existingIntent)) {
         renew();
@@ -578,6 +611,7 @@ export function activateOnboardingProposal(root, proposalId, confirmed, {
       if (!requiredOk) throw new Error('Scout doctor rejected the activated workspace');
       const marker = {
         activatedAt, provider: proposal.provider, proposalId,
+        livingCvEvidenceDigest: proposal.livingCvEvidenceDigest || null,
         stagedHashes: proposal.stagedHashes,
         activatedHashes: Object.fromEntries(ONBOARDING_FILES.map((relative) => [relative, sha256(targetPath(root, relative))])),
       };

@@ -342,10 +342,56 @@ stand-ins are installed before native first launch so discovery cannot fall
 back to an existing host account. Owned read-only macOS/portable app trees are
 made removable only inside the disposable install root; workspace preservation
 and occupied-port/existing-install guards remain enforced.
-
 Independent review found candidate-version ordering still used a lexical fallback.
 Observed RED at the public update-check action for an installed candidate moving
 to the final beta; numeric `rc10` versus `rc2` was also wrong. Semantic candidate
 ordering and all supported version projections now agree. Candidate-tag artifact
 uploads are disabled as well as deployment/publication. Post-fix full Node
 verification passed 1,587 total, 1,581 passed, zero failed, six platform skips.
+
+## 2026-10-26 — standalone workflows (Codex standalone-features agent)
+
+Work is on `friend/standalone-features`, with the reviewed package integration
+merged into the branch. This section records implementation and evidence; it
+does not tick release gates or claim a merge to the canonical integration branch.
+
+| Area inspected | Existing implementation reused | Gap implemented |
+| --- | --- | --- |
+| Adaptive setup and lanes | Bounded universal/specialist questions, explicit profile publication, traceable lane history and reversible retirement | First-run wording, editable browser-local language/currency/time-zone proposals, no implicit Adzuna country; existing workspaces retain their explicit settings |
+| Living CV | Master-CV assessment prompt digest and six-per-scan historical-rejection reassessment cap | External read-only Markdown/JSON source, background checks while open, exact diff approval, immutable versions, prepared approval/recovery, profile rebuilding from approved evidence |
+| Application drafts | Job-specific CV/cover-letter chat, editable source, per-role folders, Typst runtime and CV quality checks | Cover-letter PDF target, visible DRAFT label, correct library selection and stale-download refusal |
+| Explicit learning | Separate feedback events, reviewed proposals, interpretable bounded ranking, versions and undo | Thumbs/reason forms, optional title/employer proposals, honest save failures, reset with retained history and undo |
+| Employer registry | Watch priority, rotated careers monitoring, terms/robots guards, per-employer health and history | Bounded private employer notes preserved across discovery and monitoring |
+| Phone and first use | Existing responsive PWA and private workspace boundary | Phone-width approval/feedback tests, usable text entry, short Getting started and troubleshooting guidance |
+
+The code/docs TODO and roadmap search found no additional unfinished user
+feature outside the epic/request ownership above. Household instance management,
+local-provider execution, native artifact smoke tests, signing and final browser
+and CI release gates are separate workstreams and are not claimed here.
+
+Synthetic regression evidence includes pre-fix HTTP 404 for Living CV and
+cover-letter PDF routes, absent phone controls, a feedback failure hidden behind
+a success message, unchosen-country requests, FIFO process timeout, and
+interrupted approval without recovery. The repairs exercise exact approval and
+revision conflicts, immutable history, JSON validation, source loss, digest
+tampering, non-blocking descriptor validation, every approval replacement
+boundary, post-crash conflict preservation, idempotent recovery, recovery before
+scan/provider admission, profile evidence refresh, PDF freshness, feedback
+publication/reset/undo and workspace isolation. Full-suite, privacy-audit and
+browser results are recorded on the draft PR for the tested head. Tests do not
+use live provider logins or personal workspaces.
+
+Owner-only release actions and acceptance remain governed by the final
+integration review and release gates. No release was published and no private
+source file was added to the public repository.
+
+Independent review added composition fixes: pending CV approvals gate ordinary
+chat, fit assessment and editable provider work; CV read/edit/render paths reject
+sibling workspace links; profile rebuilds preserve existing schedules and bind
+start/staging/activation evidence revisions; source checks compare the approved
+external digest and derive rebuild completion from the activation marker.
+Disconnect/import retires active external evidence while keeping versions.
+Local-only operation now has a trusted structured evidence-selector draft flow,
+an explicit editable preview/save step and a separate DRAFT CV PDF target.
+Fake HTTP/provider-to-save-to-render tests cover both draft kinds; generic
+operation projections contain an opaque draft ID and no CV text.

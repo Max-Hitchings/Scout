@@ -4,7 +4,7 @@ Scout is a local-first, AI-assisted opportunity finder. It searches configured j
 
 Scout never submits an application or sends outreach. Your CV, profile, tracker, reports, applications, chat history, and source credentials live in a separate private workspace.
 
-**New user?** Start with the [five-minute quick start](docs/QUICK_START.md), then choose [Windows](docs/INSTALL_WINDOWS.md), [macOS](docs/INSTALL_MACOS.md), or [Linux](docs/INSTALL_LINUX.md). Advanced users can run the same private workspace on an always-on Linux host by following the [VPS guide](docs/INSTALL_VPS.md). Scout beta packages are unsigned and require a configured local model server or your own authenticated Codex or Claude provider account.
+**New user?** Start with [Getting started](docs/GETTING_STARTED.md), then choose [Windows](docs/INSTALL_WINDOWS.md), [macOS](docs/INSTALL_MACOS.md), or [Linux](docs/INSTALL_LINUX.md). Advanced users can run the same private workspace on an always-on Linux host by following the [VPS guide](docs/INSTALL_VPS.md). Scout beta packages are unsigned and require a configured local model server or your own authenticated Codex or Claude provider account.
 
 > **Repository note:** this repository contains the public Scout application. Personal CV, profile, tracker, report, application, chat, and credential data belongs only in a separate private workspace. See [Repository layout](docs/REPOSITORY_LAYOUT.md).
 

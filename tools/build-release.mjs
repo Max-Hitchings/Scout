@@ -33,6 +33,8 @@ export const RELEASE_FILES = Object.freeze([
   { source: 'docs/DOCUMENTATION.md', target: 'docs/DOCUMENTATION.md' },
   { source: 'docs/OPERATIONS.md', target: 'docs/OPERATIONS.md' },
   { source: 'docs/QUICK_START.md', target: 'docs/QUICK_START.md' },
+  { source: 'docs/GETTING_STARTED.md', target: 'docs/GETTING_STARTED.md' },
+  { source: 'docs/LIVING_CV.md', target: 'docs/LIVING_CV.md' },
   { source: 'docs/INSTALL_WINDOWS.md', target: 'docs/INSTALL_WINDOWS.md' },
   { source: 'docs/INSTALL_MACOS.md', target: 'docs/INSTALL_MACOS.md' },
   { source: 'docs/INSTALL_LINUX.md', target: 'docs/INSTALL_LINUX.md' },

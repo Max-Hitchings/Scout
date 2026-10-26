@@ -94,5 +94,5 @@ test('commute preferences explain their assessment and dashboard limits', async 
     window.ScoutSetup.preferenceStep = 2;
     window.ScoutSetup.renderPreferences();
   });
-  await expect(page.locator('#setup-body')).toContainText('They do not filter newly discovered vacancies.');
+  await expect(page.locator('#setup-body')).toContainText('They do not filter newly discovered jobs.');
 });
