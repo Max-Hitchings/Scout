@@ -172,7 +172,10 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   `network-unavailable`, `rate-limited`, `cli-update-required` and
   `provider-error`. Checks run at startup, before manual/scheduled work,
   periodically while schedules are enabled and after login outcomes. A remote
-  auth failure remains authoritative until a real remote success. A blocked
+  auth failure remains authoritative until a real remote success. The
+  local HTTP provider preserves explicit 401/403 authentication failures and
+  429 rate limits from response headers while cancelling the unneeded error
+  body; oversized or stalled bodies cannot mask those failure states. A blocked
   provider creates deduplicated durable alert/run evidence and blocks only its
   own work; there is no silent substitution or automatic missed-window resend.
   Setup provider cards, guided sign-in advice and doctor readiness share one
