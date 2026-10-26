@@ -78,6 +78,17 @@ test('headless command delivery runs a real process with literal arguments and l
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('a protected executable in a writable directory cannot be selected for outbound delivery', { skip: process.platform === 'win32' }, async () => {
+  const { validateOutboundConfig } = await import('./headlessNotifications.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-outbound-writable-parent-'));
+  try {
+    const command = path.join(root, 'command');
+    fs.copyFileSync(process.execPath, command); fs.chmodSync(command, 0o700);
+    fs.chmodSync(root, 0o770);
+    assert.throws(() => validateOutboundConfig({ schemaVersion: 1, enabled: true, type: 'command', command, args: [] }), /protected.*director/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('outbound configuration cannot be borrowed through a linked workspace directory', async () => {
   const { loadOutboundConfig } = await import('./headlessNotifications.mjs');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-outbound-links-'));
