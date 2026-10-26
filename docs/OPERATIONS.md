@@ -313,6 +313,9 @@ Run it alongside the normal suite. The owner-only current-provider check is in
 
 1. Update the public checkout from `main` and create a focused `codex/` branch.
 2. Use a disposable synthetic workspace for tests; never point development tests at the authoritative workspace.
+   Settings acceptance includes delayed profile/sign-in responses released after
+   actual input edits; the saved request must retain those edits without waiting
+   for background loading before the user can interact.
 3. Implement the change with regression coverage and update affected documentation and in-app guidance.
 4. Run the complete test suite, release privacy audit, packaging checks, and relevant manual acceptance. For a workspace-format release, also migrate a production-shaped synthetic workspace, materialise its beta.22 rollback into a separate directory, compare every manifest digest and prove the live synthetic workspace retained its newer data.
    Platform packagers consume only the audit-created content snapshot, recheck
