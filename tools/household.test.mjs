@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
 test('household CLI creates isolated workspaces, lists and switches the next process without copying data', () => {
@@ -79,6 +79,54 @@ test('an unavailable sibling does not block a healthy instance and list reports 
   registry.instances[1].workspace = path.join(first.workspace, 'nested');
   fs.writeFileSync(file, JSON.stringify(registry));
   assert.throws(() => readHousehold({ file }), /overlap|isolated/i, 'structurally unsafe registries still fail closed');
+});
+
+test('household updates reclaim an old empty legacy lock without deleting any registry data', async (t) => {
+  const { createHouseholdInstance, switchHouseholdInstance } = await import('../ui/lib/household.mjs');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-household-old-lock-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'registry.json');
+  const instance = createHouseholdInstance({ appRoot: process.cwd(), directory, file, id: 'synthetic-first', port: 8460, initialise() {} });
+  const before = JSON.parse(fs.readFileSync(file));
+  fs.mkdirSync(`${file}.lock`);
+  const old = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  fs.utimesSync(`${file}.lock`, old, old);
+  assert.equal(switchHouseholdInstance(instance.id, { file }).ok, true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)), before);
+});
+
+test('a crashed household command releases its lock while a live command stays fenced even when aged', async (t) => {
+  const { createHouseholdInstance, switchHouseholdInstance } = await import('../ui/lib/household.mjs');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-household-crash-lock-'));
+  const file = path.join(directory, 'registry.json');
+  const ready = path.join(directory, 'ready');
+  let child;
+  const closeChild = async () => {
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    const closed = new Promise((resolve) => child.once('close', resolve));
+    child.kill('SIGKILL');
+    await closed;
+  };
+  t.after(async () => { await closeChild(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const first = createHouseholdInstance({ appRoot: process.cwd(), directory, file, id: 'synthetic-first', port: 8460, initialise() {} });
+  child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import fs from 'node:fs';
+    import { createHouseholdInstance } from './ui/lib/household.mjs';
+    createHouseholdInstance({appRoot:process.cwd(),directory:${JSON.stringify(directory)},file:${JSON.stringify(file)},id:'synthetic-second',port:8461,initialise(){
+      fs.writeFileSync(${JSON.stringify(ready)},'ready');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0);
+    }});
+  `], { stdio: 'ignore' });
+  const deadline = Date.now() + 10000;
+  while (!fs.existsSync(ready) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(fs.existsSync(ready), true, 'the real child must hold the registry mutation lock');
+  const old = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  fs.utimesSync(`${file}.lock`, old, old);
+  assert.throws(() => switchHouseholdInstance(first.id, { file }), /busy|in progress/i);
+  await closeChild();
+  assert.equal(switchHouseholdInstance(first.id, { file }).ok, true);
+  assert.equal(JSON.parse(fs.readFileSync(file)).instances.length, 1, 'the interrupted new instance was not committed');
+  assert.equal(fs.existsSync(path.join(directory, 'workspace-synthetic-second')), true, 'partial workspace data is preserved');
 });
 
 test('selected household runtime isolates provider homes and honours explicit workspace over selection', async () => {
