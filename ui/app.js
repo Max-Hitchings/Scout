@@ -280,7 +280,7 @@ const Scout = {
   },
   categoryIds() { return this.categories().map((category) => category.id); },
   categoryLabel(id) { return this.categories().find((category) => category.id === id)?.label || id; },
-  triagePolicy() { return { actionScore: 70, checkScore: 55, ...(this.workspaceConfig?.triage || {}) }; },
+  triagePolicy() { return this.workspaceConfig?.modePolicy?.triage || { actionScore: 70, checkScore: 55, ...(this.workspaceConfig?.triage || {}) }; },
   categoryOf(e) {
     const raw = String(e.category || e.jobCategory || '').toLowerCase();
     const ids = this.categoryIds();
@@ -396,7 +396,7 @@ const Scout = {
     this.renderShortlist();
     this.renderPipeline();
     this.renderAll();
-    this.queueStrongMatches();
+    this.loadNotifications();
   },
 
   renderDiscoveryMode() {
@@ -3012,6 +3012,8 @@ const Scout = {
       case 'open-codex-task': return this.openCodexTask();
       case 'copy-codex-task': return this.copyCodexTask();
       case 'close-chat': return this.closeChat();
+      case 'acknowledge-notification': return this.acknowledgeNotification(id);
+      case 'review-notification': this.showTab('jobs'); return this.loadOpportunities();
       case 'send-chat': return this.sendChat();
       case 'resend-chat': return this.resendChat();
       case 'stop-chat': return this.stopChat();
@@ -3165,6 +3167,38 @@ const Scout = {
 
   providerName(provider) { return provider === 'claude' ? 'Claude' : 'Codex'; },
 
+  async loadNotifications() {
+    try {
+      const body = await this.api('/api/notifications');
+      this.renderNotifications(body.alerts || []);
+    } catch {
+      const container = document.getElementById?.('scout-notifications');
+      if (container) {
+        container.classList.remove('hidden');
+        container.textContent = 'Scout notifications could not be loaded. Refresh Scout to retry.';
+      }
+    }
+  },
+
+  renderNotifications(alerts) {
+    const container = document.getElementById?.('scout-notifications');
+    if (!container) return;
+    container.classList.toggle('hidden', alerts.length === 0);
+    container.innerHTML = alerts.map((alert) => `<div class="provider-health-row"><strong>${this.esc(alert.title)}</strong><p>${this.esc(alert.body)}</p><button class="act" type="button" data-action="review-notification">Review in Scout</button> <button class="act" type="button" data-action="acknowledge-notification" data-id="${this.esc(alert.id)}">Acknowledge notification</button></div>`).join('');
+  },
+
+  async acknowledgeNotification(id) {
+    try {
+      const response = await fetch('/api/notifications/acknowledge', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }),
+      });
+      if (!response.ok) throw new Error('notification acknowledgement failed');
+      this.renderNotifications((await response.json()).alerts || []);
+    } catch {
+      document.getElementById?.('scout-notifications')?.insertAdjacentHTML('afterbegin', '<p role="status">The notification is still pending. Retry when the scan finishes.</p>');
+    }
+  },
+
   async loadProviderHealth() {
     let providers;
     try {
@@ -3308,6 +3342,7 @@ const Scout = {
     window.setTimeout?.(() => this.checkForAppUpdate(false), 2500);
     window.setInterval?.(() => this.refreshSyncStatus(), 5 * 60 * 1000);
     window.setInterval?.(() => this.loadProviderHealth(), 5 * 60 * 1000);
+    window.setInterval?.(() => this.loadNotifications(), 60 * 1000);
     window.setInterval?.(() => {
       this.serviceWorkerRegistration?.update?.();
       this.checkUiBuild();

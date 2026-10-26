@@ -16,6 +16,7 @@ scout doctor
 ```json
 {
   "schemaVersion": 2,
+  "mode": "background",
   "locale": "en-GB",
   "currency": "GBP",
   "timezone": "Europe/London",
@@ -39,6 +40,7 @@ scout doctor
 }
 ```
 
+- `mode` is `background` (the default, including existing workspaces) or `active`. It sets the existing assessment bars, scan result cap and local alert/digest policy; see [Search modes and alerts](SEARCH_MODES_AND_ALERTS.md). It is independent of a schedule job’s `primary`/`second-pass` mode.
 - `locale`, `currency` and `timezone` are required strings. Use recognised BCP 47, ISO 4217 and IANA values.
 - `profile.tone` guides drafts; it never authorises sending.
 - Search arrays contain user-defined plain-text preferences. `salaryMinimum` is numeric or `null`; adverts with missing salary remain uncertain rather than passing automatically.

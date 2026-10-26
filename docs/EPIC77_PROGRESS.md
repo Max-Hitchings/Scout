@@ -203,3 +203,37 @@ the token. Three real-file regressions were observed failing before the repair;
 they cover reservation failure and completion persistence failure for both paths.
 If Scout exits after reservation, the user reviews the conversation and composes
 a new request deliberately; automatic replay is never attempted.
+## 2026-10-25 — Codex: workspace modes and local alerts
+
+- Added per-workspace background watch and active hunting choices to the setup
+  conversation and Settings; existing workspaces default to background watch.
+  Both modes use the existing deterministic ranking and assessment gates, with
+  different bars, result caps and daily active-hunt digest behaviour.
+- Added bounded local alerts with durable provider episodes, per-vacancy tracker
+  dedupe, acknowledgement and a delivery outbox. Scan alert state is part of the
+  tracker/report mutation receipt. Runtime alerts and delivery receipts use
+  companion files so later acknowledgement cannot invalidate crash recovery.
+- Preserved exceptional pending matches across active-to-background changes and
+  kept lifetime match dedupe on existing tracker entries so historical active
+  matches cannot fill the outbox. Dashboard acknowledgement can free historical
+  capacity without pretending native delivery occurred.
+- Windows tray delivery uses an immutable notification/icon owner, shared status
+  balloon arbitration and bounded local HTTP calls. Delayed events from a retired
+  icon cannot acknowledge a newer match. No outbound notification service was
+  added. The C# change was reviewed by reading; Windows compilation, installation
+  and notification-settings acceptance remain unverified on this Linux host.
+- Verification observed RED then GREEN for mode defaults/policy, assessed-score
+  thresholds, notification schema, provider partial-commit dedupe, scan receipt
+  recovery, mode changes, 10,000-match capacity, dashboard-only acknowledgement,
+  distinct query-only adverts and the real ranked scan-to-alert path. Chromium
+  setup/settings/alerts checks passed 37/37; Firefox was unavailable. Full-suite
+  counts and exact tested head are recorded in the draft package PR.
+- The Linux test container's PID 1 does not reap orphan processes. Tests use an
+  external child-subreaper wrapper; Scout's process tests were not weakened.
+  F-1, D-1, live provider checks, private workspaces and deployment were untouched.
+
+- Follow-up self-review isolated provider-warning capacity from match history.
+  Health replacement always wins over notification-storage errors; a bounded
+  pending intent preserves failure/recovery episodes until publication. The
+  independent 64-record operational reserve retires superseded/resolved history
+  while retaining current warnings and monotonic episode identities.

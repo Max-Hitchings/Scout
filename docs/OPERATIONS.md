@@ -123,6 +123,19 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   completed jobs or batches. Durable request records contain only stable job
   references, input digests, bounded parameters and versioned provenance, not
   CVs, adverts, prompts, transcripts or raw provider responses.
+- Every workspace selects background watch or active hunting. The existing
+  ranking/assessment gates apply mode-dependent thresholds and scan caps.
+  Assessed-match notifications participate in the tracker/report mutation
+  receipt; provider-failure episodes enter the bounded private local outbox
+  independently of fenced health replacement, using a bounded pending intent.
+  Full notification storage cannot override a remote-authentication failure. Active hunting flushes a non-empty daily
+  digest; background watch has no routine digest. Polls atomically retain
+  consumed pending identities beside runtime alerts, including ordinary
+  active matches cleared by a switch to background watch. They never rewrite
+  the scan's receipted notification target. Windows tray delivery polls
+  only local endpoints and acknowledges delivery separately from dashboard
+  acknowledgement. No outbound notification service is configured. See
+  [Search modes and alerts](SEARCH_MODES_AND_ALERTS.md).
 - Device-local provider health uses `checking`, `ready`,
   `credentials-present-unverified`, `sign-in-required`, `login-in-progress`,
   `network-unavailable`, `rate-limited`, `cli-update-required` and

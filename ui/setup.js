@@ -157,9 +157,19 @@ export function providerLoginPanelHtml(
 }
 
 
+export function searchModeQuestionHtml(mode = 'background') {
+  return `<label class="setup-field wide">How should Scout help you?
+    <select id="setup-mode">
+      <option value="background"${mode === 'background' ? ' selected' : ''}>Background watch — only exceptional matches</option>
+      <option value="active"${mode === 'active' ? ' selected' : ''}>Active job hunt — daily new matches</option>
+    </select></label>
+    <p class="meta">Background watch stays quiet unless an assessed match is exceptional. Active job hunt brings you a daily summary of new good matches and invites your feedback. Provider problems are reported in both modes. You can change this later in Settings.</p>`;
+}
+
 export function buildConfig(form, current = {}) {
   const salary = String(form.salaryMinimum || '').trim();
   return {
+    mode: form.mode || current.mode || 'background',
     locale: String(form.locale || current.locale || 'en-GB').trim(),
     currency: String(form.currency || current.currency || 'GBP').trim().toUpperCase(),
     timezone: String(form.timezone || current.timezone || 'Europe/London').trim(),
@@ -1054,9 +1064,22 @@ const Setup = {
       <p>Locations: ${this.escape((search.locations || []).join(', ') || 'Not configured')}</p>
       <p>Minimum salary: ${search.salaryMinimum == null ? 'Not set' : `${this.escape(config.currency || '')} ${this.escape(search.salaryMinimum)}`}</p>
       <p>Hard exclusions: ${this.escape((search.exclusions || []).join(', ') || 'None')}</p></div>
+      ${searchModeQuestionHtml(config.mode || 'background')}
+      <p><button id="settings-mode-save" class="act" type="button">Save search mode</button></p>
       ${searchProfileReviewHtml(this.searchProfile)}
       <p><button id="settings-retune-search" class="act primary" type="button">Retune my search</button></p>
       <p class="meta">Retuning stages evidence-led changes for review. It does not reset tracker, application, report or chat history.</p>`;
+    this.el('settings-mode-save').addEventListener('click', async () => {
+      try {
+        const result = await requestJson('/api/setup/config', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ mode: this.el('setup-mode').value }),
+        });
+        this.status.config = result.config;
+        await window.Scout?.loadOpportunities?.();
+        this.setMessage('Search mode saved.', 'good');
+      } catch { this.setMessage('Search mode could not be saved. Try again when the scan finishes.', 'error'); }
+    });
     this.el('settings-retune-search').addEventListener('click', () => {
       this.enterRetune('search');
       this.focusDialogTitle();
@@ -1846,6 +1869,7 @@ const Setup = {
   renderPreferences() {
     const c = this.status?.config || {};
     if (!this.preferenceDraft) this.preferenceDraft = {
+      mode: c.mode || 'background',
       displayName: c.profile?.displayName || '', tone: c.profile?.tone || '',
       roleFamilies: (c.search?.roleFamilies || []).join(', '), sectors: (c.search?.sectors || []).join(', '),
       locations: (c.search?.locations || []).join(', '), exclusions: (c.search?.exclusions || []).join(', '),
@@ -1862,6 +1886,7 @@ const Setup = {
       ['What compensation makes a move worthwhile?', 'This guides the search; it is not inserted into applications.', `<label class="setup-field">Minimum base salary<input id="setup-salary" type="number" min="0" step="1000" value="${this.escape(d.salaryMinimum)}"></label><label class="setup-field">Currency<input id="setup-currency" maxlength="3" value="${this.escape(d.currency)}"></label>`],
       ['What should I rule out immediately?', 'Keep these to genuine dealbreakers so I don’t hide an unusual but excellent role.', `<label class="setup-field wide">Hard exclusions <span>comma-separated</span><textarea id="setup-exclusions">${this.escape(d.exclusions)}</textarea></label>`],
     ];
+    questions.push(['Are you looking for a new job now?', 'Choose how often Scout should bring matches to your attention.', searchModeQuestionHtml(d.mode)]);
     const q = questions[this.preferenceStep];
     this.el('setup-body').innerHTML = `
       <div class="setup-conversation"><div class="setup-scout"><span class="setup-scout-frame" role="img" aria-label="Scout is asking a question"></span></div><div class="scout-bubble tail-left"><div class="meta">Question ${this.preferenceStep + 1} of ${questions.length}</div><h2>${q[0]}</h2><p>${q[1]}</p><div class="setup-grid">${q[2]}</div></div></div>`;
@@ -1871,7 +1896,7 @@ const Setup = {
   capturePreferenceQuestion() {
     const d = this.preferenceDraft;
     const value = (id, key) => { const el = this.el(id); if (el) d[key] = el.value; };
-    [['setup-name','displayName'],['setup-tone','tone'],['setup-roles','roleFamilies'],['setup-sectors','sectors'],['setup-locations','locations'],['setup-commute-origin','commuteOrigin'],['setup-commute-mode','commuteMode'],['setup-commute-max','commuteMax'],['setup-salary','salaryMinimum'],['setup-currency','currency'],['setup-exclusions','exclusions']].forEach(([id,key]) => value(id,key));
+    [['setup-mode','mode'],['setup-name','displayName'],['setup-tone','tone'],['setup-roles','roleFamilies'],['setup-sectors','sectors'],['setup-locations','locations'],['setup-commute-origin','commuteOrigin'],['setup-commute-mode','commuteMode'],['setup-commute-max','commuteMax'],['setup-salary','salaryMinimum'],['setup-currency','currency'],['setup-exclusions','exclusions']].forEach(([id,key]) => value(id,key));
     const unknown = this.el('setup-include-unknown'); if (unknown) d.includeUnknown = unknown.checked;
   },
 
@@ -2452,7 +2477,7 @@ const Setup = {
       }
       if (this.step === 2) {
         this.capturePreferenceQuestion();
-        if (this.preferenceStep < 4) {
+        if (this.preferenceStep < 5) {
           this.preferenceStep += 1;
           this.renderPreferences();
           return;

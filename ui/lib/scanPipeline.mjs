@@ -1,3 +1,4 @@
+import { notificationsForAssessment, readNotifications } from './notifications.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -2225,8 +2226,8 @@ export function gateAssessment(assessment, policy, candidate = {}) {
   const rankedScore = Number(candidate?.preRankScore);
   const total = Number.isFinite(rankedScore)
     ? Math.round(rankedScore * 100) / 100
-    : assessment.recommendation === 'keep' ? actionScore
-      : assessment.recommendation === 'check' ? checkScore : 0;
+    : assessment.recommendation === 'keep' ? 70
+      : assessment.recommendation === 'check' ? 55 : 0;
   const unmet = (assessment.mandatoryRequirements || []).filter((item) => item.status === 'unmet');
   const unknown = (assessment.mandatoryRequirements || []).filter((item) => item.status === 'unknown');
   if (assessment.recommendation === 'discard' || unmet.length) {
@@ -2302,15 +2303,16 @@ function mergeTracker(
       outcome, score: gate.score,
       reasons: reasons.map((reason) => boundedText(reason)).filter(Boolean).slice(0, REVIEW_REASON_LIMIT),
     };
+    const previous = existing.opportunities.find((entry) => sameUnderlyingJob(entry, candidate));
     if (!gate.keep) {
-      reviewed.push(review);
+      reviewed.push({ ...review, ...(previous ? { trackerId: previous.id } : {}) });
       continue;
     }
     const baseId = `${slug(candidate.company)}-${slug(candidate.role)}-${date.slice(0, 7)}`;
-    const previous = existing.opportunities.find((entry) => sameUnderlyingJob(entry, candidate));
     let id = previous?.id || baseId;
     for (let suffix = 2; !previous && byId.has(id); suffix += 1) id = `${baseId}-${suffix}`;
     const changedAdvert = Boolean(previous && advertMateriallyChanged(previous, candidate));
+
     const references = mergeSourceReferences(previous || {}, candidate);
     const urls = references.map((reference) => reference.url).filter(Boolean);
     const deterministicDimensions = Array.isArray(candidate.dimensions) ? candidate.dimensions : [];
@@ -2353,7 +2355,7 @@ function mergeTracker(
     const changed = previous && !isDeepStrictEqual(
       keeperContent(previous, identityLimit), keeperContent({ ...previous, ...generated }, identityLimit),
     );
-    reviewed.push({ ...review, trackerOutcome: previous ? changed ? 'updated' : 'unchanged' : 'added' });
+    reviewed.push({ ...review, trackerId: id, trackerOutcome: previous ? changed ? 'updated' : 'unchanged' : 'added' });
     if (previous) {
       Object.assign(previous, generated);
       if (changed) keepersUpdated += 1;
@@ -2641,6 +2643,12 @@ export function coordinateScanArtifacts(root, input, { run, lease, hooks = {} })
       || input.startedAt;
     const artifacts = buildScanArtifacts(root, { ...input, timestamp });
     const date = artifacts.run.timestamp.slice(0, 10);
+    const notifications = input.notificationConfig ? notificationsForAssessment(
+      readNotifications(root), input.notificationConfig, artifacts.run.reviewed, timestamp, { tracker: artifacts.tracker },
+    ) : null;
+    if (notifications && artifacts.contents.tracker !== undefined) {
+      artifacts.contents.tracker = serializeTracker(artifacts.tracker);
+    }
     const hasTracker = artifacts.contents.tracker !== undefined;
     const selectedLanes = Array.isArray(input.lanes) ? input.lanes : [];
     const currentLanePlan = selectedLanes.length ? loadSearchLanePlan(root) : null;
@@ -2720,6 +2728,7 @@ export function coordinateScanArtifacts(root, input, { run, lease, hooks = {} })
         { kind: 'run-log', key: 'scan-log' },
         ...(updatedLanePlan ? [{ kind: 'json', key: 'search-lanes' }] : []),
         ...(updatedEmployerRegistry ? [{ kind: 'json', key: 'employers' }] : []),
+        ...(notifications ? [{ kind: 'json', key: 'notifications' }] : []),
       ],
     };
     plan = prepareMutation({ handle: run, lease }, target, {
@@ -2729,6 +2738,7 @@ export function coordinateScanArtifacts(root, input, { run, lease, hooks = {} })
           artifacts.contents.tracker,
         ),
       } : {}),
+      ...(notifications ? { notifications: jsonReplaceRecipe(notifications) } : {}),
       [`report:${date}`]: artifacts.recipes.report,
       'scan-log': artifacts.recipes.runLog,
       ...(updatedLanePlan ? { 'search-lanes': jsonReplaceRecipe(updatedLanePlan) } : {}),
