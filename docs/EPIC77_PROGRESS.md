@@ -91,3 +91,20 @@ digests survive projection unchanged. Five consecutive coordinated scans cover
 initial addition, repeated verification, a real advert change and its recheck.
 Both new regressions were observed failing before the repair. No advert body is
 added to durable scan artifacts.
+## 2026-10-25 — supply-chain (Codex)
+
+- F-2: CI now uses the same immutable checkout and Node setup commits already
+  pinned in the release workflow. Their upstream `v4.4.0` tag identities were
+  checked. Policy coverage discovers every secret-bearing workflow and checks
+  every action in it, including jobs that do not receive secrets themselves.
+- F-3: allowlisted application and public-source trees exclude nested
+  `node_modules` directories, including case variants. A real staging
+  composition covers every copied tree and confirms top-level production
+  packages and their required nested dependencies remain available.
+- Observed RED before each fix: F-2 reported four mutable CI action references;
+  F-3 reported copied dependency trees. Each focused regression then passed.
+  Release staging, privacy-audit and workflow tests passed together: 71/71.
+- F-1, D-1, platform signing, package publication and live systems are outside
+  this change. Full-suite and hosted-platform evidence is recorded in the draft
+  package PR; Linux tests use a process-reaping wrapper outside the repository
+  because this disposable container's PID 1 does not reap orphaned children.
