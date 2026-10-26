@@ -1483,7 +1483,7 @@ const Setup = {
   async checkLocalProvider() {
     try {
       this.setBusy(true);
-      const local = this.readLocalProviderSettings();
+      const local = this.readLocalProviderSettings() || {};
       if (!local.baseUrl || !local.model) throw new Error('Enter the local server URL and model name.');
       const saved = await requestJson('/api/setup/config', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -1511,6 +1511,9 @@ const Setup = {
       apiKeyFile: this.el('setup-local-key-file').value.trim() || null,
     };
     if (this.selectedProvider() === 'local' && (!local.baseUrl || !local.model)) throw new Error('Enter the local server URL and model name.');
+    // Saving Codex/Claude preferences must not create empty local settings.
+    // A previously configured local provider can still be cleared explicitly.
+    if (!local.baseUrl && !local.model && !local.apiKeyFile && !Object.keys(current).length) return undefined;
     return local;
   },
 

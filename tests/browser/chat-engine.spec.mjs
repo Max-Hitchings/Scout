@@ -148,7 +148,9 @@ test.beforeEach(async ({ page }) => {
 test('the engine picker shows each provider allowance and offers models', async ({ page }) => {
   await page.evaluate((id) => window.Scout.openChat(id, 'ask'), opportunity.id);
   const picker = page.locator('.chat-picker');
-  await expect(picker.locator('.engine-card')).toHaveCount(2);
+  await expect(picker.locator('.engine-card')).toHaveCount(3);
+  await expect(picker.locator('[data-engine-card="local"]')).toContainText('Local model');
+  await expect(picker.locator('[data-engine-card="local"]')).toContainText('Your configured model · text chat');
 
   // A real limit is stated as a limit; Claude spend is stated as spend.
   await expect(picker).toContainText('62% of your weekly limit used');

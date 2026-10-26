@@ -32,6 +32,10 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   configuration or key presence alone remains unverified. Endpoint/model changes
   invalidate incompatible queued/recovered scans. See [Providers](PROVIDERS.md)
   for setup, credentials, transport limits and local-chat capabilities.
+- Staged release audits retain all dependency privacy checks. The only Ajv
+  metadata exception is bound to the exact two vendor paths, reviewed SHA-256
+  and single advert-body heuristic documented in
+  [Supply-chain security](SUPPLY_CHAIN_SECURITY.md); byte drift fails closed.
 - When an authenticated installed Codex client supports catalogue discovery,
   Scout invokes only the fixed read-only `codex debug models` argument vector
   through the resolved provider executable with `shell: false`. The probe has a
