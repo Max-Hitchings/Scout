@@ -890,18 +890,77 @@ const Scout = {
   replaceOpportunityCards(target, html) {
     const previous = new Map([...(target.querySelectorAll?.('.card[data-id]') || [])]
       .map((card) => [card.dataset.id, card]));
+    const feedbackEditors = new Map([...previous].map(([id, card]) => [
+      id, card.querySelector('[data-feedback-form]'),
+    ]).filter(([, editor]) => editor));
     const focused = target.contains?.(document.activeElement) ? document.activeElement : null;
     const selection = focused && typeof focused.selectionStart === 'number'
       ? [focused.selectionStart, focused.selectionEnd, focused.selectionDirection] : null;
-    target.innerHTML = html;
+    // Keep identical nodes connected: a late setup/config refresh may finish
+    // between pointer-down and pointer-up on an unchanged scan-review button.
+    // Compare freshly rendered DOM rather than caching a subset of its inputs.
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    for (const card of template.content.querySelectorAll('.card[data-id]')) {
+      const old = previous.get(card.dataset.id);
+      if (!old) continue;
+      // Include the latest expanded facts/actions before comparing, so an open
+      // card can retain its controls without freezing a stale CV catalogue.
+      if (old.classList.contains('open')) this.expandCard(card.dataset.id, card, true);
+      const feedback = feedbackEditors.get(card.dataset.id);
+      if (feedback) card.append(feedback.cloneNode(true));
+    }
+    const identity = (node) => JSON.stringify([...node.attributes]
+      .filter(({ name }) => name.startsWith('data-'))
+      .map(({ name, value }) => [name, value]).sort());
+    const patchChildren = (parent, source) => {
+      const current = [...parent.childNodes];
+      const next = [...source.childNodes];
+      next.forEach((node, index) => {
+        if (current[index]) patchNode(current[index], node);
+        else parent.append(node);
+      });
+      for (const node of current.slice(next.length)) node.remove();
+    };
+    const patchNode = (current, next) => {
+      if (current.isEqualNode(next)) return;
+      if (current.nodeType !== 1 || next.nodeType !== 1
+        || current.nodeName !== next.nodeName || identity(current) !== identity(next)) {
+        current.replaceWith(next);
+        return;
+      }
+      for (const { name } of [...current.attributes]) {
+        if (!next.hasAttribute(name)) current.removeAttribute(name);
+      }
+      for (const { name, value } of [...next.attributes]) {
+        if (current.getAttribute(name) !== value) current.setAttribute(name, value);
+      }
+      patchChildren(current, next);
+    };
+    const previousChildren = [...target.childNodes];
+    const nextChildren = [...template.content.childNodes];
+    nextChildren.forEach((node, index) => {
+      const current = previousChildren[index];
+      if (current?.isEqualNode(node)) return;
+      // An updated score or fact must not remove an unchanged feedback action.
+      // Keep action identities bound to all their current data attributes.
+      if (current?.nodeType === 1 && node.nodeType === 1
+        && current.matches('.card[data-id]') && current.dataset.id === node.dataset.id) patchNode(current, node);
+      else if (current) current.replaceWith(node);
+      else target.append(node);
+    });
+    for (const node of previousChildren.slice(nextChildren.length)) node.remove();
     for (const card of target.querySelectorAll?.('.card[data-id]') || []) {
       const old = previous.get(card.dataset.id);
       if (!old) continue;
-      if (old.classList.contains('open')) this.expandCard(card.dataset.id, card, true);
       // Keep the live editor and any pending save handler, while rebuilding
       // the job's details from current facts, settings and CV catalogue.
-      const feedback = old.querySelector('[data-feedback-form]');
-      if (feedback) card.append(feedback);
+      const feedback = feedbackEditors.get(card.dataset.id);
+      const copy = card.querySelector('[data-feedback-form]');
+      if (feedback && copy !== feedback) {
+        if (copy) copy.replaceWith(feedback);
+        else card.append(feedback);
+      }
     }
     if (focused?.isConnected) {
       focused.focus({ preventScroll: true });

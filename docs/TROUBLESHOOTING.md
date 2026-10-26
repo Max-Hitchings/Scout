@@ -184,6 +184,10 @@ mutation share one coordinator and must not overlap.
 
 This is not automatically a failed scan. Scout shows the number reviewed, number kept and the discard breakdown (hard exclusions, mandatory gates, below-threshold results and provider assessment discards), with links to the bounded candidate audit and dated report. Check source health first. If a first/manual primary scan keeps zero, Scout automatically runs one broader discovery pass while retaining every approved gate. If both passes keep zero, use **Review this scan** to inspect concise role-level reasons. Do not weaken a genuine hard gate merely to produce results.
 
+You can open that review while startup checks finish. Background configuration
+refreshes preserve unchanged review controls and open job feedback; they still
+update changed job facts, preferences and application-file actions.
+
 ## A PDF is missing, stale or blank
 
 Select the master or tailored source and use its **save changes** and **render PDF** actions, which report independent outcomes: saving persists the source without rendering, and rendering compiles the last saved source without rewriting it. Keep Scout open while the background operation runs. A source edit makes the previous PDF stale immediately; render again after saving. If rendering fails, Scout preserves the old file and confirms the saved source is intact, but will not preview or download the stale PDF as current. Run `scout doctor` and repair/reinstall Scout when the managed Typst runtime is missing. Do not install an unrelated system Typst merely to mask a damaged package.

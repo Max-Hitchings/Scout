@@ -317,6 +317,10 @@ Run it alongside the normal suite. The owner-only current-provider check is in
    Settings acceptance includes delayed profile/sign-in responses released after
    actual input edits; the saved request must retain those edits without waiting
    for background loading before the user can interact.
+   Scan review acceptance also releases an initial setup response between real
+   pointer-down and pointer-up, then checks the full audit and expanded feedback
+   action. Unchanged controls remain connected while freshly rendered changed
+   facts, configuration and application catalogues still replace stale content.
 3. Implement the change with regression coverage and update affected documentation and in-app guidance.
 4. Run the complete test suite, release privacy audit, packaging checks, and relevant manual acceptance. For a workspace-format release, also migrate a production-shaped synthetic workspace, materialise its beta.22 rollback into a separate directory, compare every manifest digest and prove the live synthetic workspace retained its newer data.
    Platform packagers consume only the audit-created content snapshot, recheck
