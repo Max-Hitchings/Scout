@@ -277,7 +277,7 @@ test('candidate refs retain every artifact-upload, deployment and publication gu
   const guardedUploads = [...workflow.matchAll(/- if: \$\{\{ !contains\(github\.ref_name, '-rc'\) \}\}\s+uses: actions\/upload-artifact@/g)];
   assert.equal(uploads.length, 3, 'All three platform artifact uploads are checked');
   assert.equal(guardedUploads.length, uploads.length, 'Every platform upload must exclude release-candidate refs');
-  assert.match(workflow, /deploy-vps:[\s\S]*?if: \(startsWith\(github\.ref, 'refs\/tags\/'\) && !contains\(github\.ref_name, '-rc'\)\)/);
+  assert.match(workflow, /deploy-vps:[\s\S]*?if: \(startsWith\(github\.ref, 'refs\/tags\/'\) && !contains\(github\.ref_name, '-rc'\)(?: && [^\n]+)?\) \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.deploy_vps\)/);
   assert.match(workflow, /publish:[\s\S]*?if: startsWith\(github\.ref, 'refs\/tags\/'\) && !contains\(github\.ref_name, '-rc'\)/);
 });
 
