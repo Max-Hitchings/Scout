@@ -3,6 +3,7 @@ import path from 'node:path';
 import { validatePhysicalWorkspacePath } from './physicalPath.mjs';
 import { atomicWriteFile } from './atomicWrite.mjs';
 import { deviceSettingsPath } from './deviceSettings.mjs';
+import { acquireProcessDirectoryLock } from './processDirectoryLock.mjs';
 
 export function householdSettingsPath(env = process.env) {
   const hostEnv = { ...env };
@@ -59,14 +60,16 @@ export function listHousehold(options = {}) {
 }
 function update(file, action) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const lock = `${file}.lock`;
-  try { fs.mkdirSync(lock, { mode: 0o700 }); } catch { throw new Error('household registry is busy; retry after the other command finishes'); }
+  const lock = acquireProcessDirectoryLock(`${file}.lock`);
+  if (!lock) throw new Error('household registry is busy; retry after the other command finishes');
   try {
+    lock.assertOwned();
     const state = readHousehold({ file });
     const result = action(state);
+    lock.assertOwned();
     atomicWriteFile(file, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
     return result;
-  } finally { fs.rmdirSync(lock); }
+  } finally { lock.release(); }
 }
 const overlaps = (a, b) => { const rel = path.relative(a, b); return !rel || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel)); };
 export function createHouseholdInstance({ appRoot, directory, id, port, file = householdSettingsPath(), initialise }) {

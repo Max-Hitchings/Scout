@@ -80,6 +80,14 @@ Selection affects the next CLI or web process without `--workspace` or `SCOUT_WO
 
 Living CV source selection is available only on the host-local dashboard. It rejects source paths inside all registered household workspaces and `.scout` directories, resolving directory aliases before reading. These application checks also apply without systemd. The systemd filesystem sandbox blocks accidental access to sibling state from an instance. A single Unix account is still an administrator trust boundary: the account owner can change the units or run commands outside that sandbox. Use separate Unix accounts, independent provider credentials and separately authorised private access when household members must be protected from one another. A loopback port is not a household authentication system; the owner must map each person's private access to only their instance.
 
+Household registry updates record the owning process, its start identity and the
+acquisition time in private coordination state. A later command can reclaim a
+proven-dead owner. An old empty lock left by earlier versions becomes eligible
+after ten minutes; cleanup never removes a non-empty unknown directory. Live or
+unverifiable owners remain busy even when old, preventing overlapping writes.
+The coordination directory can remain after a successful command and is not
+itself evidence that a command is still running.
+
 ## Local dashboard API
 
 `GET /api/summary` is read-only, local-only and uncached. It never starts a provider, scan, digest or tracker mutation. The response has `schemaVersion: 1` and:

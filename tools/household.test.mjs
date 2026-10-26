@@ -88,6 +88,7 @@ test('household updates reclaim an old empty legacy lock without deleting any re
   const file = path.join(directory, 'registry.json');
   const instance = createHouseholdInstance({ appRoot: process.cwd(), directory, file, id: 'synthetic-first', port: 8460, initialise() {} });
   const before = JSON.parse(fs.readFileSync(file));
+  fs.rmSync(`${file}.lock`, { recursive: true, force: true });
   fs.mkdirSync(`${file}.lock`);
   const old = new Date(Date.now() - 24 * 60 * 60 * 1000);
   fs.utimesSync(`${file}.lock`, old, old);
