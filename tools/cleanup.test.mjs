@@ -144,3 +144,21 @@ test('actual cleanup CLI separately reviews queue compaction and preserves recen
   assert.deepEqual(projectScanQueue(root).requests.map((item) => item.id), ['synthetic-live']);
   assert.equal(fs.existsSync(path.join(root, '.scout/runs/synthetic-run-00')), true);
 });
+
+test('queue-only cleanup requires the existing persisted recovery key before any compaction', async (t) => {
+  const { enqueueScanRequest, projectScanQueue } = await import('../ui/lib/scanQueue.mjs');
+  const { root, parent, cli } = fixture(t);
+  const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: 'synthetic-key-check' });
+  try { enqueueScanRequest(root, { id: 'synthetic-old-queue', key: 'synthetic-old-queue', requester: 'manual', purpose: 'job-discovery',
+    requestedAt: '2020-01-01T00:00:00.000Z', expiresAt: '2020-01-02T00:00:00.000Z', windowAt: null,
+    compatibility: { schemaVersion: 1, profileFingerprint: 'a'.repeat(64), configFingerprint: 'b'.repeat(64) }, lease }); }
+  finally { releaseScanLease(lease); }
+  const output = path.join(parent, 'queue-key-review.json');
+  const planned = cli('--plan', '--queue', '--output', output);
+  assert.equal(planned.status, 0, planned.stderr);
+  const review = JSON.parse(planned.stdout);
+  saveSyncSettings(root, { enabled: true, dataKey: crypto.randomBytes(32).toString('base64url') });
+  const applied = cli('--apply', output, '--confirm', review.reviewDigest);
+  assert.notEqual(applied.status, 0);
+  assert.deepEqual(projectScanQueue(root).requests.map((item) => item.id), ['synthetic-old-queue']);
+});
