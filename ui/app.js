@@ -1801,7 +1801,7 @@ const Scout = {
     const title = draft.kind === 'cv' ? 'CV' : 'cover-letter';
     return `<div class="setup-callout"><h3>Review ${title} draft</h3><p>Scout selects relevant confirmed CV passages and keeps their facts and headings. You can edit the draft below. Check the current advert and every fact; Scout never sends this material.</p>
       <p role="status">${this.esc(draft.message || '')}</p>
-      ${typeof draft.markdown === 'string' ? `<label class="setup-field wide">Editable draft<textarea id="application-draft-text" class="cv-source" data-input-action="application-draft-dirty">${this.esc(draft.markdown)}</textarea></label><label><input id="application-draft-confirm" type="checkbox"> I reviewed the facts and my edits and want to save this draft</label><p><button class="act primary" data-action="save-reviewed-draft">Save reviewed draft</button> <button class="act" data-action="discard-reviewed-draft">Discard unsaved draft</button></p>` : `<button class="act primary" data-action="generate-reviewed-draft"${draft.busy ? ' disabled' : ''}>Generate draft from confirmed CV facts</button>`}
+      ${typeof draft.markdown === 'string' ? `<label class="setup-field wide">Editable draft<textarea id="application-draft-text" class="cv-source" data-input-action="application-draft-dirty"${draft.busy ? ' readonly' : ''}>${this.esc(draft.markdown)}</textarea></label><label><input id="application-draft-confirm" type="checkbox"${draft.busy ? ' disabled' : ''}> I reviewed the facts and my edits and want to save this draft</label><p><button class="act primary" data-action="save-reviewed-draft"${draft.busy ? ' disabled' : ''}>Save reviewed draft</button> <button class="act" data-action="discard-reviewed-draft"${draft.busy ? ' disabled' : ''}>Discard unsaved draft</button></p>` : `<button class="act primary" data-action="generate-reviewed-draft"${draft.busy ? ' disabled' : ''}>Generate draft from confirmed CV facts</button>`}
     </div>`;
   },
 
@@ -1813,6 +1813,13 @@ const Scout = {
   async startReviewedDraft(id, kind) {
     id ||= document.getElementById('cv-create-opportunity')?.value;
     if (!id) return;
+    if (this.applicationDraft?.busy) {
+      this.applicationDraft.message = 'Wait for the current application draft to finish before starting another.';
+      this.renderApplicationDraft();
+      return;
+    }
+    if (typeof this.applicationDraft?.markdown === 'string'
+      && !window.confirm('Discard this unsaved application draft and your edits before starting another?')) return;
     this.applicationDraft = { opportunityId: id, kind, message: 'Generate a draft, then review it before saving. Your application CV and other drafts stay in place until you explicitly save.' };
     this.showTab('cv');
     await this.waitFor('#application-draft-panel');
@@ -1844,10 +1851,22 @@ const Scout = {
 
   async saveReviewedDraft() {
     const draft = this.applicationDraft;
-    if (!draft?.draftId) return;
+    if (!draft?.draftId || draft.busy) return;
     if (!document.getElementById('application-draft-confirm')?.checked) { draft.message = 'Review and confirm the draft before saving.'; this.renderApplicationDraft(); return; }
-    const saved = await this.api('/api/cv/drafts/save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ draftId: draft.draftId, markdown: document.getElementById('application-draft-text').value, confirmed: true }) });
-    if (saved.error) { draft.message = saved.error; this.renderApplicationDraft(); return; }
+    draft.markdown = document.getElementById('application-draft-text').value;
+    draft.busy = true;
+    draft.message = 'Saving reviewed draft…';
+    this.renderApplicationDraft();
+    let saved;
+    try {
+      saved = await this.api('/api/cv/drafts/save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ draftId: draft.draftId, markdown: draft.markdown, confirmed: true }) });
+      if (saved.error) throw new Error(saved.error);
+    } catch (error) {
+      draft.busy = false;
+      draft.message = error.message;
+      this.renderApplicationDraft();
+      return;
+    }
     this.applicationDraft = null;
     await this.renderCv();
     await this.openCv(saved.path, saved.slug, draft.opportunityId);
@@ -3167,7 +3186,7 @@ const Scout = {
       case 'start-reviewed-draft': return this.startReviewedDraft(id, element.dataset.kind);
       case 'generate-reviewed-draft': return this.generateReviewedDraft();
       case 'save-reviewed-draft': return this.saveReviewedDraft();
-      case 'discard-reviewed-draft': this.applicationDraft = null; return this.renderApplicationDraft();
+      case 'discard-reviewed-draft': if (this.applicationDraft?.busy) return; this.applicationDraft = null; return this.renderApplicationDraft();
       case 'save-cv': return this.saveCv();
       case 'render-cv': return this.renderCvOnly();
       case 'download-cv': return this.downloadCv();

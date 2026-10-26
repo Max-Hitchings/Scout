@@ -125,3 +125,98 @@ test('phone reviewed draft flow keeps local-model text editable and requires con
   expect(saves).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });
+
+async function openReviewedDraftFixture(page, generationReady = Promise.resolve()) {
+  const source = '# DRAFT\n\nConfirmed synthetic CV experience.';
+  let generationRequested;
+  const started = new Promise((resolve) => { generationRequested = resolve; });
+  await page.route('**/api/cv', (route) => route.fulfill({ json: { applications: [], outreach: [], entries: [], draftCvs: [] } }));
+  await page.route('**/api/cv/drafts/generate', async (route) => {
+    generationRequested(route.request().postDataJSON());
+    await generationReady;
+    await route.fulfill({ json: { operation: { id: 'synthetic-draft', status: 'succeeded', result: { draftId: 'synthetic-draft' } } } });
+  });
+  await page.route('**/api/cv/drafts/preview**', (route) => route.fulfill({ json: { opportunityId: 'new-systems-product-2026-07', kind: 'cv', revision: 'synthetic-revision', provider: 'local', markdown: source } }));
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => Boolean(window.Scout?.state?.cvFiles))).toBe(true);
+  await page.getByRole('button', { name: 'CV', exact: true }).click();
+  await page.getByRole('button', { name: 'Review CV options' }).click();
+  await page.locator('#cv-create-opportunity').selectOption('new-systems-product-2026-07');
+  await page.getByRole('button', { name: 'Create reviewed CV draft' }).click();
+  await page.getByRole('button', { name: 'Generate draft from confirmed CV facts' }).click();
+  return { source, started };
+}
+
+for (const transition of [
+  { name: 'another draft type', role: 'new-systems-product-2026-07', button: 'Create reviewed letter draft', heading: 'Review cover-letter draft' },
+  { name: 'another role', role: 'legacy-systems-hardware-2026-07', button: 'Create reviewed CV draft', heading: 'Review CV draft' },
+]) {
+  test(`switching to ${transition.name} requires explicit discard of unsaved human edits`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { source } = await openReviewedDraftFixture(page);
+    const edited = source + '\nA careful unsaved human edit.';
+    await expect(page.getByLabel('Editable draft')).toHaveValue(source);
+    await page.getByLabel('Editable draft').fill(edited);
+    await page.getByRole('button', { name: 'Review CV options' }).click();
+    await page.locator('#cv-create-opportunity').selectOption(transition.role);
+    let acceptDiscard = false;
+    let confirmations = 0;
+    page.on('dialog', async (dialog) => {
+      confirmations++;
+      if (acceptDiscard) await dialog.accept();
+      else await dialog.dismiss();
+    });
+    await page.getByRole('button', { name: transition.button, exact: true }).click();
+    await expect(page.getByLabel('Editable draft')).toHaveValue(edited);
+    expect(confirmations).toBe(1);
+    acceptDiscard = true;
+    await page.getByRole('button', { name: transition.button, exact: true }).click();
+    await expect(page.getByRole('heading', { name: transition.heading, exact: true })).toBeVisible();
+    await expect(page.getByLabel('Editable draft')).toHaveCount(0);
+    expect(confirmations).toBe(2);
+  });
+}
+
+test('starting another draft cannot replace generation that is still in flight', async ({ page }) => {
+  let releaseGeneration;
+  const generationReady = new Promise((resolve) => { releaseGeneration = resolve; });
+  const { source, started } = await openReviewedDraftFixture(page, generationReady);
+  expect(await started).toMatchObject({ opportunityId: 'new-systems-product-2026-07', kind: 'cv' });
+  await page.getByRole('button', { name: 'Review CV options' }).click();
+  await page.locator('#cv-create-opportunity').selectOption('legacy-systems-hardware-2026-07');
+  await page.getByRole('button', { name: 'Create reviewed letter draft', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Generate draft from confirmed CV facts' })).toBeDisabled();
+  releaseGeneration();
+  await expect(page.getByLabel('Editable draft')).toHaveValue(source);
+  await expect(page.getByRole('heading', { name: 'Review CV draft', exact: true })).toBeVisible();
+});
+
+test('a pending reviewed-draft save blocks switching and duplicate saves', async ({ page }) => {
+  const { source } = await openReviewedDraftFixture(page);
+  await expect(page.getByLabel('Editable draft')).toHaveValue(source);
+  const edited = source + '\nA human edit being saved.';
+  await page.getByLabel('Editable draft').fill(edited);
+  let releaseSave;
+  const saveReady = new Promise((resolve) => { releaseSave = resolve; });
+  let saveRequested;
+  const saveStarted = new Promise((resolve) => { saveRequested = resolve; });
+  let saves = 0;
+  await page.route('**/api/cv/drafts/save', async (route) => {
+    saves++;
+    saveRequested(route.request().postDataJSON());
+    await saveReady;
+    await route.fulfill({ json: { ok: true, path: 'applications/new-systems-product-2026-07/draft-cv.md', slug: 'new-systems-product-2026-07' } });
+  });
+  await page.route('**/api/cv/file**', (route) => route.fulfill({ contentType: 'text/plain', body: edited }));
+  await page.getByRole('checkbox', { name: 'I reviewed the facts and my edits' }).check();
+  await page.getByRole('button', { name: 'Save reviewed draft', exact: true }).click();
+  expect(await saveStarted).toMatchObject({ markdown: edited, confirmed: true });
+  await page.getByRole('button', { name: 'Review CV options' }).click();
+  await page.getByRole('button', { name: 'Create reviewed letter draft', exact: true }).click();
+  await expect(page.getByLabel('Editable draft')).toHaveValue(edited);
+  await expect(page.getByRole('button', { name: 'Save reviewed draft', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Discard unsaved draft', exact: true })).toBeDisabled();
+  releaseSave();
+  await expect(page.locator('#cv-text')).toHaveValue(edited);
+  expect(saves).toBe(1);
+});

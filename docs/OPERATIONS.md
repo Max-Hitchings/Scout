@@ -343,6 +343,10 @@ Living CV source configuration, approved master replacements and content-address
 
 Reviewed application drafts use bounded tool-free structured selection for local, Codex or Claude providers, with provider-work/auth fencing and close-gated cancellation. The provider may return only supplied CV evidence IDs; trusted runtime composition copies facts verbatim. Generation snapshots and rechecks CV, source, job and target revisions. The preview remains in a bounded one-hour in-memory store; operation projections retain an opaque preview ID rather than career text. Explicit reviewed save atomically writes only the selected job's Markdown source under workspace authority. Guided CVs keep a separate DRAFT Typst/PDF target. File read/edit/render paths revalidate physical workspace containment, including sibling-link guards. Profile rebuilds bind start/staging/activation evidence revisions and retain schedules; completed activation markers bind the approved CV for truthful reminder state.
 
+Draft-switch acceptance must preserve edited previews after declined discard,
+including role/type changes. Pending generation and saves block replacement;
+pending saves also lock editing, duplicate saves and discard until they settle.
+
 Multi-file onboarding activation additionally writes a prepared intent before
 the first replacement and reconciles it at startup under the shared workspace
 mutation authority. Proposal staging and discard cannot erase that intent;

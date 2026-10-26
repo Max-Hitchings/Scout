@@ -33,6 +33,39 @@ function loadScout() {
   return { scout: context.window.Scout, context };
 }
 
+test('reviewed draft transitions preserve edits until explicit discard', async () => {
+  const { scout, context } = loadScout();
+  const original = { opportunityId: 'synthetic-role-a', kind: 'cv', draftId: 'synthetic-preview', markdown: '# DRAFT\n\nA careful human edit.' };
+  scout.applicationDraft = original;
+  scout.showTab = () => {};
+  scout.waitFor = async () => {};
+  scout.renderApplicationDraft = () => {};
+  let confirmations = 0;
+  context.window.confirm = () => { confirmations++; return false; };
+  await scout.startReviewedDraft('synthetic-role-b', 'cover-letter');
+  assert.equal(scout.applicationDraft, original);
+  assert.equal(confirmations, 1);
+  context.window.confirm = () => true;
+  await scout.startReviewedDraft('synthetic-role-b', 'cover-letter');
+  assert.equal(scout.applicationDraft.opportunityId, 'synthetic-role-b');
+  assert.equal(scout.applicationDraft.kind, 'cover-letter');
+  assert.equal(scout.applicationDraft.markdown, undefined);
+});
+
+test('busy reviewed draft transitions and discard retain the current work', async () => {
+  const { scout, context } = loadScout();
+  const original = { opportunityId: 'synthetic-role-a', kind: 'cv', busy: true };
+  scout.applicationDraft = original;
+  scout.showTab = () => {};
+  scout.waitFor = async () => {};
+  scout.renderApplicationDraft = () => {};
+  context.window.confirm = () => { throw new Error('Busy work cannot be discarded.'); };
+  await scout.startReviewedDraft('synthetic-role-b', 'cover-letter');
+  assert.equal(scout.applicationDraft, original);
+  scout.runAction({ dataset: { action: 'discard-reviewed-draft' } });
+  assert.equal(scout.applicationDraft, original);
+});
+
 test('an earlier opportunities response cannot replace the latest rendered tracker', async () => {
   const { scout, context } = loadScout();
   context.document.getElementById = () => null;
