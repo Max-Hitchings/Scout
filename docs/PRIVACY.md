@@ -44,10 +44,14 @@ headers, credentials or an unbounded raw payload. Observation diagnostics
 declare `fingerprint-only` retention and are bounded to sixteen fixed codes.
 
 Durable ranked-stage artifacts replace complete advert text with bounded
-semantic facts and digests. The scan log keeps only a sanitised review summary.
-At most the newest 512 review decisions are loaded into a later scan for
-lifecycle comparison. An unchanged prior rejection can therefore be
-revalidated and skipped without sending the advert to the assessment provider
+semantic facts and digests. Stopword-only clauses and duplicate facts are
+omitted; a non-empty description is not a promise of one stored fact per clause.
+The scan log keeps only a sanitised review summary. At most 512 mixed lifecycle
+decisions are loaded: when both pools are full, 384 assessed decisions and 128
+pre-assessment decisions. An undersupplied pool lends its unused places to the
+other. A separate bounded memory reads the full log and retains the latest
+4,096 assessed rejections, including their assessment version. An unchanged
+prior rejection can therefore be revalidated and skipped without sending the advert to the assessment provider
 again; a material, reopened, profile-changed or assessment-contract-changed
 vacancy is eligible for reassessment. Existing run-retention and encrypted
 backup policies govern the underlying private run and scan-log files.

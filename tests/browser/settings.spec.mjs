@@ -720,6 +720,7 @@ test('settings is a single usable scroll surface on a phone viewport', async ({ 
 });
 
 test('guided provider login supports code, failure, retry and cancel without browser persistence', async ({ page }) => {
+  let session = null;
   await page.unroute('**/api/setup/status');
   await page.route('**/api/setup/status', async (route) => {
     await route.fulfill({
@@ -728,13 +729,16 @@ test('guided provider login supports code, failure, retry and cancel without bro
         ...establishedStatus,
         providers: {
           ...establishedStatus.providers,
-          claude: { installed: true, authenticated: false, capabilities: { structuredOutput: true } },
+          claude: {
+            installed: true, authenticated: session?.state === 'succeeded',
+            healthState: session?.state === 'succeeded' ? 'ready' : 'sign-in-required',
+            capabilities: { structuredOutput: true },
+          },
         },
       }),
     });
   });
   await page.unroute('**/api/provider-login/status?*');
-  let session = null;
   let startCount = 0;
   let retryCount = 0;
   let statusRequests = 0;
@@ -1171,4 +1175,20 @@ test('a service-worker or build upgrade waits for CV edits, operations, and sett
     page.waitForNavigation(),
     banner.getByRole('button', { name: 'Refresh Scout' }).click({ force: true }),
   ]);
+});
+
+test('Adzuna country can be reviewed and saved without replacing credentials', async ({ page }) => {
+  let saved;
+  await page.route('**/api/setup/config', async (route) => {
+    saved = route.request().postDataJSON();
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      ok: true, config: { ...establishedStatus.config, sources: { adzuna: { country: saved.sources.adzuna.country } } },
+    }) });
+  });
+  await page.evaluate(() => window.ScoutSetup.openSettings('sources'));
+  await expect(page.getByLabel('Adzuna search country')).toBeVisible();
+  await page.getByLabel('Adzuna search country').selectOption('us');
+  await page.getByRole('button', { name: 'Save search country' }).click();
+  await expect.poll(() => saved?.sources?.adzuna?.country).toBe('us');
+  await expect(page.locator('#setup-body')).toContainText('country');
 });

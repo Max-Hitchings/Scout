@@ -34,6 +34,14 @@ Files must be PDF, DOCX, Markdown or plain text and no larger than 10 MB. Passwo
 
 Confirm both variables exist in the selected workspace `.env`, without quotes accidentally becoming part of their values. Test `scout source adzuna`. Missing Adzuna credentials are non-fatal; invalid credentials, quota and network failures should be recorded as reduced coverage.
 
+## Earlier search settings are active
+
+This dashboard notice means an established workspace is still using its earlier
+search setup. Scans can continue, but the complete published-profile ranking
+path is not active yet. Choose **Review search profile**, inspect the complete
+draft in **Settings → Search & profile**, then explicitly publish it. The notice
+clears for later scans. Fresh workspaces must publish before their first scan.
+
 ## A promising vacancy was not assessed
 
 Open **Jobs -> Review this scan**, then expand **Why roles missed detailed
@@ -77,9 +85,11 @@ Do not delete `.scout/scan-lease.json`, `.scout/scan-queue.jsonl`, a run
 journal, or a legacy `.scout-scan.lock` to make work continue. A live,
 unexpired or unverifiable owner must be stopped and allowed to reach its
 takeover margin. Stop every older Scout process before the first fenced
-activation. Once activated, the fenced lease is authoritative; an older Scout
-binary or a new legacy lock is a downgrade/coexistence conflict, and Scout
-refuses to run until only the current version remains.
+activation and disable its schedules. Current Scout refuses a conflicting legacy
+lock after activation. Older binaries cannot see the fenced lease and may still
+write, so this check does not make old/new coexistence safe. Keep only the current
+version running against the live workspace; use a separate compatible snapshot
+for a reviewed rollback.
 
 If a terminal run remains visible because lease cleanup was interrupted, leave
 it in place. A successor validates the terminal journal and removes or

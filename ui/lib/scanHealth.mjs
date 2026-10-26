@@ -232,7 +232,8 @@ export function publicQueueSummary(projection = {}) {
       id: shortId(request.id),
       status: safeToken(request.status) || 'queued',
       requester: ['manual', 'scheduled'].includes(request.requester) ? request.requester : 'manual',
-      purpose: safeToken(request.purpose),
+      purpose: request.requester === 'scheduled' && request.purpose === 'manual-discovery'
+        ? 'scheduled-discovery' : safeToken(request.purpose),
       requestedAt: typeof request.requestedAt === 'string' ? request.requestedAt : null,
       expiresAt: typeof request.expiresAt === 'string' ? request.expiresAt : null,
     };

@@ -17,6 +17,9 @@ Answer Scout's setup questions for:
 - compensation and commute constraints;
 - hard exclusions and writing tone.
 
+Generated profile and CV content follows the workspace's `locale`; Scout does
+not impose a language from another person's workspace.
+
 Choose **Generate proposal**. Scout gives every supplied field and imported CV line a stable evidence ID. Every factual CV item, skill, qualification and achievement must cite one of those IDs. The provider proposes content, a 100-point rubric and search lanes; Scout validates them and stages:
 
 Proposal generation runs as a local background operation. Setup shows the current phase, step progress and elapsed time. You may choose **Continue in background**, close setup or close the browser; reopening setup reattaches to the same operation. Do not quit Scout while it is working, because quitting stops local provider work.

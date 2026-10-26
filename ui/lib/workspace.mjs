@@ -16,6 +16,7 @@ export const CURRENT_WORKSPACE_SCHEMA = 2;
 
 export const DEFAULT_WORKSPACE_CONFIG = Object.freeze({
   schemaVersion: CURRENT_WORKSPACE_SCHEMA,
+  mode: 'background',
   locale: 'en-GB',
   currency: 'GBP',
   timezone: 'Europe/London',
@@ -150,6 +151,7 @@ export function validateWorkspaceConfig(value) {
   for (const key of ['locale', 'currency', 'timezone']) {
     if (typeof value[key] !== 'string' || !value[key].trim()) throw new Error(`workspace ${key} is required`);
   }
+  if (!['background', 'active'].includes(value.mode)) throw new Error('workspace mode must be background or active');
   if (value.search && typeof value.search !== 'object') throw new Error('workspace search must be an object');
   for (const key of ['roleFamilies', 'sectors', 'locations', 'exclusions']) {
     if (!Array.isArray(value.search?.[key])) throw new Error(`workspace search.${key} must be an array`);
@@ -160,6 +162,7 @@ export function validateWorkspaceConfig(value) {
   }
   if (Number(value.triage.checkScore) > Number(value.triage.actionScore)) throw new Error('workspace triage.checkScore cannot exceed actionScore');
   if (!value.sources || typeof value.sources !== 'object') throw new Error('workspace sources must be an object');
+  if (!/^[a-z]{2}$/.test(String(value.sources.adzuna?.country || ''))) throw new Error('workspace Adzuna country must be a two-letter lower-case code');
   if (value.commute && typeof value.commute !== 'object') throw new Error('workspace commute must be an object');
   if (value.ai && ![null, 'codex', 'claude', 'local'].includes(value.ai.provider ?? null)) throw new Error('workspace ai.provider must be codex, claude, local, or null');
   for (const [provider, model] of Object.entries(value.ai?.models || {})) {

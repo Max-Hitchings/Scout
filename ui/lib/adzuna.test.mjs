@@ -85,3 +85,37 @@ test('resolveAdzunaCredentials reads the env object', () => {
 test('default queries are empty until onboarding configures the search', () => {
   assert.deepEqual(DEFAULT_ADZUNA_QUERIES, []);
 });
+
+test('Adzuna compensation follows the queried country, never the workspace currency', async () => {
+  const { normaliseObservation } = await import('./vacancyObservation.mjs');
+  for (const [country, currency] of [['us', 'USD'], ['de', 'EUR'], ['au', 'AUD'], ['zz', null]]) {
+    const requested = [];
+    const result = await fetchAdzuna({
+      ...creds, country, currency: 'GBP', salaryMin: 50000,
+      locale: 'de-DE', queries: ['synthetic role'],
+    }, async (url) => {
+      requested.push(new URL(url));
+      return response({ results: [item] });
+    });
+    const job = result.jobs[0];
+    const observation = normaliseObservation(job, { sourceName: 'adzuna' });
+    assert.equal(observation.compensation.value.currency, currency, country);
+    assert.equal(observation.compensation.value.currencyProvenance,
+      currency ? 'queried-country' : 'unknown');
+    assert.equal(requested[0].searchParams.has('salary_min'), false,
+      'a workspace minimum in a different or unknown currency must not filter source results');
+    if (!currency) assert.match(job.salary, /currency unknown/);
+  }
+  let requested;
+  await fetchAdzuna({ ...creds, country: 'ca', currency: 'CAD', salaryMin: 50000, queries: ['synthetic role'] }, async (url) => {
+    requested = new URL(url);
+    return response({ results: [] });
+  });
+  assert.equal(requested.searchParams.get('salary_min'), '50000');
+  await fetchAdzuna({ ...creds, country: 'us', salaryMin: 50000, queries: ['synthetic role'] }, async (url) => {
+    requested = new URL(url);
+    return response({ results: [] });
+  });
+  assert.equal(requested.searchParams.has('salary_min'), false,
+    'the compatibility GBP default must not become a USD salary filter');
+});

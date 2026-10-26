@@ -1,13 +1,23 @@
+import { providerCardPresentation } from './lib/providerPresentation.mjs?v=__SCOUT_UI_BUILD__';
+export { providerCardPresentation };
+
 const STEPS = ['Welcome', 'AI provider', 'Your search', 'Adzuna', 'Import CV', 'AI hand-off', 'First scan'];
 // Keep the existing storage key so people who previously dismissed setup are
 // not forced back into it after upgrading. It now represents an intentional
 // decision to finish the optional AI enrichment later.
 const SETUP_DEFERRED_KEY = 'scout.setup.legacySkipped.v1';
 const SUPPORTED_CV = /\.(pdf|docx|md|markdown|txt)$/i;
+const ADZUNA_COUNTRIES = ['at', 'au', 'be', 'br', 'ca', 'ch', 'de', 'es', 'fr', 'gb', 'in', 'it', 'mx', 'nl', 'nz', 'pl', 'sg', 'us', 'za'];
+
+function adzunaCountryField(config = {}) {
+  const selected = config.sources?.adzuna?.country || 'gb';
+  const countries = [...new Set([...ADZUNA_COUNTRIES, selected])];
+  const names = new Intl.DisplayNames([config.locale || 'en-GB'], { type: 'region' });
+  return `<label class="setup-field">Adzuna search country<select id="setup-adzuna-country">${countries.map((country) => `<option value="${escapeProfileText(country)}" ${selected === country ? 'selected' : ''}>${escapeProfileText(names.of(country.toUpperCase()) || country)}</option>`).join('')}</select></label><p class="meta">Adzuna searches this country's vacancies. Salary currencies come from that country, independently of your preferred currency.</p>`;
+}
 const DISMISSIBLE_VIEWS = new Set(['hub', 'section', 'retune', 'backup-details']);
 // Sunday = 0, matching ui/lib/scheduler.mjs. Kept as a literal here because
-// setup.js stays self-contained so a browser attached to a pre-update server
-// can still boot.
+// importing the scheduler would bring Node-specific code into the browser.
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
 // Alternating splits the week so the two providers never scan on the same day.
@@ -85,19 +95,30 @@ export function providerLoginPanelHtml(
   };
   const state = session?.provider === provider ? session.state : null;
   const active = ['starting', 'awaiting-code', 'authenticating', 'validating'].includes(state);
-  const retryable = ['failed', 'cancelled', 'expired'].includes(state);
-  const reauthenticationRequired = providerStatus.healthState === 'sign-in-required';
-  const authenticated = providerStatus.authenticated === true && !reauthenticationRequired;
+  const presentation = providerCardPresentation(providerStatus);
+  const authenticated = presentation.available;
+  const needsSignIn = providerStatus.healthState === 'sign-in-required'
+    || (providerStatus.authenticated !== true
+      && [undefined, 'ready', 'credentials-present-unverified'].includes(providerStatus.healthState));
+  const retryable = ['failed', 'cancelled', 'expired'].includes(state)
+    || (state === 'succeeded' && !authenticated);
   const canStart = providerStatus.installed === true
     && !authenticated
+    && needsSignIn
     && !state
     && !active
     && !retryable;
-  const statusText = stateLabels[state]
+  const statusText = (state === 'succeeded' && !authenticated
+    ? `Sign-in still needs verification. ${presentation.label}. ${presentation.help}`
+    : stateLabels[state])
     || (authenticated
-      ? `${name} is signed in.`
+      ? providerStatus.healthState === 'credentials-present-unverified'
+        ? `${name} sign-in was found but has not yet been verified with the provider.`
+        : `${name} is signed in.`
       : providerStatus.installed
-        ? `${name} needs sign-in.`
+        ? needsSignIn
+          ? `${name} needs sign-in. ${presentation.help}`
+          : `${name}: ${presentation.label}. ${presentation.help}`
         : `${name} is not installed.`);
   const sessionId = escapeProfileText(session?.sessionId || '');
   const disabled = pending ? ' disabled aria-disabled="true"' : '';
@@ -131,72 +152,24 @@ export function providerLoginPanelHtml(
     <p class="meta" role="status" aria-live="polite">${statusText}</p>
     ${device}${verification}
     <div class="provider-login-actions">${code}${start}${cancel}${retry}${clear}</div>
-    ${authenticated ? '' : `<p class="meta">Manual fallback: open your terminal and run <code>${command}</code>. <a href="${guide}" target="_blank" rel="noreferrer">Official ${name} login guide</a>. Retry only checks sign-in. After reconnecting, close Settings and use Run missed scan now on the dashboard.</p>`}
+    ${authenticated ? '' : `<p class="meta">Manual fallback: open your terminal and run <code>${command}</code>. <a href="${guide}" target="_blank" rel="noreferrer">Official ${name} login guide</a>. Retry starts a new sign-in attempt. After reconnecting, close Settings and choose which blocked work to retry.</p>`}
   </section>`;
 }
 
-export function providerCardPresentation(provider = {}) {
-  if (provider.installed !== true) {
-    return {
-      available: false,
-      label: 'Not installed',
-      help: 'Install this provider CLI from its official guide, then refresh provider status.',
-    };
-  }
-  const blocked = {
-    checking: {
-      label: 'Installed; checking provider status',
-      help: 'Wait for the bounded provider check to finish, then refresh if needed.',
-    },
-    'sign-in-required': {
-      label: 'Installed; sign-in required',
-      help: 'Sign in with Scout or use the manual provider command, then refresh.',
-    },
-    'login-in-progress': {
-      label: 'Installed; sign-in in progress',
-      help: 'Wait for the current sign-in flow to finish before selecting this provider.',
-    },
-    'network-unavailable': {
-      label: 'Installed; network unavailable',
-      help: 'Restore provider network access, then refresh. Scout will not replay blocked work automatically.',
-    },
-    'rate-limited': {
-      label: 'Installed; provider rate limited',
-      help: 'Wait for the provider rate limit to clear, then retry explicitly.',
-    },
-    'cli-update-required': {
-      label: 'Installed and signed in; CLI update required',
-      help: 'Update this CLI from its official installation guide, then refresh.',
-    },
-    'provider-error': {
-      label: 'Installed; provider error',
-      help: 'Resolve the provider error and refresh status before selecting it.',
-    },
-  };
-  if (Object.hasOwn(blocked, provider.healthState)) {
-    return { available: false, ...blocked[provider.healthState] };
-  }
-  if (!['ready', 'credentials-present-unverified'].includes(provider.healthState)) {
-    return {
-      available: false,
-      label: 'Installed; provider status unavailable',
-      help: 'Refresh provider status. Scout will keep this provider disabled until its state is known.',
-    };
-  }
-  if (provider.authenticated !== true) return { available: false, ...blocked['sign-in-required'] };
-  if (provider.capabilities?.structuredOutput === false) {
-    return { available: false, ...blocked['cli-update-required'] };
-  }
-  return {
-    available: true,
-    label: 'Installed, signed in and compatible',
-    help: '',
-  };
+
+export function searchModeQuestionHtml(mode = 'background') {
+  return `<label class="setup-field wide">How should Scout help you?
+    <select id="setup-mode">
+      <option value="background"${mode === 'background' ? ' selected' : ''}>Background watch — only exceptional matches</option>
+      <option value="active"${mode === 'active' ? ' selected' : ''}>Active job hunt — daily new matches</option>
+    </select></label>
+    <p class="meta">Background watch stays quiet unless an assessed match is exceptional. Active job hunt brings you a daily summary of new good matches and invites your feedback. Provider problems are reported in both modes. You can change this later in Settings.</p>`;
 }
 
 export function buildConfig(form, current = {}) {
   const salary = String(form.salaryMinimum || '').trim();
   return {
+    mode: form.mode || current.mode || 'background',
     locale: String(form.locale || current.locale || 'en-GB').trim(),
     currency: String(form.currency || current.currency || 'GBP').trim().toUpperCase(),
     timezone: String(form.timezone || current.timezone || 'Europe/London').trim(),
@@ -1091,9 +1064,22 @@ const Setup = {
       <p>Locations: ${this.escape((search.locations || []).join(', ') || 'Not configured')}</p>
       <p>Minimum salary: ${search.salaryMinimum == null ? 'Not set' : `${this.escape(config.currency || '')} ${this.escape(search.salaryMinimum)}`}</p>
       <p>Hard exclusions: ${this.escape((search.exclusions || []).join(', ') || 'None')}</p></div>
+      ${searchModeQuestionHtml(config.mode || 'background')}
+      <p><button id="settings-mode-save" class="act" type="button">Save search mode</button></p>
       ${searchProfileReviewHtml(this.searchProfile)}
       <p><button id="settings-retune-search" class="act primary" type="button">Retune my search</button></p>
       <p class="meta">Retuning stages evidence-led changes for review. It does not reset tracker, application, report or chat history.</p>`;
+    this.el('settings-mode-save').addEventListener('click', async () => {
+      try {
+        const result = await requestJson('/api/setup/config', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ mode: this.el('setup-mode').value }),
+        });
+        this.status.config = result.config;
+        await window.Scout?.loadOpportunities?.();
+        this.setMessage('Search mode saved.', 'good');
+      } catch { this.setMessage('Search mode could not be saved. Try again when the scan finishes.', 'error'); }
+    });
     this.el('settings-retune-search').addEventListener('click', () => {
       this.enterRetune('search');
       this.focusDialogTitle();
@@ -1578,6 +1564,10 @@ const Setup = {
       this.providerLoginState[provider] = { ...result, loading: false };
       const sessionChanged = JSON.stringify(current?.session || null)
         !== JSON.stringify(result.session || null);
+      if (sessionChanged && result.session?.state === 'succeeded') {
+        await this.refreshStatus({ keepOpen: true });
+        if (this.providerLoginGeneration[provider] !== generation) return;
+      }
       if (sessionChanged && this.providerLoginVisible()) {
         if (this.view === 'section') this.renderProviderSettings();
         else this.renderProviders();
@@ -1665,6 +1655,10 @@ const Setup = {
       if (this.providerLoginGeneration[provider] !== generation) return;
       const session = result.session || null;
       this.providerLoginState[provider] = { ...entry, mutating: false, session };
+      if (session?.state === 'succeeded') {
+        await this.refreshStatus({ keepOpen: true });
+        if (this.providerLoginGeneration[provider] !== generation) return;
+      }
       if (action === 'clear') {
         if (result.result?.state !== 'cleared') {
           throw new Error('Claude credential clearing did not complete');
@@ -1714,11 +1708,22 @@ const Setup = {
     this.el('setup-body').innerHTML = `
       <div class="setup-callout"><strong>Public sources</strong><p>Scout uses its configured public job sources without requiring credentials.</p></div>
       <div class="setup-callout"><strong>Adzuna: ${this.status?.adzunaConfigured ? 'configured' : 'not configured'}</strong>
-      <p>Saved credentials are never displayed. Use Retune my search to add or replace them.</p></div>
+      <p>Saved credentials are never displayed. Use Retune my search to add or replace them.</p>
+      ${adzunaCountryField(this.status?.config)}<button id="settings-save-adzuna-country" class="act" type="button">Save search country</button></div>
       <p><button id="settings-retune-sources" class="act" type="button">Retune search and sources</button></p>`;
     this.el('settings-retune-sources').addEventListener('click', () => {
       this.enterRetune('sources');
       this.focusDialogTitle();
+    });
+    this.el('settings-save-adzuna-country').addEventListener('click', async () => {
+      try {
+        const result = await requestJson('/api/setup/config', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sources: { adzuna: { country: this.el('setup-adzuna-country').value } } }),
+        });
+        this.status.config = result.config;
+        this.setMessage('Adzuna search country saved.', 'good');
+      } catch (error) { this.setMessage(error.message, 'error'); }
     });
   },
 
@@ -1938,6 +1943,7 @@ const Setup = {
   renderPreferences() {
     const c = this.status?.config || {};
     if (!this.preferenceDraft) this.preferenceDraft = {
+      mode: c.mode || 'background',
       displayName: c.profile?.displayName || '', tone: c.profile?.tone || '',
       roleFamilies: (c.search?.roleFamilies || []).join(', '), sectors: (c.search?.sectors || []).join(', '),
       locations: (c.search?.locations || []).join(', '), exclusions: (c.search?.exclusions || []).join(', '),
@@ -1950,10 +1956,11 @@ const Setup = {
     const questions = [
       ['First, what should I call you?', 'I’ll also match the tone you want in CVs and outreach drafts.', `<label class="setup-field">Your name<input id="setup-name" autocomplete="name" value="${this.escape(d.displayName)}" required></label><label class="setup-field">Writing tone<input id="setup-tone" value="${this.escape(d.tone)}" placeholder="Natural, direct and evidence-led"></label>`],
       ['What kind of work should I look for?', 'Use job titles or role families you would genuinely consider. These answers become search queries after you approve the setup.', `<label class="setup-field wide">Role families <span>comma-separated</span><input id="setup-roles" value="${this.escape(d.roleFamilies)}" placeholder="Software engineer, product manager, data analyst"></label><label class="setup-field wide">Sectors <span>comma-separated</span><input id="setup-sectors" value="${this.escape(d.sectors)}" placeholder="Developer tools, climate, healthcare"></label>`],
-      ['Where can the right role be?', 'I use travel time rather than simple mileage when commute information is available.', `<label class="setup-field wide">Locations <span>comma-separated</span><input id="setup-locations" value="${this.escape(d.locations)}"></label><label class="setup-field wide">Commute origin<input id="setup-commute-origin" value="${this.escape(d.commuteOrigin)}" placeholder="Town, city or postcode"></label><label class="setup-field">Mode<select id="setup-commute-mode">${option('either','Car or public transport')}${option('car','Car')}${option('public','Public transport')}${option('any','No filter')}</select></label><label class="setup-field">Maximum minutes<input id="setup-commute-max" type="number" min="0" max="1440" value="${this.escape(d.commuteMax)}"></label><label class="setup-field wide"><span><input id="setup-include-unknown" type="checkbox" ${d.includeUnknown ? 'checked' : ''}> Include roles with unknown commute</span></label>`],
+      ['Where can the right role be?', 'Commute settings guide assessments and filter your dashboard. They do not filter newly discovered vacancies.', `<label class="setup-field wide">Locations <span>comma-separated</span><input id="setup-locations" value="${this.escape(d.locations)}"></label><label class="setup-field wide">Commute origin<input id="setup-commute-origin" value="${this.escape(d.commuteOrigin)}" placeholder="Town, city or postcode"></label><label class="setup-field">Mode<select id="setup-commute-mode">${option('either','Car or public transport')}${option('car','Car')}${option('public','Public transport')}${option('any','No filter')}</select></label><label class="setup-field">Maximum minutes<input id="setup-commute-max" type="number" min="0" max="1440" value="${this.escape(d.commuteMax)}"></label><label class="setup-field wide"><span><input id="setup-include-unknown" type="checkbox" ${d.includeUnknown ? 'checked' : ''}> Include roles with unknown commute</span></label>`],
       ['What compensation makes a move worthwhile?', 'This guides the search; it is not inserted into applications.', `<label class="setup-field">Minimum base salary<input id="setup-salary" type="number" min="0" step="1000" value="${this.escape(d.salaryMinimum)}"></label><label class="setup-field">Currency<input id="setup-currency" maxlength="3" value="${this.escape(d.currency)}"></label>`],
       ['What should I rule out immediately?', 'Keep these to genuine dealbreakers so I don’t hide an unusual but excellent role.', `<label class="setup-field wide">Hard exclusions <span>comma-separated</span><textarea id="setup-exclusions">${this.escape(d.exclusions)}</textarea></label>`],
     ];
+    questions.push(['Are you looking for a new job now?', 'Choose how often Scout should bring matches to your attention.', searchModeQuestionHtml(d.mode)]);
     const q = questions[this.preferenceStep];
     this.el('setup-body').innerHTML = `
       <div class="setup-conversation"><div class="setup-scout"><span class="setup-scout-frame" role="img" aria-label="Scout is asking a question"></span></div><div class="scout-bubble tail-left"><div class="meta">Question ${this.preferenceStep + 1} of ${questions.length}</div><h2>${q[0]}</h2><p>${q[1]}</p><div class="setup-grid">${q[2]}</div></div></div>`;
@@ -1963,7 +1970,7 @@ const Setup = {
   capturePreferenceQuestion() {
     const d = this.preferenceDraft;
     const value = (id, key) => { const el = this.el(id); if (el) d[key] = el.value; };
-    [['setup-name','displayName'],['setup-tone','tone'],['setup-roles','roleFamilies'],['setup-sectors','sectors'],['setup-locations','locations'],['setup-commute-origin','commuteOrigin'],['setup-commute-mode','commuteMode'],['setup-commute-max','commuteMax'],['setup-salary','salaryMinimum'],['setup-currency','currency'],['setup-exclusions','exclusions']].forEach(([id,key]) => value(id,key));
+    [['setup-mode','mode'],['setup-name','displayName'],['setup-tone','tone'],['setup-roles','roleFamilies'],['setup-sectors','sectors'],['setup-locations','locations'],['setup-commute-origin','commuteOrigin'],['setup-commute-mode','commuteMode'],['setup-commute-max','commuteMax'],['setup-salary','salaryMinimum'],['setup-currency','currency'],['setup-exclusions','exclusions']].forEach(([id,key]) => value(id,key));
     const unknown = this.el('setup-include-unknown'); if (unknown) d.includeUnknown = unknown.checked;
   },
 
@@ -1973,6 +1980,7 @@ const Setup = {
       <p>Register for an Adzuna developer account, then paste the application ID and API key below. Scout saves them only to the private workspace's ignored <code>.env</code> file.</p>
       ${this.status?.adzunaConfigured ? '<div class="setup-callout"><strong>Adzuna is configured</strong><p>The saved values are deliberately not displayed. Leave both fields empty to keep them unchanged.</p></div>' : ''}
       <div class="setup-grid">
+        ${adzunaCountryField(this.status?.config)}
         <label class="setup-field">Application ID<input id="setup-adzuna-id" type="password" autocomplete="off" spellcheck="false"></label>
         <label class="setup-field">API key<input id="setup-adzuna-key" type="password" autocomplete="off" spellcheck="false"></label>
       </div>
@@ -2543,7 +2551,7 @@ const Setup = {
       }
       if (this.step === 2) {
         this.capturePreferenceQuestion();
-        if (this.preferenceStep < 4) {
+        if (this.preferenceStep < 5) {
           this.preferenceStep += 1;
           this.renderPreferences();
           return;
@@ -2561,6 +2569,11 @@ const Setup = {
         window.Scout?.applyWorkspaceConfig?.(result.config);
       }
       if (this.step === 3) {
+        const countryResult = await requestJson('/api/setup/config', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sources: { adzuna: { country: fieldValue('setup-adzuna-country') } } }),
+        });
+        this.status.config = countryResult.config;
         const appId = fieldValue('setup-adzuna-id').trim();
         const apiKey = fieldValue('setup-adzuna-key').trim();
         if ((appId && !apiKey) || (!appId && apiKey)) throw new Error('Enter both Adzuna values, or leave both blank to skip.');
