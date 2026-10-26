@@ -389,6 +389,50 @@ test('opportunities and setup status reuse one fresh scan-health measurement per
   }
 });
 
+test('browser config responses retain current effective mode policy without persisting a supplied projection', async () => {
+  seedWorkspace(APP_ROOT, WORKSPACE_ROOT);
+  const configFile = path.join(WORKSPACE_ROOT, 'workspace.json');
+  const trackerFile = path.join(WORKSPACE_ROOT, 'data', 'opportunities.json');
+  const originalConfig = fs.readFileSync(configFile);
+  const originalTracker = fs.readFileSync(trackerFile);
+  const originalDetect = providerDetection.detect;
+  providerDetection.detect = async () => ({});
+  try {
+    fs.writeFileSync(trackerFile, JSON.stringify({ updated: '2026-10-26', opportunities: [
+      { id: 'synthetic-policy-role-2026-10', company: 'Synthetic Company', role: 'Synthetic Role', score: 82, status: 'new', sources: [] },
+    ] }));
+    for (const [mode, triage, effective] of [
+      ['background', { actionScore: 70, checkScore: 55 }, { actionScore: 95, checkScore: 85 }],
+      ['background', { actionScore: 98, checkScore: 93 }, { actionScore: 98, checkScore: 93 }],
+      ['active', { actionScore: 82, checkScore: 64 }, { actionScore: 82, checkScore: 64 }],
+      ['background', { actionScore: 82, checkScore: 64 }, { actionScore: 95, checkScore: 85 }],
+    ]) {
+      const saved = await request({ method: 'POST', path: '/api/setup/config', headers: JSON_HEADERS(), body: JSON.stringify({
+        mode, triage, modePolicy: { mode: 'active', triage: { actionScore: 1, checkScore: 0 } },
+      }) });
+      assert.equal(saved.status, 200, saved.text);
+      const opportunities = JSON.parse((await request({ path: '/api/opportunities' })).text);
+      const setup = JSON.parse((await request({ path: '/api/setup/status' })).text);
+      assert.deepEqual(setup.config.modePolicy, opportunities.workspaceConfig.modePolicy,
+        'a real setup refresh must retain the same policy as opportunities');
+      for (const config of [setup.config, opportunities.workspaceConfig, JSON.parse(saved.text).config]) {
+        assert.equal(config.modePolicy.mode, mode);
+        assert.equal(config.modePolicy.triage.actionScore, effective.actionScore);
+        assert.equal(config.modePolicy.triage.checkScore, effective.checkScore);
+        assert.equal(config.triage.actionScore, triage.actionScore, 'stored settings remain distinct from derived thresholds');
+      }
+      assert.equal(opportunities.triage.action.length, mode === 'active' ? 1 : 0);
+      assert.equal(Object.hasOwn(JSON.parse(fs.readFileSync(configFile, 'utf8')), 'modePolicy'), false,
+        'client-supplied derived policy must never become stored authority');
+    }
+  } finally {
+    await drainScheduledCheckpoints();
+    providerDetection.detect = originalDetect;
+    fs.writeFileSync(configFile, originalConfig);
+    fs.writeFileSync(trackerFile, originalTracker);
+  }
+});
+
 const JSON_HEADERS = () => {
   const host = `127.0.0.1:${port}`;
   return { host, origin: `http://${host}`, 'content-type': 'application/json' };

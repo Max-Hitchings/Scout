@@ -156,6 +156,10 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   CVs, adverts, prompts, transcripts or raw provider responses.
 - Every workspace selects background watch or active hunting. The existing
   ranking/assessment gates apply mode-dependent thresholds and scan caps.
+  Browser config responses project the current policy from the stored mode and
+  triage settings, so setup refreshes and settings saves use the same thresholds
+  as opportunities. Derived policy is never accepted as stored configuration;
+  stricter custom thresholds and explicit mode changes remain authoritative.
   Assessed-match notifications participate in the tracker/report mutation
   receipt; provider-failure episodes enter the bounded private local outbox
   independently of fenced health replacement, using a bounded pending intent.
