@@ -666,6 +666,8 @@ const Scout = {
 
   uiReloadBlocker() {
     if (this.cvState.dirty) return 'Save or discard the open CV changes first.';
+    if (this.applicationDraft?.busy) return 'Wait for the application draft to finish first.';
+    if (typeof this.applicationDraft?.markdown === 'string') return 'Save or discard the application draft first.';
     if (this.chat?.streaming) return 'Wait for the current Scout response to finish first.';
     if (this.scanRunning) return 'Wait for the current scan to finish first.';
     if (Object.values(window.ScoutSetup?.operations || {}).some((operation) => ['queued', 'running'].includes(operation?.status))) {
@@ -1799,7 +1801,7 @@ const Scout = {
     const title = draft.kind === 'cv' ? 'CV' : 'cover-letter';
     return `<div class="setup-callout"><h3>Review ${title} draft</h3><p>Scout selects relevant confirmed CV passages and keeps their facts and headings. You can edit the draft below. Check the current advert and every fact; Scout never sends this material.</p>
       <p role="status">${this.esc(draft.message || '')}</p>
-      ${typeof draft.markdown === 'string' ? `<label class="setup-field wide">Editable draft<textarea id="application-draft-text" class="cv-source" data-input-action="application-draft-dirty">${this.esc(draft.markdown)}</textarea></label><label><input id="application-draft-confirm" type="checkbox"> I reviewed the facts and my edits and want to save this draft</label><p><button class="act primary" data-action="save-reviewed-draft">Save reviewed draft</button></p>` : `<button class="act primary" data-action="generate-reviewed-draft"${draft.busy ? ' disabled' : ''}>Generate draft from confirmed CV facts</button>`}
+      ${typeof draft.markdown === 'string' ? `<label class="setup-field wide">Editable draft<textarea id="application-draft-text" class="cv-source" data-input-action="application-draft-dirty">${this.esc(draft.markdown)}</textarea></label><label><input id="application-draft-confirm" type="checkbox"> I reviewed the facts and my edits and want to save this draft</label><p><button class="act primary" data-action="save-reviewed-draft">Save reviewed draft</button> <button class="act" data-action="discard-reviewed-draft">Discard unsaved draft</button></p>` : `<button class="act primary" data-action="generate-reviewed-draft"${draft.busy ? ' disabled' : ''}>Generate draft from confirmed CV facts</button>`}
     </div>`;
   },
 
@@ -3162,6 +3164,7 @@ const Scout = {
       case 'start-reviewed-draft': return this.startReviewedDraft(id, element.dataset.kind);
       case 'generate-reviewed-draft': return this.generateReviewedDraft();
       case 'save-reviewed-draft': return this.saveReviewedDraft();
+      case 'discard-reviewed-draft': this.applicationDraft = null; return this.renderApplicationDraft();
       case 'save-cv': return this.saveCv();
       case 'render-cv': return this.renderCvOnly();
       case 'download-cv': return this.downloadCv();

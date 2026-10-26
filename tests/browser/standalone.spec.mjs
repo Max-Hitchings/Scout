@@ -111,6 +111,10 @@ test('phone reviewed draft flow keeps local-model text editable and requires con
   await page.getByRole('button', { name: 'Generate draft from confirmed CV facts' }).click();
   await expect(page.getByLabel('Editable draft')).toHaveValue(source);
   await page.getByLabel('Editable draft').fill(source + '\nMy human-reviewed edit.');
+  await page.evaluate(() => window.Scout.showUiUpdate());
+  await page.getByRole('button', { name: 'Refresh Scout', exact: true }).click();
+  await expect(page.locator('#ui-update-banner')).toContainText('Save or discard the application draft first.');
+  await expect(page.getByLabel('Editable draft')).toHaveValue(/human-reviewed edit/);
   await page.getByRole('button', { name: 'Save reviewed draft' }).click();
   expect(saves).toBe(0);
   await expect(page.getByLabel('Editable draft')).toHaveValue(/human-reviewed edit/);

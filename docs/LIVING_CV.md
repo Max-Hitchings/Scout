@@ -39,6 +39,8 @@ The local provider has no file tools. Use **CV → Review CV options → Create 
 
 Edit the preview, confirm the facts and choose **Save reviewed draft**. Generation alone never changes an application file. Save checks that the CV, job, evidence source and existing draft still match the reviewed revisions. A changed input requires regeneration. Previews remain in memory for one hour, at most 16 at a time; restart discards unsaved previews. They are not added to generic operation status or browser storage.
 
+Scout's interface-update control waits while generation or an unsaved preview is open. Save the draft, or choose **Discard unsaved draft**, before refreshing to a newer interface.
+
 Guided CV text is saved as `applications/<opportunity>/draft-cv.md`, with its own `draft-cv.typ` and `draft-cv.pdf` rendering target. Existing `cv.typ`, its PDF and its quality review remain available. Letters use the existing `outreach.md` path. Both guided PDFs are visibly labelled **DRAFT**, and their text stays editable in the library. The draft selector accepts a saved CV of 500 bytes to 96 KiB and up to 128 evidence sections, returns at most 40 selected sections and limits the editable preview to 64 KiB. It does not claim a passed application-CV quality review. Review the current advert and all facts yourself; nothing is sent.
 
 ## Feedback and employer notes
