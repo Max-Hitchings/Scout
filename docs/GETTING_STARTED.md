@@ -14,6 +14,10 @@ When the scan finishes, open **Jobs** and read a result. Scout shows what it fou
 
 Use **Good fit** or **Poor fit** to explain a result. Feedback can stay with that job, or create a ranking suggestion for your review in **Settings → Feedback & learning**. A suggestion does not take effect until you publish it.
 
+When Scout updates a list of jobs, it keeps an open card and unfinished feedback
+for a job that is still in that list. Changed job details update without clearing
+your explanation. Select **Save feedback** when you are ready to keep it.
+
 From a shortlisted job, create a CV or cover-letter draft. With a local model, Scout selects confirmed CV passages for an editable preview; confirm your review before saving it. You can also start this reviewed flow from **CV → Review CV options**. Edit saved drafts in **CV**, then render and download a PDF. Guided CV and cover-letter PDFs are labelled **DRAFT** and Scout never sends them.
 
 To keep a CV from your notes app connected, open **CV → Living CV**. Scout checks the local file for changes and asks you to approve the diff. Read [Living CV and drafts](LIVING_CV.md) for the file format and version history.
