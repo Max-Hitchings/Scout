@@ -116,3 +116,20 @@ export function activateHouseholdRuntime(root, { env = process.env } = {}) {
   }
   return instance;
 }
+
+export function householdScheduleManagement(root, { env = process.env } = {}) {
+  if (env.SCOUT_HEADLESS !== '1' && !selectedHouseholdInstance({ env, workspace: root })) return null;
+  return {
+    managedExternally: true, supported: false, scheduler: 'owner-system-timers',
+    reasonCode: 'household-system-timer-required',
+    managementMessage: 'Your server owner manages per-person system timers. Ask them to change scheduled scans using the Home server guide; desktop schedule controls are unavailable here.',
+  };
+}
+
+export function assertDesktopScheduleAllowed(root, options = {}) {
+  const management = householdScheduleManagement(root, options);
+  if (!management) return;
+  const error = new Error(management.managementMessage);
+  error.code = management.reasonCode;
+  throw error;
+}

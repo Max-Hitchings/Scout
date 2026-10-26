@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { activateHouseholdRuntime, createHouseholdInstance, readHousehold, switchHouseholdInstance } from '../ui/lib/household.mjs';
+import { activateHouseholdRuntime, assertDesktopScheduleAllowed, createHouseholdInstance, householdScheduleManagement, readHousehold, switchHouseholdInstance } from '../ui/lib/household.mjs';
 import { dispatchHeadlessNotifications } from '../ui/lib/headlessNotifications.mjs';
 import { doctor } from '../ui/lib/doctor.mjs';
 import { fetchAdzuna, resolveAdzunaCredentials } from '../ui/lib/adzuna.mjs';
@@ -1306,6 +1306,7 @@ export async function runScanWith(root, provider, mode, {
 }
 
 export function installSchedule(root, time, provider, { id = `${provider}-primary`, mode = 'primary', model = null, days = null } = {}) {
+  assertDesktopScheduleAllowed(root);
   if (!['codex', 'claude'].includes(provider)) throw new Error('schedule provider must be codex or claude');
   if (!['primary', 'second-pass'].includes(mode)) throw new Error('schedule mode must be primary or second-pass');
   model = assertSafeModel(model);
@@ -1489,11 +1490,14 @@ async function main() {
   }
   if (command === 'schedule') {
     const action = argv[1] || 'status';
+    const management = householdScheduleManagement(root);
+    if (['install', 'remove', 'run-now'].includes(action)) assertDesktopScheduleAllowed(root);
     const config = loadWorkspaceConfig(root);
     const id = argValue('--id', argv) || config.schedule?.jobs?.[0]?.id || 'primary';
     if (action === 'status') return print({
       ok: true,
-      runs: config.schedule.jobs.map((job) => ({ ...job, ...scheduleStatus({ id: job.id }) })),
+      ...(management || {}),
+      runs: config.schedule.jobs.map((job) => ({ ...job, ...(management ? { ...management, ok: false } : scheduleStatus({ id: job.id })) })),
     });
     if (action === 'remove') {
       let result;

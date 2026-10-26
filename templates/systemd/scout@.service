@@ -9,6 +9,7 @@ User=scout
 Group=scout
 WorkingDirectory=/srv/apps/scout/app
 Environment=NODE_ENV=production
+Environment=SCOUT_HEADLESS=1
 Environment=SCOUT_WORKSPACE=/srv/appdata/scout/workspace-%i
 Environment=SCOUT_DEVICE_SETTINGS=/srv/appdata/scout/workspace-%i/.scout/device-settings.json
 Environment=HOME=/srv/appdata/scout/workspace-%i/.scout/provider-home

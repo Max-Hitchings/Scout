@@ -2,7 +2,7 @@ import { workspaceModePolicy } from './lib/workspaceMode.mjs';
 import { markNotification, notificationView, readNotifications, refreshNotificationDigest } from './lib/notifications.mjs';
 import http from 'node:http';
 import { dispatchHeadlessNotifications } from './lib/headlessNotifications.mjs';
-import { activateHouseholdRuntime, selectedHouseholdInstance } from './lib/household.mjs';
+import { activateHouseholdRuntime, householdScheduleManagement, selectedHouseholdInstance } from './lib/household.mjs';
 import { buildHomeSummary } from './lib/homeSummary.mjs';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -567,7 +567,11 @@ function readScheduleSummary(config = loadWorkspaceConfig(WORKSPACE_ROOT), healt
       lastResult: !record ? 'never' : record.degraded ? 'degraded' : 'healthy',
     }];
   }));
-  return scheduleSummary(config, { ...health, runs }, (config.schedule?.jobs || []).map((job) => scheduleStatus({ id: job.id })));
+  const management = householdScheduleManagement(WORKSPACE_ROOT);
+  return {
+    ...scheduleSummary(config, { ...health, runs }, (config.schedule?.jobs || []).map((job) => management ? { ...management, ok: false } : scheduleStatus({ id: job.id }))),
+    ...(management || {}),
+  };
 }
 
 // Task 5 assigns handlers into this table: routes['POST /api/status'] = (req,res,body)=>{...}
@@ -2745,6 +2749,10 @@ routes['POST /api/scan'] = (req, res, body) => {
 
 routes['POST /api/schedule'] = (req, res, body) => {
   const b = parseBody(body); if (!b) return replyJson(res, 400, { error: 'bad json' });
+  const management = householdScheduleManagement(WORKSPACE_ROOT);
+  if (management && ['install', 'remove', 'run-now'].includes(b.action)) return replyJson(res, 409, {
+    error: management.managementMessage, reasonCode: management.reasonCode,
+  });
   const config = loadWorkspaceConfig(WORKSPACE_ROOT);
   try {
     const mode = b.mode || 'primary';

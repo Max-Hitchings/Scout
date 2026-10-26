@@ -38,7 +38,7 @@ Run one Scout instance per person, without a desktop or tray. Each instance has 
 
 ## Schedule scans without a desktop
 
-Use the system timer templates above for a system account. Scout's desktop `schedule install` command creates user-level timers and needs a working user service manager; it is not needed for this system-level installation.
+Use the system timer templates above for a system account. Registered household instances and explicitly headless services (`SCOUT_HEADLESS=1`, set by the templates) reject desktop-native schedule install, remove and run-now actions in both the CLI and UI/API. Their native status is marked owner-managed rather than guessed from another person's user-global task name. The settings screen directs the owner to this guide and keeps manual scans available. Manage each instance's system timer with the administrator commands below. Scout's desktop `schedule install` command remains available outside household/headless mode and needs a working user service manager.
 
 Configure one schedule entry in this workspace's `workspace.json` before enabling its timer. Stop the instance while editing configuration. For the example timer:
 
