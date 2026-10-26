@@ -24,6 +24,43 @@ namespace ScoutHost {
     public static void OpenDashboard() { Process.Start(new ProcessStartInfo(Url) { UseShellExecute = true }); }
   }
 
+  // This state is independent of WinForms so the actual host assembly can be
+  // compiled and its delivery boundary exercised without displaying a desktop.
+  sealed class NotificationDeliveryState {
+    readonly System.Collections.Generic.HashSet<string> shownNotificationIds = new System.Collections.Generic.HashSet<string>();
+    readonly System.Collections.Generic.HashSet<string> pendingNotificationReceipts = new System.Collections.Generic.HashSet<string>();
+    readonly System.Collections.Generic.Queue<string> shownOrder = new System.Collections.Generic.Queue<string>();
+    readonly int capacity;
+    readonly int batchSize;
+    public NotificationDeliveryState(int capacity = 1000, int batchSize = 4) {
+      if (capacity < 1 || batchSize < 1) throw new ArgumentOutOfRangeException();
+      this.capacity = capacity; this.batchSize = batchSize;
+    }
+    public bool HasPendingReceipts { get { return pendingNotificationReceipts.Count > 0; } }
+    public bool ShouldDisplay(string id) {
+      return id != null && Regex.IsMatch(id, "^[a-f0-9]{64}$") && !shownNotificationIds.Contains(id);
+    }
+    public void MarkShown(string id) {
+      if (id == null || !Regex.IsMatch(id, "^[a-f0-9]{64}$")) return;
+      if (shownNotificationIds.Add(id)) {
+        shownOrder.Enqueue(id);
+        while (shownOrder.Count > capacity) shownNotificationIds.Remove(shownOrder.Dequeue());
+      }
+      pendingNotificationReceipts.Add(id);
+    }
+    public void QueueReceipt(string id) {
+      if (id != null && shownNotificationIds.Contains(id)) pendingNotificationReceipts.Add(id);
+    }
+    public System.Collections.Generic.List<string> PendingReceiptIds() {
+      var result = new System.Collections.Generic.List<string>();
+      foreach (var id in pendingNotificationReceipts) { if (result.Count >= batchSize) break; result.Add(id); }
+      return result;
+    }
+    public void ReceiptResult(string id, int status) {
+      if ((status >= 200 && status < 300) || status == 404) pendingNotificationReceipts.Remove(id);
+    }
+  }
+
   sealed class TrayContext : ApplicationContext {
     const string Url = "http://127.0.0.1:8459/";
     readonly NotifyIcon tray;
@@ -33,10 +70,9 @@ namespace ScoutHost {
     System.Windows.Forms.Timer dailyTimer;
     System.Windows.Forms.Timer watchdogTimer;
     System.Windows.Forms.Timer notificationTimer;
-    readonly System.Collections.Generic.HashSet<string> shownNotificationIds = new System.Collections.Generic.HashSet<string>();
+    readonly NotificationDeliveryState notificationDelivery = new NotificationDeliveryState();
     NotifyIcon notificationIcon;
     DateTime notificationIconExpiresAt = DateTime.MinValue;
-    readonly System.Collections.Generic.HashSet<string> pendingNotificationReceipts = new System.Collections.Generic.HashSet<string>();
     string pendingBalloonTitle;
     string pendingBalloonText;
     string pendingBalloonUrl;
@@ -122,17 +158,15 @@ namespace ScoutHost {
     }
 
     void ConfirmNotificationDelivery() {
-      var attempted = 0;
-      foreach (var id in new System.Collections.Generic.List<string>(pendingNotificationReceipts)) {
-        if (attempted++ >= 4) break;
+      foreach (var id in notificationDelivery.PendingReceiptIds()) {
         try {
           Post("api/notifications/delivered", new JavaScriptSerializer().Serialize(new { id = id }), 3000);
-          pendingNotificationReceipts.Remove(id);
+          notificationDelivery.ReceiptResult(id, 200);
         } catch (WebException error) {
           var response = error.Response as HttpWebResponse;
           var retired = response != null && response.StatusCode == HttpStatusCode.NotFound;
           if (response != null) response.Close();
-          if (retired) { pendingNotificationReceipts.Remove(id); continue; }
+          if (retired) { notificationDelivery.ReceiptResult(id, 404); continue; }
           break; // Retry the receipt without displaying the balloon again.
         } catch { break; }
       }
@@ -153,9 +187,7 @@ namespace ScoutHost {
       owner.DoubleClick += delegate { Program.OpenDashboard(); };
       owner.BalloonTipClicked += delegate { Program.OpenDashboard(); };
       owner.BalloonTipShown += delegate {
-        if (shownNotificationIds.Count >= 1000) shownNotificationIds.Clear();
-        shownNotificationIds.Add(id);
-        pendingNotificationReceipts.Add(id);
+        notificationDelivery.MarkShown(id);
         ConfirmNotificationDelivery();
       };
       owner.BalloonTipClosed += delegate {
@@ -174,7 +206,7 @@ namespace ScoutHost {
       if (notificationIcon != null && DateTime.UtcNow >= notificationIconExpiresAt) RetireNotificationIcon(notificationIcon);
       if (DateTime.UtcNow > balloonBusyUntil) updateUrl = null;
       ShowPendingStatusBalloon();
-      if (DateTime.UtcNow < balloonBusyUntil || pendingNotificationReceipts.Count > 0 || notificationIcon != null || !String.IsNullOrEmpty(updateUrl)) return;
+      if (DateTime.UtcNow < balloonBusyUntil || notificationDelivery.HasPendingReceipts || notificationIcon != null || !String.IsNullOrEmpty(updateUrl)) return;
       try {
         var response = new JavaScriptSerializer().Deserialize<System.Collections.Generic.Dictionary<string, object>>(Post("api/notifications/poll", "{}", 3000));
         var outbox = response["outbox"] as System.Collections.IEnumerable;
@@ -184,7 +216,7 @@ namespace ScoutHost {
           if (alert == null) continue;
           var id = Convert.ToString(alert["id"]);
           if (!Regex.IsMatch(id, "^[a-f0-9]{64}$")) continue;
-          if (shownNotificationIds.Contains(id)) { pendingNotificationReceipts.Add(id); ConfirmNotificationDelivery(); continue; }
+          if (!notificationDelivery.ShouldDisplay(id)) { notificationDelivery.QueueReceipt(id); ConfirmNotificationDelivery(); continue; }
           var title = Convert.ToString(alert["title"]);
           var body = Convert.ToString(alert["body"]);
           if (title.Length > 100 || body.Length > 250) continue;

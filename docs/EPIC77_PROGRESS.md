@@ -303,6 +303,46 @@ a new request deliberately; automatic replay is never attempted.
   independent 64-record operational reserve retires superseded/resolved history
   while retaining current warnings and monotonic episode identities.
 
+## 2026-10-26 — native and browser acceptance (Codex)
+
+The test-only native contract was pushed after a green full Linux Node suite.
+Hosted Windows run 40289028575, job121459460790 then observed RED at the actual
+C# compiler: CS0246, missing NotificationDeliveryState. Its implementation now
+shares real shown-event and receipt state with an executable C# assertion suite.
+The same native test measures staged/default Windows paths and a byte-preserving
+round trip beyond MAX_PATH. Linux skips that native test honestly.
+
+Expanded CI exercises all three browsers on Ubuntu, Windows and both macOS
+architectures. Initial WebKit execution exposed service-worker routing isolation,
+Safari modal return focus and a real unhandled backup-queue rejection. The
+queue rejection reproduced RED in a disposable child process and passed after
+its internal tail was observed. Hosted GREEN and installed-artifact acceptance
+remain pending until actually executed; F-1 packaging remains separately owned.
+
+Hosted evidence at e2a2e7c, run40291322968: Windows native compilation and
+receipt assertions passed; 1,604 staged files measured 77 relative/131 default
+installed characters, and the >260-character round trip passed. Windows and
+Ubuntu WebKit passed after routing isolation and Safari focus repair. Local
+Chromium passed 110/110 and full Node passed 1,584 total/1,577 passed/zero failed,
+with seven appropriate platform skips. Native package installation remains
+blocked before launch by the separately owned F-1 snapshot authorization check.
+
+Intel macOS exposed a hardware-dependent absolute CPU assertion in the scale
+fixture (10,546 ms measured against a 5,000 ms cap). The fixture now calibrates
+1,000 and 5,000 vacancies on the same runner, retaining its 30-second total wall
+limit and an explicit growth ceiling. The original quadratic implementation
+at 93048fd still failed the revised regression with ETIMEDOUT at 30 seconds;
+the indexed implementation passed at 1,418 ms CPU with a 4,935 ms calibrated
+budget. No production canonicalisation predicate or grouping rule changed.
+
+Native-harness self-review added a real subprocess regression for both provider
+discovery paths. It failed RED when the Claude stand-in returned 82 for local
+auth status, then passed after both provider protocols were covered. Both
+stand-ins are installed before native first launch so discovery cannot fall
+back to an existing host account. Owned read-only macOS/portable app trees are
+made removable only inside the disposable install root; workspace preservation
+and occupied-port/existing-install guards remain enforced.
+
 Independent review found candidate-version ordering still used a lexical fallback.
 Observed RED at the public update-check action for an installed candidate moving
 to the final beta; numeric `rc10` versus `rc2` was also wrong. Semantic candidate
