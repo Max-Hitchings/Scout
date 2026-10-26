@@ -55,8 +55,10 @@ function localKeySelection(config, root) {
       if (!stat.isDirectory() || stat.isSymbolicLink()) throw failure('authentication-required');
       parents.push(`${stat.dev}:${stat.ino}`);
     }
-    if (current === boundary) break;
-    current = path.dirname(current);
+    if (path.relative(boundary, current) === '') break;
+    const parent = path.dirname(current);
+    if (parent === current) throw failure('authentication-required');
+    current = parent;
   }
   return { file, parentIdentity: parents.join('|') };
 }

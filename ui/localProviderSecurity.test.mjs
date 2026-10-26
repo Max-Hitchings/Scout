@@ -194,7 +194,7 @@ test('case-insensitive Windows key containment cannot hang its ancestor walk', (
     const key = randomBytes(24).toString('hex');
     const fileStat = { dev: 1n, ino: 3n, size: BigInt(key.length), mtimeNs: 1n, ctimeNs: 1n,
       isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false };
-    for (const name of ['resolve', 'relative', 'dirname', 'join', 'isAbsolute']) path[name] = path.win32[name];
+    for (const name of ['resolve', 'relative', 'dirname', 'basename', 'join', 'isAbsolute']) path[name] = path.win32[name];
     path.sep = '\\\\';
     fs.existsSync = () => true;
     fs.realpathSync.native = (value) => String(value).toLowerCase();
