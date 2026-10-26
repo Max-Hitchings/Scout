@@ -4,12 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { seedWorkspace } from '../ui/lib/workspace.mjs';
 import { initializeRecoveryBackup, verifyReviewedRunArchive } from '../ui/lib/recoveryBackup.mjs';
 import { saveSyncSettings } from '../ui/lib/workspaceSync.mjs';
 import { acquireScanLease, currentLeaseOwner, releaseScanLease } from '../ui/lib/scanLease.mjs';
-const app = path.resolve(new URL('../', import.meta.url).pathname);
+const app = fileURLToPath(new URL('../', import.meta.url));
 const stable = (v) => Array.isArray(v) ? `[${v.map(stable).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${stable(v[k])}`).join(',')}}` : JSON.stringify(v);
 const hash = (v) => crypto.createHash('sha256').update(stable(v)).digest('hex');
 function fixture(t) {
@@ -72,4 +73,74 @@ test('actual cleanup CLI refuses altered content, wrong confirmation and a live 
   const changed = cli('--apply', output, '--confirm', reviewed.reviewDigest);
   assert.notEqual(changed.status, 0);
   assert.equal(fs.readFileSync(artifact, 'utf8'), 'Synthetic diagnostic changed after review.');
+});
+
+test('actual cleanup CLI resumes a verified encrypted archive after a partial deletion', async (t) => {
+  const { archiveSelectedRuns } = await import('../ui/lib/runRetention.mjs');
+  const { root, parent, cli, key } = fixture(t);
+  const output = path.join(parent, 'reviewed-plan.json');
+  const planned = cli('--plan', '--select', 'synthetic-run-00,synthetic-run-01', '--output', output);
+  assert.equal(planned.status, 0, planned.stderr);
+  const review = JSON.parse(planned.stdout);
+  Object.defineProperty(review.plan, 'recoveryDataKey', { value: key.dataKey, enumerable: false });
+  const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'cleanup', runId: 'synthetic-interrupted-cleanup' });
+  try { assert.throws(() => archiveSelectedRuns(review.plan, lease, { afterSourceDelete() { throw new Error('Synthetic interruption'); } }), /Synthetic interruption/); }
+  finally { releaseScanLease(lease); }
+  assert.equal(fs.existsSync(path.join(root, '.scout/runs/synthetic-run-00')), false);
+  assert.equal(fs.existsSync(path.join(root, '.scout/runs/synthetic-run-01')), true);
+  const resumed = cli('--apply', output, '--confirm', review.reviewDigest);
+  assert.equal(resumed.status, 0, resumed.stderr);
+  assert.equal(JSON.parse(resumed.stdout).archivedRuns, 2);
+  assert.equal(fs.existsSync(path.join(root, '.scout/runs/synthetic-run-01')), false);
+});
+
+test('actual cleanup CLI fails closed on changed queue authority and absent key cache', async (t) => {
+  const { enqueueScanRequest } = await import('../ui/lib/scanQueue.mjs');
+  const { root, parent, cli } = fixture(t);
+  const output = path.join(parent, 'reviewed-plan.json');
+  const planned = cli('--plan', '--select', 'synthetic-run-00', '--output', output);
+  assert.equal(planned.status, 0, planned.stderr);
+  const review = JSON.parse(planned.stdout);
+  const requestedAt = new Date().toISOString();
+  const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: 'synthetic-queue-change' });
+  try {
+    enqueueScanRequest(root, {
+      id: 'synthetic-queued-request', key: 'synthetic-request', requester: 'manual', purpose: 'job-discovery',
+      requestedAt, expiresAt: new Date(Date.parse(requestedAt) + 86400000).toISOString(), windowAt: null,
+      compatibility: { schemaVersion: 1, profileFingerprint: 'a'.repeat(64), configFingerprint: 'b'.repeat(64) }, lease,
+    });
+  } finally { releaseScanLease(lease); }
+  const stale = cli('--apply', output, '--confirm', review.reviewDigest);
+  assert.notEqual(stale.status, 0);
+  assert.match(stale.stderr, /recovery-critical durable state changed/);
+  assert.equal(fs.existsSync(path.join(root, '.scout/runs/synthetic-run-00')), true);
+  fs.rmSync(path.join(root, '.scout/sync.json'));
+  const missing = cli('--apply', output, '--confirm', review.reviewDigest);
+  assert.notEqual(missing.status, 0);
+  assert.match(missing.stderr, /existing unlocked recovery/);
+  assert.equal(fs.existsSync(path.join(root, '.scout/runs/synthetic-run-00')), true);
+});
+
+test('actual cleanup CLI separately reviews queue compaction and preserves recent/live requests', async (t) => {
+  const { enqueueScanRequest, projectScanQueue } = await import('../ui/lib/scanQueue.mjs');
+  const { root, parent, cli } = fixture(t);
+  const currentRequest = new Date().toISOString();
+  const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: 'synthetic-queue-review' });
+  try {
+    for (const [id, requestedAt, expiresAt] of [
+      ['synthetic-expired', '2020-01-01T00:00:00.000Z', '2020-01-02T00:00:00.000Z'],
+      ['synthetic-live', currentRequest, new Date(Date.parse(currentRequest) + 86400000).toISOString()],
+    ]) enqueueScanRequest(root, { id, key: id, requester: 'manual', purpose: 'job-discovery', requestedAt, expiresAt, windowAt: null,
+      compatibility: { schemaVersion: 1, profileFingerprint: 'a'.repeat(64), configFingerprint: 'b'.repeat(64) }, lease });
+  } finally { releaseScanLease(lease); }
+  const output = path.join(parent, 'queue-review.json');
+  const planned = cli('--plan', '--queue', '--output', output);
+  assert.equal(planned.status, 0, planned.stderr);
+  const review = JSON.parse(planned.stdout);
+  assert.equal(review.queue.removedEvents, 1);
+  const result = cli('--apply', output, '--confirm', review.reviewDigest);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).queue.removedEvents, 1);
+  assert.deepEqual(projectScanQueue(root).requests.map((item) => item.id), ['synthetic-live']);
+  assert.equal(fs.existsSync(path.join(root, '.scout/runs/synthetic-run-00')), true);
 });
