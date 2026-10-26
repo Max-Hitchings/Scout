@@ -331,6 +331,36 @@ test('packaging consumes the audit-created read-only content snapshot', () => {
   fs.rmSync(authorizationRoot, { recursive: true, force: true });
 });
 
+test('sealing cannot authorize bytes that changed after the privacy inspection', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-seal-privacy-race-'));
+  const stage = path.join(root, 'stage');
+  fs.mkdirSync(stage);
+  fs.writeFileSync(path.join(stage, 'payload.txt'), 'Public synthetic content.');
+  const chmod = fs.chmodSync;
+  let injected = false;
+  let audit;
+  t.after(() => {
+    fs.chmodSync = chmod;
+    if (audit) removeAuditedStage(audit.stageDir, { expectedRecord: audit.stageRecord });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  fs.chmodSync = (file, mode) => {
+    if (!injected && String(file).includes('.audited-')
+      && path.basename(String(file)) === 'payload.txt' && (mode & 0o222) === 0) {
+      injected = true;
+      fs.writeFileSync(file, 'SyntheticSealRaceForbiddenMarker');
+    }
+    return chmod(file, mode);
+  };
+  assert.throws(() => {
+    audit = auditStageBeforePackaging(stage, {
+      authorizationRoot: root,
+      env: { SCOUT_RELEASE_MARKERS: 'SyntheticSealRaceForbiddenMarker' },
+    });
+  }, /changed during sealing/);
+  assert.equal(injected, true);
+});
+
 test('sealed release authorization rejects the complete tamper matrix', () => {
   const cases = [
     ['content', ({ file }) => {
