@@ -13,7 +13,7 @@ import {
   productionPackageManifest, PUBLIC_SOURCE_FILES, RELEASE_FILES,
   removeAuditedStage, sha256, stagePublicSource, stageRelease, verifiedReleaseTreeDigest, writeChecksums,
 } from './build-release.mjs';
-import { verifiedAuditTreeDigest } from './release-audit.mjs';
+import { sealedAuditDirectoryMode, verifiedAuditTreeDigest } from './release-audit.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PRIVATE_COPY_FIXTURES = Object.freeze([
@@ -329,6 +329,15 @@ test('packaging consumes the audit-created read-only content snapshot', () => {
   assert.throws(() => assertAuditedStage(audit), /privacy-authorized snapshot/);
   removeAuditedStage(audit.stageDir, { expectedRecord: audit.stageRecord });
   fs.rmSync(authorizationRoot, { recursive: true, force: true });
+});
+
+test('seal transition predicts platform-reported directory permissions', () => {
+  assert.equal(sealedAuditDirectoryMode(0o555, 'win32'), 0o444);
+  assert.equal(sealedAuditDirectoryMode(0o755, 'win32'), 0o666);
+  for (const platform of ['linux', 'darwin']) {
+    assert.equal(sealedAuditDirectoryMode(0o555, platform), 0o555);
+    assert.equal(sealedAuditDirectoryMode(0o755, platform), 0o755);
+  }
 });
 
 test('sealing cannot authorize bytes that changed after the privacy inspection', (t) => {

@@ -640,6 +640,12 @@ function auditedTreeIdentityDigest(root, files, directories, links = []) {
   return crypto.createHash('sha256').update(JSON.stringify(records)).digest('hex');
 }
 
+export function sealedAuditDirectoryMode(mode, platform = process.platform) {
+  // Windows chmod maps the writable flag to READONLY; libuv reports no
+  // directory execute bits. POSIX preserves the exact requested permission bits.
+  return platform === 'win32' ? ((mode & 0o222) ? 0o666 : 0o444) : mode;
+}
+
 function auditSealTransitionDigest(root, files, directories, links, { expectedSeal, sealedDirectoryModes }) {
   // chmod must change mode/ctime only. Bind every other identity field and
   // inspected byte while predicting precisely the permitted mode changes.
@@ -651,7 +657,7 @@ function auditSealTransitionDigest(root, files, directories, links, { expectedSe
     ...directories.map((record) => {
       const relative = normaliseRelative(root, record.directory);
       const mode = expectedSeal
-        ? (Object.hasOwn(sealedDirectoryModes, relative) ? sealedDirectoryModes[relative] : 0o555)
+        ? sealedAuditDirectoryMode(Object.hasOwn(sealedDirectoryModes, relative) ? sealedDirectoryModes[relative] : 0o555)
         : undefined;
       return { type: 'directory', path: relative, names: record.names, ...identity(record.identity, mode) };
     }),
