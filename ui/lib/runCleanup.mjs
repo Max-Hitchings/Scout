@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { archiveSelectedRuns, compactScanQueue, planRunCleanup, planScanQueueCleanup } from './runRetention.mjs';
-import { loadRecoveryHeader, unlockRecoveryKey } from './recoveryBackup.mjs';
+import { assertPersistedRecoveryDataKey, loadRecoveryHeader, unlockRecoveryKey } from './recoveryBackup.mjs';
 import { loadSyncSettings } from './workspaceSync.mjs';
 import { acquireScanLease, currentLeaseOwner, releaseScanLease } from './scanLease.mjs';
 import { withMutationCoordinator } from './mutationCoordinator.mjs';
@@ -96,6 +96,8 @@ export function applyRunCleanupReview(root, { file, confirm, secretFile = null }
     if (!lease) throw new Error('Another workspace operation is active; retry the reviewed cleanup after it finishes');
     try {
       return withMutationCoordinator(root, lease, () => {
+        validatePhysicalWorkspacePath(root, path.join(root, '.scout-backup/v1/header.json'), 'cleanup recovery authority');
+        assertPersistedRecoveryDataKey(root, key);
         if (!review.plan.selected?.length && !review.queue) throw new Error('Review an explicit run selection or --queue before applying cleanup');
         if (review.queue) {
           const current = planScanQueueCleanup(root, { now: new Date(review.queue.generatedAt), summaryDays: review.queue.summaryDays });
