@@ -196,7 +196,7 @@ test('cleanup plan publication uses the canonical checked parent after an alias 
     const canonical = realpath(file, ...options);
     if (!retargeted && String(file) === alias) {
       retargeted = true;
-      fs.unlinkSync(alias);
+      fs.rmSync(alias, { recursive: true, force: true });
       fs.symlinkSync(publicApp, alias, 'junction');
     }
     return canonical;
@@ -275,10 +275,20 @@ fs.readFileSync = function(file, ...args) {
   return original.call(fs, file, ...args);
 };
 `);
-  const applied = spawnSync(process.execPath, ['--import', preload, path.join(app, 'tools/scout.mjs'), 'cleanup', '--workspace', root, '--apply', file, '--confirm', review.reviewDigest], { env, cwd: app, encoding: 'utf8', timeout: 30000 });
+  const applied = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, path.join(app, 'tools/scout.mjs'), 'cleanup', '--workspace', root, '--apply', file, '--confirm', review.reviewDigest], { env, cwd: app, encoding: 'utf8', timeout: 30000 });
   assert.equal(JSON.parse(fs.readFileSync(trace, 'utf8')).status, 'enqueued');
   assert.notEqual(applied.status, 0, 'the compactor must use the reviewed queue digest, even after a legitimate new request');
   assert.deepEqual(projectScanQueue(root).requests.map((item) => item.id).sort(), ['synthetic-concurrent', 'synthetic-expired-review']);
   const operations = path.join(root, '.scout/queue-compactions');
   assert.equal(fs.existsSync(operations) && fs.readdirSync(operations).length > 0, false, 'no unreviewed prepared intent is published');
+});
+
+test('malformed private review content is never copied into CLI diagnostics', (t) => {
+  const { parent, cli } = fixture(t);
+  const file = path.join(parent, 'invalid-review.json');
+  const privateMarker = `SyntheticPrivateReview${crypto.randomBytes(8).toString('hex')}`;
+  fs.writeFileSync(file, privateMarker, { mode: 0o600 });
+  const result = cli('--apply', file, '--confirm', 'a'.repeat(64));
+  assert.notEqual(result.status, 0);
+  assert.equal(`${result.stdout}${result.stderr}`.includes(privateMarker), false);
 });
