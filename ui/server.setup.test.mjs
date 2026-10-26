@@ -266,7 +266,7 @@ test('sync status is local-only by default and restore refuses an established wo
 test('configured categories and triage thresholds flow through the opportunities API', async () => {
   const configured = await request({
     method: 'POST', route: '/api/setup/config',
-    body: { triage: { actionScore: 82, checkScore: 64 } },
+    body: { mode: 'active', triage: { actionScore: 82, checkScore: 64 } },
   });
   assert.equal(configured.status, 200);
   fs.writeFileSync(path.join(workspace, 'data', 'search-categories.json'), JSON.stringify({

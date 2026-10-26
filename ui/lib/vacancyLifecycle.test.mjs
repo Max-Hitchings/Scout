@@ -298,3 +298,11 @@ test('the assessment-change limit does not hold back vacancies that are assessed
   assert.deepEqual(new Set(rankedAgain.eligible.map((item) => item.lifecycle.reason)), new Set(['material-change']));
   assert.equal(rankedAgain.eligible.length, 5);
 });
+
+test('lifecycle accepts both persisted underscore and public hyphen rejection vocabularies', () => {
+  for (const outcome of ['below_threshold', 'below-threshold', 'provider_discarded', 'provider-discarded', 'mandatory_unmet', 'mandatory-unmet', 'hard_exclusion', 'hard-exclusion']) {
+    const decision = decideVacancyLifecycle({ ...vacancy, outcome, profileId: 'profile-current' }, vacancy, { profileId: 'profile-current' });
+    assert.equal(decision.skipAssessment, true, outcome);
+    assert.equal(decision.reason, 'unchanged-rejection', outcome);
+  }
+});

@@ -15,6 +15,7 @@ const SAFE_OUTCOME = new Set([
   'kept', 'hard_exclusion', 'mandatory_unmet', 'below_threshold',
   'provider_discarded', 'advert_closed',
 ]);
+const TRACKER_OUTCOMES = new Set(['added', 'updated', 'unchanged']);
 const DISCARDED_COUNTERS = [
   'hard_exclusion', 'mandatory_unmet', 'below_threshold',
   'provider_discarded', 'advert_closed',
@@ -226,8 +227,15 @@ function safeIdentity(entry) {
     title: boundedLabel(identity.title, 160),
     location: boundedLabel(identity.location, 160),
     seniority: boundedLabel(identity.seniority, 80),
-    evidenceTokenDigests: evidence.filter((value) => /^[a-f0-9]{64}$/.test(value)).slice(0, 32),
+    evidenceTokenDigests: evidence.filter((value) => /^[a-f0-9]{64}$/.test(value)).slice(0, 80),
   };
+}
+
+function safeNotificationState(value) {
+  if (!value || Object.keys(value).sort().join(',') !== 'episode,exceptional,qualified'
+    || typeof value.qualified !== 'boolean' || typeof value.exceptional !== 'boolean'
+    || !Number.isSafeInteger(value.episode) || value.episode < 0) return null;
+  return { qualified: value.qualified, exceptional: value.exceptional, episode: value.episode };
 }
 
 function safeOpportunity(entry, existed, prior = null) {
@@ -267,14 +275,19 @@ function safeOpportunity(entry, existed, prior = null) {
     profileId: identifier(entry?.profileId),
     learningVersionId: identifier(entry?.learningVersionId),
     rankingHistory: safeRankingHistory(entry?.rankingHistory),
+    ...(safeNotificationState(entry?.notificationState) ? { notificationState: safeNotificationState(entry.notificationState) } : {}),
     lastChecked: /^\d{4}-\d{2}-\d{2}$/.test(entry?.lastChecked || '') ? entry.lastChecked : null,
     foundVia: code(entry?.foundVia),
     ...(entry?.advertUpdate ? {
       advertUpdate: {
         detectedAt: /^\d{4}-\d{2}-\d{2}$/.test(entry.advertUpdate.detectedAt || '')
           ? entry.advertUpdate.detectedAt : null,
-        previousDigest: digest(entry.advertUpdate.previousFingerprint),
-        currentDigest: digest(entry.advertUpdate.currentFingerprint),
+        previousDigest: typeof entry.advertUpdate.previousFingerprint === 'string'
+          ? digest(entry.advertUpdate.previousFingerprint)
+          : /^[a-f0-9]{64}$/.test(entry.advertUpdate.previousDigest || '') ? entry.advertUpdate.previousDigest : digest(''),
+        currentDigest: typeof entry.advertUpdate.currentFingerprint === 'string'
+          ? digest(entry.advertUpdate.currentFingerprint)
+          : /^[a-f0-9]{64}$/.test(entry.advertUpdate.currentDigest || '') ? entry.advertUpdate.currentDigest : digest(''),
       },
     } : {}),
     noteCode: !existed ? 'scan-assessed'
@@ -398,11 +411,13 @@ function safeRunRecord(record) {
       reason_code: code(item?.reason_code, 'unknown'),
       assessment_status: code(item?.assessment_status, 'unknown'),
       outcome: code(item?.outcome),
+      ...(TRACKER_OUTCOMES.has(item?.tracker_outcome) ? { tracker_outcome: item.tracker_outcome } : {}),
       source: sourceIdentityLabel(item?.source),
       sourceUrl: canonicalUrl(item?.sourceUrl),
       sourceReferences: safeReferences({ sourceReferences: item?.sourceReferences }),
     })),
     reviewed: (record?.reviewed || []).map((item) => ({
+      ...(identifier(item?.trackerId) ? { trackerId: identifier(item.trackerId) } : {}),
       vacancyId: durableVacancyId(item?.vacancyId),
       company: boundedLabel(item?.company, 120),
       role: boundedLabel(item?.role, 160),
@@ -416,6 +431,7 @@ function safeRunRecord(record) {
       learningVersionId: identifier(item?.learningVersionId),
       categoryId: code(item?.categoryId),
       outcome: SAFE_OUTCOME.has(item?.outcome) ? item.outcome : 'below_threshold',
+      ...(TRACKER_OUTCOMES.has(item?.trackerOutcome) ? { trackerOutcome: item.trackerOutcome } : {}),
       score: number(item?.score),
       reasonCodes: item?.outcome === 'provider_discarded'
         ? ['provider-discarded']
@@ -520,6 +536,7 @@ function canonicalTrackerRecipe(recipe) {
       profileId: identifier(item?.profileId),
       learningVersionId: identifier(item?.learningVersionId),
       rankingHistory: safeRankingHistory(item?.rankingHistory),
+      ...(safeNotificationState(item?.notificationState) ? { notificationState: safeNotificationState(item.notificationState) } : {}),
       lastChecked: /^\d{4}-\d{2}-\d{2}$/.test(item?.lastChecked || '') ? item.lastChecked : null,
       foundVia: code(item?.foundVia),
       ...(item?.advertUpdate ? {
@@ -574,6 +591,7 @@ function renderTracker(currentContent, recipe) {
       profileId: upsert.profileId,
       learningVersionId: upsert.learningVersionId,
       rankingHistory: upsert.rankingHistory,
+      ...(safeNotificationState(upsert.notificationState) ? { notificationState: safeNotificationState(upsert.notificationState) } : {}),
       lastChecked: upsert.lastChecked,
       foundVia: upsert.foundVia,
       ...(upsert.advertUpdate ? { advertUpdate: upsert.advertUpdate } : {}),

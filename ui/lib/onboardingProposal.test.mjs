@@ -8,7 +8,7 @@ import {
   activatedProposalRecovery, discardOnboardingProposal, readOnboardingProposal, recoverActivatedProposal,
   recoverOnboardingActivationAtStartup, validateOnboardingProposal,
 } from './onboardingProposal.mjs';
-import { readProviderHealth } from './providerHealth.mjs';
+import { readProviderHealth, recordProviderHealth, recordProviderResultHealth } from './providerHealth.mjs';
 import { ProviderLifecycleUnclosedError } from './structuredTurn.mjs';
 import {
   acquireProviderAuthMutation, releaseProviderAuthMutation,
@@ -51,6 +51,35 @@ function proposal() {
 const status = () => ({ installed: true, authenticated: true, executable: 'codex', capabilities: { structuredOutput: true } });
 const run = async () => ({ value: proposal(), usage: { input_tokens: 50 } });
 const healthyDoctor = () => ({ checks: { config: { ok: true }, tracker: { ok: true }, providers: { codex: { installed: true, authenticated: true } } } });
+
+test('onboarding production preflight keeps a known remote auth failure authoritative', async (t) => {
+  const dir = root();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  recordProviderHealth(dir, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' }, { purpose: 'manual-run' });
+  let calls = 0;
+  await assert.rejects(createOnboardingProposal(dir, 'codex', {
+    providerStatusFn: status,
+    runStructuredTurnFn() { calls += 1; return run(); },
+  }), /sign.in|reconnect/i);
+  assert.equal(calls, 0);
+});
+
+test('onboarding commits real success health while its provider work still excludes login', async (t) => {
+  const dir = root();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  let excluded;
+  await createOnboardingProposal(dir, 'codex', {
+    providerStatusFn: status, runStructuredTurnFn: run,
+    async recordProviderResultHealthFn(...args) {
+      const mutation = acquireProviderAuthMutation(dir, 'codex');
+      excluded = mutation === null;
+      if (mutation) releaseProviderAuthMutation(dir, mutation);
+      return recordProviderResultHealth(...args);
+    },
+  });
+  assert.equal(excluded, true);
+  assert.equal(readProviderHealth(dir, 'codex').state, 'ready');
+});
 
 test('onboarding evidence has stable IDs and oversized imports are never truncated', () => {
   const dir = root();
@@ -403,4 +432,23 @@ test('activated master CV recovery refuses workspace drift beyond activation tim
   fs.writeFileSync(workspaceFile, `${JSON.stringify(config, null, 2)}\n`);
   assert.equal(activatedProposalRecovery(dir).available, false);
   assert.throws(() => recoverActivatedProposal(dir, true, { doctorFn: healthyDoctor }), /workspace\.json no longer matches/);
+});
+
+test('generated onboarding instructions use the workspace locale for every proposal', async () => {
+  const dir = root();
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(dir, 'workspace.json'), 'utf8'));
+    config.locale = 'fr-CA';
+    writeWorkspaceConfig(dir, config);
+    let prompt;
+    await createOnboardingProposal(dir, 'codex', {
+      providerStatusFn: status,
+      runStructuredTurnFn: async (options) => {
+        prompt = options.prompt;
+        return run();
+      },
+    });
+    assert.match(prompt, /Create concise profile and CV content using the workspace locale fr-CA/);
+    assert.doesNotMatch(prompt, /UK[- ]English|British English/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
