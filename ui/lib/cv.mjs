@@ -39,8 +39,12 @@ function checkedTarget(root, { target = 'application', slug = '' } = {}) {
       pdf: path.join(root, '.scout', 'rendered', 'master-cv.pdf'),
     };
   }
-  if (target !== 'application') throw new Error(`invalid CV render target: ${target}`);
+  if (target !== 'application' && target !== 'cover-letter') throw new Error(`invalid CV render target: ${target}`);
   if (!SLUG.test(String(slug))) throw new Error(`invalid slug: ${slug}`);
+  if (target === 'cover-letter') return {
+    target, key: `cover-letter:${slug}`, slug, source: safeCvPath(root, `applications/${slug}/outreach.md`),
+    typst: path.join(root, 'applications', slug, 'outreach.typ'), pdf: path.join(root, 'applications', slug, 'outreach.pdf'),
+  };
   safeCvPath(root, `applications/${slug}/cv.typ`);
   return {
     target, key: `application:${slug}`, slug, source: path.join(root, 'applications', slug, 'cv.typ'),
@@ -81,6 +85,7 @@ function prepareTarget(root, descriptor) {
   if (!fs.existsSync(descriptor.source)) throw new Error(descriptor.target === 'master' ? 'The master CV does not exist.' : `CV source does not exist: applications/${descriptor.slug}/cv.typ`);
   const source = fs.readFileSync(descriptor.source, 'utf8');
   if (descriptor.target === 'master') atomicWriteFile(descriptor.typst, masterMarkdownToTypst(source));
+  if (descriptor.target === 'cover-letter') atomicWriteFile(descriptor.typst, masterMarkdownToTypst('# DRAFT — cover letter for your review\n\n' + source));
   fs.mkdirSync(path.dirname(descriptor.pdf), { recursive: true });
   return { ...descriptor, sourceSha256: sha256(source) };
 }
@@ -261,5 +266,9 @@ export function listCvFiles(root) {
       quality: fs.existsSync(path.join(directory, 'cv-quality.json')),
     };
   });
-  return { master: 'cv/master-cv.md', masterRender: cvRenderState(root, { target: 'master' }), applications, outreach, entries };
+  const letters = outreach.map((slug) => {
+    const state = cvRenderState(root, { target: 'cover-letter', slug });
+    return { slug, ...state, pdfCurrent: state.current, pdfStale: state.stale };
+  });
+  return { master: 'cv/master-cv.md', masterRender: cvRenderState(root, { target: 'master' }), applications, outreach, entries, letters };
 }

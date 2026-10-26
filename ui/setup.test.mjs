@@ -7,6 +7,7 @@ import {
   buildConfig,
   bytesToBase64,
   firstScanProfileReady,
+  firstRunPreferenceDefaults,
   formatLocalDateTime,
   matchingPreset,
   presetDays,
@@ -25,6 +26,14 @@ import {
   splitList,
   validateCvName,
 } from './setup.js';
+
+test('first-run proposes local language, timezone and currency while preserving established choices', () => {
+  const existing = { locale: 'en-GB', currency: 'GBP', timezone: 'Europe/London' };
+  assert.deepEqual(firstRunPreferenceDefaults(existing, { locale: 'en-CA', timeZone: 'America/Toronto' }), { locale: 'en-CA', currency: 'CAD', timezone: 'America/Toronto', country: 'ca' });
+  assert.deepEqual(firstRunPreferenceDefaults(existing, { locale: 'ja-JP', timeZone: 'Asia/Tokyo' }), { locale: 'ja-JP', currency: 'JPY', timezone: 'Asia/Tokyo', country: 'jp' });
+  assert.deepEqual(firstRunPreferenceDefaults(existing, { locale: 'en-CA', timeZone: 'America/Toronto', established: true }), { ...existing, country: '' });
+  assert.equal(firstRunPreferenceDefaults({}, { locale: 'und', timeZone: 'UTC' }).currency, '');
+});
 
 test('feedback learning review separates job events, pending proposals and published undo', () => {
   const html = feedbackLearningHtml({

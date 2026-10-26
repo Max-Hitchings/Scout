@@ -237,6 +237,34 @@ test('master CV saves reject an empty replacement without changing the active fi
   assert.equal(fs.readFileSync(file, 'utf8'), before);
 });
 
+test('Living CV API requires exact review, rejects stale approval and preserves local history', async () => {
+  const source = path.join(os.tmpdir(), `scout-synthetic-cv-${process.pid}.md`);
+  const file = path.join(workspace, 'cv/master-cv.md');
+  const previous = fs.readFileSync(file, 'utf8');
+  const text = '# Synthetic CV\n' + 'Confirmed experience. '.repeat(40);
+  fs.writeFileSync(source, text);
+  try {
+    const configured = await request({ method: 'POST', route: '/api/cv/living/source', body: { sourcePath: source } });
+    assert.equal(configured.status, 200);
+    assert.equal(configured.json.state, 'changed');
+    assert.equal(fs.readFileSync(file, 'utf8'), previous);
+    const unconfirmed = await request({ method: 'POST', route: '/api/cv/living/approve', body: { revision: configured.json.revision } });
+    assert.equal(unconfirmed.status, 409);
+    fs.appendFileSync(source, '\nA later edit.');
+    const stale = await request({ method: 'POST', route: '/api/cv/living/approve', body: { revision: configured.json.revision, confirmed: true } });
+    assert.equal(stale.status, 409);
+    const status = await request({ route: '/api/cv/living' });
+    const accepted = await request({ method: 'POST', route: '/api/cv/living/approve', body: { revision: status.json.revision, confirmed: true } });
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.json.state, 'current');
+    assert.equal(accepted.json.versions.length, 2);
+    assert.equal(fs.readFileSync(file, 'utf8'), text + '\nA later edit.');
+  } finally {
+    fs.rmSync(source, { force: true });
+    fs.writeFileSync(file, previous);
+  }
+});
+
 test('fresh setup cannot be marked complete before trusted proposal activation', async () => {
   const completed = await request({ method: 'POST', route: '/api/setup/complete', body: {} });
   assert.equal(completed.status, 409);

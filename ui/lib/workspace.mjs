@@ -14,9 +14,9 @@ export const CURRENT_WORKSPACE_SCHEMA = 2;
 
 export const DEFAULT_WORKSPACE_CONFIG = Object.freeze({
   schemaVersion: CURRENT_WORKSPACE_SCHEMA,
-  locale: 'en-GB',
-  currency: 'GBP',
-  timezone: 'Europe/London',
+  locale: 'en',
+  currency: 'USD',
+  timezone: 'UTC',
   profile: {
     displayName: '',
     tone: 'natural, direct and evidence-led',
@@ -42,7 +42,7 @@ export const DEFAULT_WORKSPACE_CONFIG = Object.freeze({
   },
   sources: {
     adzuna: {
-      country: 'gb',
+      country: null,
       where: '',
       distanceKm: null,
       resultsPerPage: 50,

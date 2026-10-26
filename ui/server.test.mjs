@@ -1959,6 +1959,35 @@ test('POST /api/status accepts the shortlist status and persists it', async () =
   assert.equal(saved.status, 'shortlist');
 });
 
+test('thumbs feedback proposes an interpretable ranking change and reset keeps all evidence', { concurrency: false }, async (t) => {
+  seedWorkspace(APP_ROOT, testWorkspace);
+  const learningFile = workspacePaths(testWorkspace).feedbackLearning;
+  const previousLedger = fs.existsSync(learningFile) ? fs.readFileSync(learningFile) : null;
+  t.after(() => { if (previousLedger) fs.writeFileSync(learningFile, previousLedger); else fs.rmSync(learningFile, { force: true }); });
+  const trackerFile = path.join(testWorkspace, 'data/opportunities.json');
+  const id = 'synthetic-fit-feedback';
+  fs.writeFileSync(trackerFile, JSON.stringify({ updated: '2026-10-26', opportunities: [{ id, role: 'Example Coordinator', company: 'Example Cooperative', status: 'new', score: 70 }] }));
+  const initial = JSON.parse((await request({ path: '/api/feedback-learning' })).text);
+  const submit = async (apiPath, value) => {
+    const response = await request({ method: 'POST', path: apiPath, headers: JSON_HEADERS(), body: JSON.stringify(value) });
+    assert.equal(response.status, 200, response.text);
+    return JSON.parse(response.text);
+  };
+  const recorded = await submit('/api/feedback', { revision: initial.revision, opportunityId: id, decision: 'not-interested', reason: 'responsibilities', explanation: 'These responsibilities are outside the intended work.', learning: { field: 'title' } });
+  assert.equal(recorded.proposed, true);
+  const proposal = recorded.ledger.proposals.at(-1);
+  assert.equal(proposal.status, 'pending');
+  assert.deepEqual(proposal.change, { kind: 'rank-adjustment', field: 'title', value: 'Example Coordinator', weight: -3, scope: 'profile-wide', scopeValue: null });
+  assert.deepEqual(recorded.ledger.active.changes, initial.active.changes);
+  assert.equal(JSON.parse(fs.readFileSync(trackerFile)).opportunities[0].status, 'new');
+  const published = await submit('/api/learning/publish', { revision: recorded.ledger.revision, proposalId: proposal.id, confirmed: true });
+  const reset = await submit('/api/learning/reset', { revision: published.ledger.revision, versionId: published.ledger.active.id, confirmed: true, explanation: 'Return to the approved search preferences.' });
+  assert.deepEqual(reset.ledger.active.changes, []);
+  assert.equal(reset.ledger.feedbackEvents.at(-1).reason, 'responsibilities');
+  assert.equal(reset.ledger.proposals.at(-1).status, 'published');
+  assert.equal(reset.ledger.versions.at(-1).resetOf, published.ledger.active.id);
+});
+
 test('feedback, proposal, publication and undo remain separate revisioned mutations', { concurrency: false }, async () => {
   seedWorkspace(APP_ROOT, testWorkspace);
   const trackerFile = path.join(testWorkspace, 'data', 'opportunities.json');

@@ -1,6 +1,7 @@
 import { createChatDrawerState, reduceChatDrawer } from './lib/chatDrawerState.mjs?v=__SCOUT_UI_BUILD__';
 import { openCodexTask as codexTaskLaunchView } from './lib/codexDeepLink.mjs?v=__SCOUT_UI_BUILD__';
 import { DURABLE_RUN_STATES, TERMINAL_RUN_STATES } from './lib/durableRunStates.mjs?v=__SCOUT_UI_BUILD__';
+import { jobFeedbackHtml, livingCvHtml } from './lib/standaloneUi.mjs?v=__SCOUT_UI_BUILD__';
 
 // Keep browser orchestration here while pure state machines live in /lib, where
 // deterministic unit tests exercise them without a DOM. Scout character data
@@ -1308,30 +1309,32 @@ const Scout = {
           : `<button class="act bridge" data-action="open-chat" data-id="${this.esc(e.id)}" data-prefill="coverLetter">create custom cover letter</button>`}
         <button class="act" data-action="open-company-history" data-id="${this.esc(e.id)}">company history</button>
         <button class="act" data-action="record-feedback" data-id="${this.esc(e.id)}">record feedback</button>
+        <button class="act" data-action="record-feedback" data-decision="promising" data-id="${this.esc(e.id)}">👍 Good fit</button>
+        <button class="act" data-action="record-feedback" data-decision="not-interested" data-id="${this.esc(e.id)}">👎 Poor fit</button>
         <button class="act bridge" data-action="open-chat" data-id="${this.esc(e.id)}" data-prefill="fit">fit and evidence gaps</button>
         <button class="act bridge" data-action="open-chat" data-id="${this.esc(e.id)}" data-prefill="ask">ask about this job</button>
         <button class="act${prepRecommended ? ' bridge' : ''}" data-action="open-interview-prep" data-id="${this.esc(e.id)}">interview prep</button>
       </div>`;
   },
 
-  async recordJobFeedback(id, presetDecision = null) {
-    const decisions = [
-      'applied', 'interview', 'promising', 'saved', 'rejected',
-      'not-interested', 'duplicate', 'already-seen',
-    ];
-    const reasons = [
-      'location', 'salary', 'seniority', 'responsibilities', 'employer',
-      'role-family', 'other', 'positive', 'duplicate', 'already-seen',
-    ];
-    const decision = presetDecision || window.prompt?.(
-      `Decision (${decisions.join(', ')}):`,
-      'not-interested',
-    );
-    if (!decisions.includes(decision)) return null;
-    const reason = window.prompt?.(`Reason (${reasons.join(', ')}):`, decision === 'promising' ? 'positive' : 'other');
-    if (!reasons.includes(reason)) return null;
-    const explanation = window.prompt?.('Explain this job-specific feedback:', '');
-    if (!String(explanation || '').trim()) return null;
+  recordJobFeedback(id, presetDecision = 'promising', sourceCard = null) {
+    const card = sourceCard || [...document.querySelectorAll('.card[data-id]')].find((item) => item.dataset.id === id && item.offsetParent !== null);
+    if (!card) return;
+    card.querySelector('.job-feedback')?.remove();
+    card.insertAdjacentHTML('beforeend', jobFeedbackHtml(id, presetDecision));
+    card.querySelector('[data-feedback-explanation]')?.focus();
+  },
+
+  async saveJobFeedback(element) {
+    const form = element.closest('[data-feedback-form]');
+    if (!form) return;
+    const id = form.dataset.feedbackForm;
+    const decision = form.querySelector('[data-feedback-decision]').value;
+    const reason = form.querySelector('[data-feedback-reason]').value;
+    const explanation = form.querySelector('[data-feedback-explanation]').value.trim();
+    const field = form.querySelector('[data-feedback-scope]').value;
+    const status = form.querySelector('[data-feedback-status]');
+    if (!explanation) { status.textContent = 'Add a reason in your own words before saving.'; return; }
     if (!this.feedbackLearning?.revision) {
       this.feedbackLearning = await this.api('/api/feedback-learning');
     }
@@ -1343,12 +1346,13 @@ const Scout = {
         opportunityId: id,
         decision,
         reason,
-        explanation: String(explanation).trim(),
+        explanation,
+        ...(field !== 'job' ? { learning: { field } } : {}),
       }),
     });
     if (result?.ok) {
       this.feedbackLearning = result.ledger;
-      window.alert?.('Job feedback recorded. Ranking did not change; any learned preference must be proposed and reviewed in Settings.');
+      status.textContent = result.proposed ? 'Feedback saved. A ranking suggestion is waiting for your review in Settings → Feedback & learning.' : 'Feedback saved for this job. Other jobs and ranking are unchanged.';
     }
     return result;
   },
@@ -1583,7 +1587,7 @@ const Scout = {
   async seeCoverLetter(slug) {
     this.showTab('cv');
     await this.waitFor('#cv-text');
-    this.openCv(`applications/${slug}/outreach.md`, null);
+    this.openCv(`applications/${slug}/outreach.md`, slug);
   },
 
   chooseCvOptions(id, artifactSlug = null) {
@@ -1634,16 +1638,20 @@ const Scout = {
       .sort((a, b) => `${a.company} ${a.role}`.localeCompare(`${b.company} ${b.role}`));
     const opportunityOptions = opportunities.map((entry) =>
       `<option value="${this.esc(entry.id)}">${this.esc(entry.company)} — ${this.esc(entry.role)}</option>`).join('');
+    const letterBtns = (list.outreach || []).map((slug) => `<button class="act cv-entry" data-action="open-cv" data-cv-path="applications/${this.esc(slug)}/outreach.md" data-slug="${this.esc(slug)}"><span class="cv-entry-label">${this.esc(this.opportunitiesForSlug(slug)[0]?.company || slug)} — cover letter</span><span class="chip">DRAFT</span></button>`).join('');
     el.innerHTML = `
       <div class="cv-library-head"><div><h2>CV library</h2><div class="meta">Existing sources remain available even before a PDF or quality review exists.</div></div><button class="act bridge" data-action="toggle-cv-create">Review CV options</button></div>
+      <p class="meta">Application CVs and cover letters are DRAFTS for your review. Scout never sends them.</p>
+      <section id="living-cv-panel" aria-label="Living CV"></section>
       <div id="cv-create-panel" class="cv-create-panel hidden cv-create">
-        ${opportunityOptions ? `<label>Tracked opportunity<select id="cv-create-opportunity">${opportunityOptions}</select></label><button class="act primary" data-action="start-cv-create">Start tailored CV</button>` : '<div class="meta">Add a tracked opportunity before creating a tailored CV.</div>'}
+        ${opportunityOptions ? `<label>Tracked opportunity<select id="cv-create-opportunity">${opportunityOptions}</select></label><button class="act primary" data-action="start-cv-create">Start tailored CV</button><button class="act" data-action="start-cover-letter">Start cover-letter draft</button>` : '<div class="meta">Add a tracked opportunity before creating a tailored CV.</div>'}
       </div>
       <div class="cv-layout">
         <aside class="cv-sidebar">
           <div class="label">master</div>
           <button class="act" data-action="open-cv" data-cv-path="${this.esc('cv/master-cv.md')}">master-cv.md</button>
           <div class="label">applications</div>${appBtns}
+          <div class="label">cover-letter drafts</div>${letterBtns || '<div class="meta">No cover-letter drafts yet.</div>'}
         </aside>
         <section class="cv-editor-panel">
           <div class="label"><span id="cv-editing">select a file</span> <span id="cv-dirty" style="color:var(--warn)"></span> <span id="cv-status" class="meta"></span></div>
@@ -1658,7 +1666,7 @@ const Scout = {
             <div class="label">request changes through the job chat</div>
             <div class="meta">This opens the same job-specific Codex or Claude conversation used to create the CV. Your request is placed in the message box for review; nothing is sent until you press Send in the chat drawer.</div>
             <div class="cv-chat-request-row">
-              <input id="cv-instruction" class="act" placeholder="e.g. lead with the drone/UAV angle and mention the composites oven rig">
+              <input id="cv-instruction" class="act" placeholder="e.g. lead with the most relevant confirmed experience">
               <button class="act bridge" data-action="open-chat-for-cv">open job chat with request</button>
             </div>
           </div>
@@ -1692,6 +1700,48 @@ const Scout = {
       await this.showStoredCv();
       await this.reattachCvRender();
     }
+    await this.refreshLivingCv();
+  },
+
+  async refreshLivingCv(force = false) {
+    const panel = document.getElementById('living-cv-panel');
+    if (!panel || (!force && panel.contains(document.activeElement))) return;
+    try {
+      const status = await this.api('/api/cv/living');
+      if (status.error) throw new Error(status.error);
+      const signature = JSON.stringify(status);
+      if (!force && panel.dataset.signature === signature) return;
+      const open = panel.querySelector('details')?.open || force;
+      panel.innerHTML = livingCvHtml(status);
+      panel.querySelector('details').open = open;
+      panel.dataset.signature = signature;
+      this.livingCv = status;
+    } catch (error) { panel.textContent = error.message || 'Living CV status is unavailable. Your saved CV is unchanged.'; }
+  },
+
+  async updateLivingCv(action) {
+    const endpoint = action === 'approve' ? 'approve' : 'source';
+    const payload = action === 'approve'
+      ? { confirmed: document.getElementById('living-cv-confirm')?.checked === true, revision: this.livingCv?.revision }
+      : { sourcePath: action === 'disconnect' ? null : document.getElementById('living-cv-source')?.value.trim() };
+    if (action === 'approve' && !payload.confirmed) return this.setCvStatus('Review and confirm the exact CV change first.');
+    if (action === 'approve' && this.cvState.dirty) return this.setCvStatus('Save or discard your editor changes before approving an external CV.');
+    const result = await this.api(`/api/cv/living/${endpoint}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+    if (result.error) { this.setCvStatus(result.error); await this.refreshLivingCv(true); return; }
+    if (action === 'approve' && this.cvState.path === 'cv/master-cv.md') {
+      this.cvState.content = await this.api('/api/cv/file?path=cv%2Fmaster-cv.md');
+      document.getElementById('cv-text').value = this.cvState.content;
+      this.state.cvFiles = await this.api('/api/cv');
+      this.updateCvControls();
+      await this.showStoredCv();
+    }
+    this.setCvStatus(action === 'approve' ? 'Updated CV saved. Both versions kept; review search preferences when ready.' : 'Living CV source updated.');
+    await this.refreshLivingCv(true);
+  },
+
+  async openLivingCvVersion(id) {
+    const text = await this.api(`/api/cv/living/version?id=${encodeURIComponent(id)}`);
+    document.getElementById('living-cv-version-text').textContent = typeof text === 'string' ? text : text.error;
   },
 
   opportunityIdForSlug(slug) {
@@ -1759,7 +1809,9 @@ const Scout = {
       b.classList.toggle('active', b.dataset.cvPath === pathRel));
     this.updateCvControls();
     await this.showStoredCv();
-    if (slug) await this.refreshCvQuality(slug);
+    if (this.currentCvRequest()?.target === 'cover-letter') {
+      document.getElementById('cv-quality').innerHTML = '<b>DRAFT — cover letter</b><p>Review every fact and edit the text before using it. The PDF is labelled DRAFT. Scout never sends it.</p>';
+    } else if (slug) await this.refreshCvQuality(slug);
     else {
       const quality = document.getElementById('cv-quality');
       if (quality) quality.innerHTML = '<div class="label">Master reference</div><b>Evidence source</b><div class="meta">The reference PDF is for reviewing the approved master evidence. Tailored application PDFs keep their separate quality gate.</div>';
@@ -1768,11 +1820,15 @@ const Scout = {
 
   currentCvRequest() {
     if (!this.cvState.path) return null;
+    if (this.cvState.path.endsWith('/outreach.md')) return { target: 'cover-letter', slug: this.cvState.slug };
     return this.cvState.slug ? { target: 'application', slug: this.cvState.slug } : { target: 'master' };
   },
 
   currentCvRenderState() {
     if (!this.cvState.path) return { pdf: false, current: false, stale: false };
+    if (this.currentCvRequest()?.target === 'cover-letter') {
+      return this.state.cvFiles?.letters?.find((item) => item.slug === this.cvState.slug) || { pdf: false, current: false, stale: false };
+    }
     if (!this.cvState.slug) return this.state.cvFiles?.masterRender || { pdf: false, current: false, stale: false };
     const entry = this.state.cvFiles?.entries?.find((item) => item.slug === this.cvState.slug);
     if (!entry) return { pdf: false, current: false, stale: false };
@@ -1866,7 +1922,7 @@ const Scout = {
           this.state.cvFiles = await this.api('/api/cv');
           this.updateCvControls();
           await this.showStoredCv();
-          if (this.cvState.slug) await this.refreshCvQuality(this.cvState.slug);
+          if (this.cvState.slug && this.currentCvRequest()?.target === 'application') await this.refreshCvQuality(this.cvState.slug);
         }
       } catch (error) {
         this.cvRenderTimer = null;
@@ -1928,7 +1984,7 @@ const Scout = {
   pdfUrl({ download = false } = {}) {
     const request = this.currentCvRequest();
     if (!request) return '';
-    const query = request.target === 'master' ? 'target=master' : `slug=${encodeURIComponent(request.slug)}`;
+    const query = request.target === 'master' ? 'target=master' : `target=${encodeURIComponent(request.target)}&slug=${encodeURIComponent(request.slug)}`;
     return `/api/cv/pdf?${query}${download ? '&download=1' : ''}&t=${Date.now()}#zoom=${encodeURIComponent(this.cvPreviewZoom)}`;
   },
 
@@ -1961,6 +2017,11 @@ const Scout = {
 
   async downloadCv() {
     if (!this.currentCvRenderState().current) return alert('Save and render a current PDF first.');
+    if (this.currentCvRequest()?.target === 'cover-letter') {
+      const a = document.createElement('a');
+      a.href = this.pdfUrl({ download: true }); a.download = `${this.cvState.slug}-cover-letter-DRAFT.pdf`;
+      document.body.appendChild(a); a.click(); a.remove(); return;
+    }
     if (!this.cvState.slug) {
       const a = document.createElement('a');
       a.href = this.pdfUrl({ download: true }); a.download = 'master-cv-reference.pdf';
@@ -2957,6 +3018,7 @@ const Scout = {
       case 'open-cv': return this.openCv(element.dataset.cvPath, slug || null, element.dataset.opportunityId || null);
       case 'toggle-cv-create': return this.toggleCvCreate();
       case 'start-cv-create': return this.startCvCreate();
+      case 'start-cover-letter': return this.openChat(document.getElementById('cv-create-opportunity')?.value, 'coverLetter');
       case 'save-cv': return this.saveCv();
       case 'render-cv': return this.renderCvOnly();
       case 'download-cv': return this.downloadCv();
@@ -2977,7 +3039,15 @@ const Scout = {
       case 'triage-no': return this.triageNo(id);
       case 'undo-dismiss': return this.undoDismiss(id);
       case 'remove-shortlist': return this.removeFromShortlist(id);
-      case 'record-feedback': return this.recordJobFeedback(id);
+      case 'record-feedback': return this.recordJobFeedback(id, element.dataset.decision || 'promising', element.closest('.card[data-id]'));
+      case 'save-feedback': return this.saveJobFeedback(element);
+      case 'cancel-feedback': return element.closest('[data-feedback-form]')?.remove();
+      case 'living-cv-connect': return this.updateLivingCv('connect');
+      case 'living-cv-disconnect': return this.updateLivingCv('disconnect');
+      case 'living-cv-approve': return this.updateLivingCv('approve');
+      case 'living-cv-refresh': return this.refreshLivingCv(true);
+      case 'living-cv-profile': return window.ScoutSetup?.openSettings?.('search');
+      case 'living-cv-version': return this.openLivingCvVersion(element.dataset.version);
       case 'restore': return this.restoreEntry(id);
       default: return undefined;
     }
@@ -3008,6 +3078,7 @@ const Scout = {
         this.runAction(action);
         return;
       }
+      if (event.target.closest?.('input, select, textarea, label, form')) return;
       const card = event.target.closest?.('.card[data-id]');
       if (card) {
         event.preventDefault();
@@ -3265,6 +3336,7 @@ const Scout = {
     window.setTimeout?.(() => this.checkForAppUpdate(false), 2500);
     window.setInterval?.(() => this.refreshSyncStatus(), 5 * 60 * 1000);
     window.setInterval?.(() => this.loadProviderHealth(), 5 * 60 * 1000);
+    window.setInterval?.(() => { if (this.state.tab === 'cv') this.refreshLivingCv(); }, 30 * 1000);
     window.setInterval?.(() => {
       this.serviceWorkerRegistration?.update?.();
       this.checkUiBuild();
