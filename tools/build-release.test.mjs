@@ -65,11 +65,12 @@ test('a Debian package built under umask 077 remains readable after root-owned i
     const control = path.join(staged.stageDir, 'DEBIAN');
     fs.mkdirSync(control, { mode: 0o755 }); fs.chmodSync(control, 0o755);
     fs.writeFileSync(path.join(control, 'control'), 'Package: scout-synthetic-modes\nVersion: 1.0.0\nArchitecture: all\nMaintainer: Synthetic fixture\nDescription: Synthetic public package fixture\n');
+    const output = path.join(base, 'artifacts'); fs.mkdirSync(output);
     audit = auditStageBeforePackaging(staged.stageDir, {
       authorizationRoot: base, env: { SCOUT_RELEASE_MARKERS: 'SyntheticUmaskFixtureMarker' },
       sealedDirectoryModes: { DEBIAN: 0o755 },
     });
-    const artifact = path.join(base, 'synthetic.deb');
+    const artifact = path.join(output, 'synthetic.deb');
     assertAuditedStage(audit);
     const built = spawnSync('dpkg-deb', ['--build', '--root-owner-group', audit.stageDir, artifact], { encoding: 'utf8' });
     assert.equal(built.status, 0, built.stderr);
