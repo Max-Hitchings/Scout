@@ -80,3 +80,14 @@ PROV-3 was already done and was not repeated. F-1, D-1 and live operator
 acceptance remain outside this package. Package branches and PRs are review
 evidence, not merged-main or release acceptance. Exact-head full-suite, browser
 and privacy evidence is recorded in the draft package PR.
+
+## 2026-10-26 — independent review repairs (Codex)
+
+The realistic description-bearing, receipted scan regression now distinguishes
+unchanged adverts from genuine responsibility changes. Live evidence and durable
+token hashes use the same comparison representation; new receipts keep all 80
+bounded token hashes, while older 32-token receipts remain readable. Advert-update
+digests survive projection unchanged. Five consecutive coordinated scans cover
+initial addition, repeated verification, a real advert change and its recheck.
+Both new regressions were observed failing before the repair. No advert body is
+added to durable scan artifacts.

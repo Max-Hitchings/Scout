@@ -1383,7 +1383,8 @@ test('repeated assessed keeper content reconciles as unchanged while verificatio
 });
 
 test('receipted scan projection preserves an unchanged keeper through the next coordinated scan', () => {
-  const { root, input } = unchangedKeeperFixture();
+  const { root, input, candidate } = unchangedKeeperFixture();
+  candidate.description = 'Design distributed database architecture deliver reliable cloud infrastructure implement observability tooling mentor engineers improve security automation';
   const execute = (id) => {
     const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: id });
     const run = openRunJournal(root, id);
@@ -1404,7 +1405,14 @@ test('receipted scan projection preserves an unchanged keeper through the next c
     assert.equal(second.run.funnel.bySource.ats.unchanged, 1);
     assert.equal(second.run.explanations[0].tracker_outcome, 'unchanged');
     assert.equal(second.run.reviewed[0].trackerOutcome, 'unchanged');
+    assert.deepEqual(second.tracker.opportunities[0].tags, []);
     assert.ok(second.mutationReceipt);
+    assert.equal(execute('synthetic-keeper-third').run.funnel.unchanged, 1);
+    input.candidates = [{ ...candidate, description: 'Coordinate warehouse shipping transport inventory freight logistics procurement packaging distribution dispatch deliveries cargo stock returns' }];
+    const changed = execute('synthetic-keeper-changed');
+    assert.equal(changed.run.funnel.updated, 1);
+    assert.ok(changed.tracker.opportunities[0].tags.includes('Updated advert — review'));
+    assert.equal(execute('synthetic-keeper-changed-repeat').run.funnel.unchanged, 1);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

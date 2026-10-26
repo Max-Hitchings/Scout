@@ -2250,10 +2250,11 @@ function sourceHealth(sources) {
   }]));
 }
 
-function keeperContent(entry) {
+function keeperContent(entry, identityLimit = 80) {
   const encoded = JSON.stringify({ opportunities: [entry] });
   const content = trackerMergeRecipe(encoded, encoded).upserts[0];
   for (const key of ['lastChecked', 'rankingHistory', 'notificationState']) delete content[key];
+  content.jobIdentity.evidenceTokenDigests = content.jobIdentity.evidenceTokenDigests.slice(0, identityLimit);
   return content;
 }
 
@@ -2348,8 +2349,9 @@ function mergeTracker(
     };
     // Verification dates and ranking history advance even when the keeper's
     // job content is unchanged; they are not a newly updated opportunity.
+    const identityLimit = previous?.jobIdentity?.evidenceTokenDigests?.length === 32 ? 32 : 80;
     const changed = previous && !isDeepStrictEqual(
-      keeperContent(previous), keeperContent({ ...previous, ...generated }),
+      keeperContent(previous, identityLimit), keeperContent({ ...previous, ...generated }, identityLimit),
     );
     reviewed.push({ ...review, trackerOutcome: previous ? changed ? 'updated' : 'unchanged' : 'added' });
     if (previous) {
