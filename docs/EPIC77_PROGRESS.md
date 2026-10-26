@@ -288,3 +288,11 @@ limit and an explicit growth ceiling. The original quadratic implementation
 at 93048fd still failed the revised regression with ETIMEDOUT at 30 seconds;
 the indexed implementation passed at 1,418 ms CPU with a 4,935 ms calibrated
 budget. No production canonicalisation predicate or grouping rule changed.
+
+Native-harness self-review added a real subprocess regression for both provider
+discovery paths. It failed RED when the Claude stand-in returned 82 for local
+auth status, then passed after both provider protocols were covered. Both
+stand-ins are installed before native first launch so discovery cannot fall
+back to an existing host account. Owned read-only macOS/portable app trees are
+made removable only inside the disposable install root; workspace preservation
+and occupied-port/existing-install guards remain enforced.

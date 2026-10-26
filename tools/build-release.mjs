@@ -77,7 +77,7 @@ export const PUBLIC_SOURCE_FILES = Object.freeze([
   ...[
     'tools/build-release.mjs', 'tools/build-release.test.mjs',
     'tools/build-platform.mjs', 'tools/build-platform.test.mjs',
-    'tools/native-install-smoke.mjs', 'tools/windows-native.test.mjs',
+    'tools/native-install-smoke.mjs', 'tools/native-provider.test.mjs', 'tools/windows-native.test.mjs',
     'tools/release-audit.mjs', 'tools/release-audit.test.mjs',
     'tools/fetch-adzuna.mjs', 'tools/fetch-ats.mjs', 'tools/fetch-hiring-cafe.mjs',
     'tools/scan-lock.mjs', 'tools/scan-lock.test.mjs', 'tools/scan-skill-parity.test.mjs',

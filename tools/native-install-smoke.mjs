@@ -102,9 +102,11 @@ try {
   fs.mkdirSync(bin, { recursive: true });
   const fake = fs.readFileSync(path.join(root, 'tests/native/fake-provider.mjs'), 'utf8');
   fs.writeFileSync(path.join(bin, 'proposal.json'), JSON.stringify(syntheticProposal()));
-  const script = path.join(bin, 'codex.mjs'); fs.writeFileSync(script, fake);
-  if (process.platform === 'win32') fs.writeFileSync(path.join(bin, 'codex.cmd'), `@"${runtime}" "${script}" %*\r\n`);
-  else fs.writeFileSync(path.join(bin, 'codex'), `#!${runtime}\n${fake}`, { mode: 0o700 });
+  for (const provider of ['codex', 'claude']) {
+    const script = path.join(bin, `${provider}.mjs`); fs.writeFileSync(script, fake);
+    if (process.platform === 'win32') fs.writeFileSync(path.join(bin, `${provider}.cmd`), `@"${runtime}" "${script}" %*\r\n`);
+    else fs.writeFileSync(path.join(bin, provider), `#!${runtime}\n${fake}`, { mode: 0o700 });
+  }
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => ['path', 'systemroot', 'comspec', 'pathext', 'windir', 'programfiles', 'programfiles(x86)', 'display', 'xauthority'].includes(key.toLowerCase())));
   Object.assign(env, { HOME: home, USERPROFILE: home, APPDATA: path.join(home, 'AppData/Roaming'), LOCALAPPDATA: path.join(home, 'AppData/Local'),
     TMPDIR: temporary, TEMP: temporary, TMP: temporary, SCOUT_WORKSPACE: workspace, SCOUT_ROOT: installedRoot,
