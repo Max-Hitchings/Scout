@@ -120,12 +120,12 @@ test('actual onboarding approval survives reviewed operational settings and prof
     assert.deepEqual(fs.readFileSync(markerFile), marker);
   });
   const publishedConfig = fs.readFileSync(configFile);
-  const rejected = async () => {
+  const rejected = async (expectedMarker = marker) => {
     assert.equal((await request('/api/setup/status')).readiness.approved, false);
     let entered = false;
     await assert.rejects(runScan(root, 'local', 'primary', { runScanWithFn: async () => { entered = true; return { ok: true }; } }), /approved/);
     assert.equal(entered, false);
-    assert.deepEqual(fs.readFileSync(markerFile), marker, 'an invalidation never rewrites approval');
+    assert.deepEqual(fs.readFileSync(markerFile), expectedMarker, 'an invalidation never rewrites approval');
   };
   for (const [label, change] of [
     ['provider', { ai: { provider: 'codex' } }],
@@ -134,10 +134,21 @@ test('actual onboarding approval survives reviewed operational settings and prof
     ['profile', { profile: { tone: 'Changed reviewed evidence tone' } }],
     ['search', { search: { roleFamilies: ['Changed synthetic role'] } }],
     ['triage', { triage: { actionScore: 80 } }],
+    ['locale', { locale: 'en-CA' }],
+    ['currency', { currency: 'CAD' }],
+    ['timezone', { timezone: 'America/Toronto' }],
+    ['sources', { sources: { adzuna: { country: 'ca' } } }],
+    ['commute', { commute: { maxMinutes: 30 } }],
+    ['unknown search-profile field', { searchProfile: { ...loadWorkspaceConfig(root).searchProfile, futureApprovalField: 'unreviewed' } }],
     ['unknown config field', { futureApprovalField: 'unreviewed' }],
     ['unknown setup field', { setup: { futureApprovalField: 'unreviewed' } }],
   ]) {
-    await t.test(`${label} changes still invalidate approval`, async () => { await request('/api/setup/config', change); await rejected(); });
+    await t.test(`${label} changes still invalidate approval`, async () => {
+      await request('/api/setup/config', change);
+      await rejected();
+      await request('/api/setup/config', { mode: 'background' });
+      await rejected(); // An operational save cannot bless an unrelated edit.
+    });
     fs.writeFileSync(configFile, publishedConfig);
   }
   for (const relative of ['profile/context.md', 'profile/calibration.md', 'cv/master-cv.md', 'data/search-categories.json']) {
@@ -148,5 +159,36 @@ test('actual onboarding approval survives reviewed operational settings and prof
       finally { fs.writeFileSync(file, before); }
     });
   }
+  await t.test('legacy approval uses only the original hash-verified staged config', async () => {
+    const legacy = JSON.parse(marker);
+    delete legacy.configApproval;
+    const legacyBytes = Buffer.from(JSON.stringify(legacy));
+    const stagedFile = path.join(root, '.scout/onboarding/workspace.json');
+    const stagedBytes = fs.readFileSync(stagedFile);
+    fs.writeFileSync(markerFile, legacyBytes);
+    try {
+      assert.equal((await request('/api/setup/status')).readiness.approved, true);
+      fs.appendFileSync(stagedFile, '\nSynthetic unreviewed staged change.\n');
+      await rejected(legacyBytes);
+      fs.rmSync(stagedFile);
+      await rejected(legacyBytes);
+      fs.writeFileSync(stagedFile, stagedBytes);
+      const unbound = { ...legacy, stagedHashes: {} };
+      const unboundBytes = Buffer.from(JSON.stringify(unbound));
+      fs.writeFileSync(markerFile, unboundBytes);
+      await rejected(unboundBytes);
+    } finally {
+      fs.writeFileSync(stagedFile, stagedBytes);
+      fs.writeFileSync(markerFile, marker);
+    }
+  });
+  await t.test('malformed or newer binding versions fail closed without legacy downgrade', async () => {
+    for (const binding of [{ schemaVersion: 2, digest: '0'.repeat(64) }, { schemaVersion: 1, digest: 'invalid' }]) {
+      const invalid = Buffer.from(JSON.stringify({ ...JSON.parse(marker), configApproval: binding }));
+      fs.writeFileSync(markerFile, invalid);
+      try { await rejected(invalid); }
+      finally { fs.writeFileSync(markerFile, marker); }
+    }
+  });
   assert.equal(providerCalls, 1, 'settings and rejected scans must not contact a provider');
 });
