@@ -162,3 +162,21 @@ test('queue-only cleanup requires the existing persisted recovery key before any
   assert.notEqual(applied.status, 0);
   assert.deepEqual(projectScanQueue(root).requests.map((item) => item.id), ['synthetic-old-queue']);
 });
+
+test('actual cleanup CLI unlocks with a protected existing recovery secret without exposing it', (t) => {
+  const { root, parent, cli, key } = fixture(t);
+  const output = path.join(parent, 'secret-review.json');
+  const planned = cli('--plan', '--select', 'synthetic-run-00', '--output', output);
+  assert.equal(planned.status, 0, planned.stderr);
+  const review = JSON.parse(planned.stdout);
+  const original = fs.readFileSync(output);
+  assert.notEqual(cli('--plan', '--select', 'synthetic-run-01', '--output', output).status, 0, 'a new plan never overwrites another review');
+  assert.deepEqual(fs.readFileSync(output), original);
+  fs.rmSync(path.join(root, '.scout/sync.json'));
+  const secret = path.join(parent, 'recovery-secret');
+  fs.writeFileSync(secret, key.recoveryKey, { mode: 0o600 });
+  const applied = cli('--apply', output, '--confirm', review.reviewDigest, '--secret-file', secret);
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.equal(fs.existsSync(path.join(root, '.scout/runs/synthetic-run-00')), false);
+  assert.equal(`${applied.stdout}${applied.stderr}${planned.stdout}`.includes(key.recoveryKey), false);
+});
