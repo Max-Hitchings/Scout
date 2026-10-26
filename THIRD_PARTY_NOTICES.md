@@ -1,5 +1,10 @@
 # Third-party notices
 
+Scout uses Ajv (MIT licence) for local JSON-schema validation, with its
+MIT-licensed runtime dependencies fast-deep-equal, fast-uri, json-schema-traverse
+and require-from-string. Source and licence notices are included in the installed
+Node packages. Ajv source: https://github.com/ajv-validator/ajv.
+
 Scout packages include the Typst command-line compiler version 0.14.2.
 
 - Project: https://github.com/typst/typst

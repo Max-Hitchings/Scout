@@ -12,7 +12,7 @@ Application files install under `%LOCALAPPDATA%\Programs\Scout` on Windows, `/Ap
 - `.scout/backups/` and, when initialised, private Git history.
 - optional `.scout-backup/v1/` encrypted recovery data and ignored device-local sync settings.
 
-Provider login credentials remain in provider-owned storage. Scout must never copy workspace content into its application repository.
+Codex and Claude login credentials remain in provider-owned storage. A local model's optional API key is read from the configured file and never stored in configuration or health evidence. Keep that file outside the workspace and manage its backup separately; the selector path remains private workspace configuration. Scout must never copy workspace content into its application repository.
 
 Tailored application folders may include `cv-evidence.json` and `cv-quality.json`. These private files record the selected CV methods, user-confirmed answers, per-bullet evidence references, quality findings and any explicit draft override. They remain in the workspace and may contain career details that were not present in the original imported CV.
 
@@ -20,7 +20,7 @@ Company relationship history is stored under `data/companies/`. It may contain r
 
 ## Network boundaries
 
-- AI-assisted setup, chat and scans send necessary context to Codex or Claude under that provider's terms and account controls.
+- AI-assisted setup, chat and scans send necessary context to the selected Codex/Claude provider or explicitly configured local model server. Local HTTP endpoints can be on loopback or your private network; they are operator-selected provider destinations and are separate from the public-only job-source boundary below. A local model name does not guarantee offline processing: control the server and its logging/forwarding settings yourself. Provider redirects are refused.
 - Adzuna searches send search parameters and credentials to Adzuna.
 - ATS and public-source requests reveal ordinary request metadata to those sites.
 - Careers and advert discovery accepts only public HTTP(S) destinations. Scout

@@ -22,6 +22,16 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
 - Scout listens only on `127.0.0.1:8459`.
 - Tailscale Serve provides the owner-only HTTPS route; Funnel and public ports are not used.
 - Codex and Claude authentication belongs to the dedicated unprivileged Scout account on the VPS.
+- A first-class `local` provider uses OpenAI-compatible HTTP chat completions
+  directly, without a Codex/Claude executable. Private `ai.local` settings hold
+  the explicit base URL, exact model, optional API-key file selector and bounded
+  timeout/retry limits. Key contents and raw transport errors never enter health
+  or durable run evidence. Structured output always receives local JSON-schema
+  validation, including the one explicit capability-rejection fallback to plain
+  JSON. Fixed structured health probes verify the selected endpoint/model;
+  configuration or key presence alone remains unverified. Endpoint/model changes
+  invalidate incompatible queued/recovered scans. See [Providers](PROVIDERS.md)
+  for setup, credentials, transport limits and local-chat capabilities.
 - When an authenticated installed Codex client supports catalogue discovery,
   Scout invokes only the fixed read-only `codex debug models` argument vector
   through the resolved provider executable with `shell: false`. The probe has a
