@@ -1670,19 +1670,23 @@ const Scout = {
     const opportunityOptions = opportunities.map((entry) =>
       `<option value="${this.esc(entry.id)}">${this.esc(entry.company)} — ${this.esc(entry.role)}</option>`).join('');
     const letterBtns = (list.outreach || []).map((slug) => `<button class="act cv-entry" data-action="open-cv" data-cv-path="applications/${this.esc(slug)}/outreach.md" data-slug="${this.esc(slug)}"><span class="cv-entry-label">${this.esc(this.opportunitiesForSlug(slug)[0]?.company || slug)} — cover letter</span><span class="chip">DRAFT</span></button>`).join('');
+    const guidedBtns = (list.draftCvs || []).map(({ slug }) => `<button class="act cv-entry" data-action="open-cv" data-cv-path="applications/${this.esc(slug)}/draft-cv.md" data-slug="${this.esc(slug)}"><span class="cv-entry-label">${this.esc(this.opportunitiesForSlug(slug)[0]?.company || slug)} — reviewed CV draft</span><span class="chip">DRAFT</span></button>`).join('');
     el.innerHTML = `
       <div class="cv-library-head"><div><h2>CV library</h2><div class="meta">Existing sources remain available even before a PDF or quality review exists.</div></div><button class="act bridge" data-action="toggle-cv-create">Review CV options</button></div>
       <p class="meta">Application CVs and cover letters are DRAFTS for your review. Scout never sends them.</p>
       <section id="living-cv-panel" aria-label="Living CV"></section>
       <div id="cv-create-panel" class="cv-create-panel hidden cv-create">
         ${opportunityOptions ? `<label>Tracked opportunity<select id="cv-create-opportunity">${opportunityOptions}</select></label><button class="act primary" data-action="start-cv-create">Start tailored CV</button><button class="act" data-action="start-cover-letter">Start cover-letter draft</button>` : '<div class="meta">Add a tracked opportunity before creating a tailored CV.</div>'}
+        ${opportunityOptions ? '<button class="act" data-action="start-reviewed-draft" data-kind="cv">Create reviewed CV draft</button><button class="act" data-action="start-reviewed-draft" data-kind="cover-letter">Create reviewed letter draft</button>' : ''}
       </div>
+      <section id="application-draft-panel" aria-label="Reviewed application draft">${this.applicationDraftHtml()}</section>
       <div class="cv-layout">
         <aside class="cv-sidebar">
           <div class="label">master</div>
           <button class="act" data-action="open-cv" data-cv-path="${this.esc('cv/master-cv.md')}">master-cv.md</button>
           <div class="label">applications</div>${appBtns}
           <div class="label">cover-letter drafts</div>${letterBtns || '<div class="meta">No cover-letter drafts yet.</div>'}
+          <div class="label">reviewed CV drafts</div>${guidedBtns || '<div class="meta">No reviewed CV drafts yet.</div>'}
         </aside>
         <section class="cv-editor-panel">
           <div class="label"><span id="cv-editing">select a file</span> <span id="cv-dirty" style="color:var(--warn)"></span> <span id="cv-status" class="meta"></span></div>
@@ -1789,6 +1793,65 @@ const Scout = {
     document.getElementById('living-cv-version-text').textContent = typeof text === 'string' ? text : text.error;
   },
 
+  applicationDraftHtml() {
+    const draft = this.applicationDraft;
+    if (!draft) return '';
+    const title = draft.kind === 'cv' ? 'CV' : 'cover-letter';
+    return `<div class="setup-callout"><h3>Review ${title} draft</h3><p>Scout selects relevant confirmed CV passages and keeps their facts and headings. You can edit the draft below. Check the current advert and every fact; Scout never sends this material.</p>
+      <p role="status">${this.esc(draft.message || '')}</p>
+      ${typeof draft.markdown === 'string' ? `<label class="setup-field wide">Editable draft<textarea id="application-draft-text" class="cv-source" data-input-action="application-draft-dirty">${this.esc(draft.markdown)}</textarea></label><label><input id="application-draft-confirm" type="checkbox"> I reviewed the facts and my edits and want to save this draft</label><p><button class="act primary" data-action="save-reviewed-draft">Save reviewed draft</button></p>` : `<button class="act primary" data-action="generate-reviewed-draft"${draft.busy ? ' disabled' : ''}>Generate draft from confirmed CV facts</button>`}
+    </div>`;
+  },
+
+  renderApplicationDraft() {
+    const panel = document.getElementById('application-draft-panel');
+    if (panel) panel.innerHTML = this.applicationDraftHtml();
+  },
+
+  async startReviewedDraft(id, kind) {
+    id ||= document.getElementById('cv-create-opportunity')?.value;
+    if (!id) return;
+    this.applicationDraft = { opportunityId: id, kind, message: 'Generate a draft, then review it before saving. Your application CV and other drafts stay in place until you explicitly save.' };
+    this.showTab('cv');
+    await this.waitFor('#application-draft-panel');
+    this.renderApplicationDraft();
+    document.getElementById('application-draft-panel')?.scrollIntoView?.({ block: 'start' });
+  },
+
+  async generateReviewedDraft() {
+    const draft = this.applicationDraft;
+    if (!draft || draft.busy) return;
+    draft.busy = true; draft.message = 'Selecting confirmed facts with your chosen AI provider…'; this.renderApplicationDraft();
+    try {
+      const started = await this.api('/api/cv/drafts/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ opportunityId: draft.opportunityId, kind: draft.kind }) });
+      if (started.error || !started.operation?.id) throw new Error(started.error || 'Draft generation could not start.');
+      let operation = started.operation;
+      while (['queued', 'running'].includes(operation.status)) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        const value = await this.api(`/api/operations/${encodeURIComponent(operation.id)}`);
+        if (value.error || !value.operation) throw new Error(value.error || 'Draft status is unavailable.');
+        operation = value.operation;
+      }
+      if (operation.status !== 'succeeded') throw new Error(operation.error || 'Draft generation failed. Your saved files are unchanged.');
+      const preview = await this.api(`/api/cv/drafts/preview?id=${encodeURIComponent(operation.result.draftId)}`);
+      if (preview.error) throw new Error(preview.error);
+      this.applicationDraft = { ...preview, draftId: operation.result.draftId, message: 'DRAFT only. Edit and confirm the facts before saving. This preview expires after one hour or when Scout restarts.' };
+    } catch (error) { draft.message = error.message; draft.busy = false; }
+    this.renderApplicationDraft();
+  },
+
+  async saveReviewedDraft() {
+    const draft = this.applicationDraft;
+    if (!draft?.draftId) return;
+    if (!document.getElementById('application-draft-confirm')?.checked) { draft.message = 'Review and confirm the draft before saving.'; this.renderApplicationDraft(); return; }
+    const saved = await this.api('/api/cv/drafts/save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ draftId: draft.draftId, markdown: document.getElementById('application-draft-text').value, confirmed: true }) });
+    if (saved.error) { draft.message = saved.error; this.renderApplicationDraft(); return; }
+    this.applicationDraft = null;
+    await this.renderCv();
+    await this.openCv(saved.path, saved.slug, draft.opportunityId);
+    this.setCvStatus('Reviewed draft saved. Render its DRAFT PDF when ready; nothing was sent.');
+  },
+
   opportunityIdForSlug(slug) {
     const matches = this.opportunitiesForSlug(slug);
     return matches.length === 1 ? matches[0].id : null;
@@ -1816,6 +1879,7 @@ const Scout = {
   // generation as the artifact slug, so "start fresh" really does write to a new
   // per-role folder and the existing folder is never overwritten.
   reviewCvOptions(id) {
+    if (this.workspaceConfig?.ai?.provider === 'local') return this.startReviewedDraft(id, 'cv');
     const entry = (this.state.data?.opportunities || []).find((item) => item.id === id);
     if (!entry) return;
     const resolved = this.resolveArtifactFor(entry);
@@ -1854,8 +1918,8 @@ const Scout = {
       b.classList.toggle('active', b.dataset.cvPath === pathRel));
     this.updateCvControls();
     await this.showStoredCv();
-    if (this.currentCvRequest()?.target === 'cover-letter') {
-      document.getElementById('cv-quality').innerHTML = '<b>DRAFT — cover letter</b><p>Review every fact and edit the text before using it. The PDF is labelled DRAFT. Scout never sends it.</p>';
+    if (['cover-letter', 'draft-cv'].includes(this.currentCvRequest()?.target)) {
+      document.getElementById('cv-quality').innerHTML = '<b>DRAFT — for your review</b><p>Review every fact and edit the text before using it. The PDF is labelled DRAFT. Your full application CV and its separate quality review stay available. Scout never sends it.</p>';
     } else if (slug) await this.refreshCvQuality(slug);
     else {
       const quality = document.getElementById('cv-quality');
@@ -1866,6 +1930,7 @@ const Scout = {
   currentCvRequest() {
     if (!this.cvState.path) return null;
     if (this.cvState.path.endsWith('/outreach.md')) return { target: 'cover-letter', slug: this.cvState.slug };
+    if (this.cvState.path.endsWith('/draft-cv.md')) return { target: 'draft-cv', slug: this.cvState.slug };
     return this.cvState.slug ? { target: 'application', slug: this.cvState.slug } : { target: 'master' };
   },
 
@@ -1874,6 +1939,7 @@ const Scout = {
     if (this.currentCvRequest()?.target === 'cover-letter') {
       return this.state.cvFiles?.letters?.find((item) => item.slug === this.cvState.slug) || { pdf: false, current: false, stale: false };
     }
+    if (this.currentCvRequest()?.target === 'draft-cv') return this.state.cvFiles?.draftCvs?.find((item) => item.slug === this.cvState.slug) || { pdf: false, current: false, stale: false };
     if (!this.cvState.slug) return this.state.cvFiles?.masterRender || { pdf: false, current: false, stale: false };
     const entry = this.state.cvFiles?.entries?.find((item) => item.slug === this.cvState.slug);
     if (!entry) return { pdf: false, current: false, stale: false };
@@ -1904,16 +1970,17 @@ const Scout = {
     if (!this.cvState.path) return alert('Open a file first.');
     const content = document.getElementById('cv-text').value;
     this.setCvStatus('Saving…');
-    const save = await this.post('/api/cv/save', { path: this.cvState.path, content });
+    const save = await this.api('/api/cv/save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: this.cvState.path, content }) });
     if (!(save && save.ok)) return this.setCvStatus('Save failed. Your changes are still in the editor.');
     this.cvState.dirty = false;
     this.cvState.content = content;
+    this.state.cvFiles = await this.api('/api/cv');
     const dirty = document.getElementById('cv-dirty');
     if (dirty) dirty.textContent = '';
     const request = this.currentCvRequest();
     const catalogue = this.state.cvFiles;
     const rendered = request?.target === 'master' ? catalogue?.masterRender
-      : (request?.target === 'cover-letter' ? catalogue?.letters : catalogue?.entries)?.find((entry) => entry.slug === request?.slug);
+      : (request?.target === 'cover-letter' ? catalogue?.letters : request?.target === 'draft-cv' ? catalogue?.draftCvs : catalogue?.entries)?.find((entry) => entry.slug === request?.slug);
     if (rendered) Object.assign(rendered, { current: false, pdfCurrent: false, stale: rendered.pdf === true, pdfStale: rendered.pdf === true });
     this.updateCvControls();
     await this.showStoredCv();
@@ -2069,9 +2136,9 @@ const Scout = {
 
   async downloadCv() {
     if (!this.currentCvRenderState().current) return alert('Save and render a current PDF first.');
-    if (this.currentCvRequest()?.target === 'cover-letter') {
+    if (['cover-letter', 'draft-cv'].includes(this.currentCvRequest()?.target)) {
       const a = document.createElement('a');
-      a.href = this.pdfUrl({ download: true }); a.download = `${this.cvState.slug}-cover-letter-DRAFT.pdf`;
+      a.href = this.pdfUrl({ download: true }); a.download = `${this.cvState.slug}-${this.currentCvRequest().target}-DRAFT.pdf`;
       document.body.appendChild(a); a.click(); a.remove(); return;
     }
     if (!this.cvState.slug) {
@@ -3082,7 +3149,7 @@ const Scout = {
       case 'see-cv': return this.seeCv(slug, id || null);
       case 'choose-cv-options': return this.reviewCvOptions(id);
       case 'see-cover-letter': return this.seeCoverLetter(slug);
-      case 'open-chat': return this.openChat(id, prefill);
+      case 'open-chat': return prefill === 'coverLetter' && this.workspaceConfig?.ai?.provider === 'local' ? this.startReviewedDraft(id, 'cover-letter') : this.openChat(id, prefill);
       case 'open-company-history': return this.openCompanyHistory(id);
       case 'open-interview-prep': return this.openInterviewPrep(id);
       case 'remove-company-communication': return this.removeCompanyCommunication(id);
@@ -3091,7 +3158,10 @@ const Scout = {
       case 'open-cv': return this.openCv(element.dataset.cvPath, slug || null, element.dataset.opportunityId || null);
       case 'toggle-cv-create': return this.toggleCvCreate();
       case 'start-cv-create': return this.startCvCreate();
-      case 'start-cover-letter': return this.openChat(document.getElementById('cv-create-opportunity')?.value, 'coverLetter');
+      case 'start-cover-letter': return this.workspaceConfig?.ai?.provider === 'local' ? this.startReviewedDraft(null, 'cover-letter') : this.openChat(document.getElementById('cv-create-opportunity')?.value, 'coverLetter');
+      case 'start-reviewed-draft': return this.startReviewedDraft(id, element.dataset.kind);
+      case 'generate-reviewed-draft': return this.generateReviewedDraft();
+      case 'save-reviewed-draft': return this.saveReviewedDraft();
       case 'save-cv': return this.saveCv();
       case 'render-cv': return this.renderCvOnly();
       case 'download-cv': return this.downloadCv();
@@ -3172,6 +3242,7 @@ const Scout = {
       else if (element.dataset.engineModel) this.onEngineModelChange(element);
     });
     document.addEventListener?.('input', (event) => {
+      if (event.target.dataset.inputAction === 'application-draft-dirty' && this.applicationDraft) { this.applicationDraft.markdown = event.target.value; return; }
       if (event.target.dataset.inputAction !== 'cv-dirty') return;
       this.cvState.dirty = true;
       this.cvState.content = event.target.value;

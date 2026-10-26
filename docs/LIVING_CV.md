@@ -15,11 +15,13 @@ Both the previous CV and the approved text are saved under `cv/versions/`, ident
 
 An approval interrupted by a failed write or shutdown keeps a prepared recovery record. On startup, status refresh or the next scan, Scout finishes only the exact approved replacements under the workspace lock. If you edited either file after the interruption, Scout preserves that edit and asks for recovery instead of overwriting it. Scans and profile rebuilding wait until the approval is consistent. See [troubleshooting](TROUBLESHOOTING.md).
 
-Disconnecting stops source checks and keeps the saved CV and history. A restored workspace may need the source path reconnected on its new host. External source files themselves are not included in Scout backups; approved copies and workspace history are.
+Disconnecting stops source checks, retires that source as active profile-rebuild evidence, and keeps the saved CV and history. Importing another CV also disconnects the source so new imported evidence is used. A restored workspace may need the source path reconnected on its new host. External source files themselves are not included in Scout backups; approved copies and workspace history are.
 
 ## Rebuild the profile after a CV change
 
 After approval, choose **Rebuild my profile from this CV**, then **Generate proposal**. Scout uses the approved immutable CV version as evidence instead of stale imported CV text. Review the staged changes, activate the proposal and review/publish changed search rules. Generation uses your chosen AI service only when you request it. You can also use **Review my search preferences** to edit the rules yourself.
+
+Profile generation binds the CV, selected evidence source, imported evidence and active file revisions before the provider starts. A newer edit or approval requires regeneration; an older proposal cannot overwrite the newer evidence. Rebuilding keeps existing schedules, enabled flags, providers, models, weekdays and times. The completed activation marker records which approved CV was used, so the rebuild reminder clears only after activation completes. Rephrasing the generated master does not count as a new external source edit.
 
 The approved master CV immediately becomes assessment evidence for future scans. Its changed digest changes the assessment prompt version. Existing assessment history is preserved; the existing cap allows at most six unchanged historical rejections to be reassessed per scan when the prompt version changes. Newly discovered or materially changed jobs keep their normal assessment rules. No new preference becomes a hard exclusion without explicit review and publication.
 
@@ -30,6 +32,14 @@ Choose **create custom CV** or **create custom cover letter** on a job, or open 
 Select the draft in **CV**, edit its text, choose **save changes**, then **render PDF**. CVs use the existing Typst and quality-review path. Cover letters use editable `outreach.md`, rendered through the same Typst runtime into a PDF labelled **DRAFT**. The generated Typst source is treated as text, so Markdown cannot inject Typst commands. Changing either source makes its old PDF stale; render it again before download.
 
 Every draft stays under your control. Scout does not send an application, message or attachment. A CV quality result checks its evidence and writing; you still decide whether to use it.
+
+### Reviewed drafts with a local model
+
+The local provider has no file tools. Use **CV → Review CV options → Create reviewed CV draft** or **Create reviewed letter draft**. With a local provider selected, the job's creation controls open the same flow. Choose **Generate draft from confirmed CV facts**. Scout asks the model only to select relevant evidence IDs, then copies those CV passages and their headings verbatim into a draft. The model cannot add qualifications or achievements through this selector.
+
+Edit the preview, confirm the facts and choose **Save reviewed draft**. Generation alone never changes an application file. Save checks that the CV, job, evidence source and existing draft still match the reviewed revisions. A changed input requires regeneration. Previews remain in memory for one hour, at most 16 at a time; restart discards unsaved previews. They are not added to generic operation status or browser storage.
+
+Guided CV text is saved as `applications/<opportunity>/draft-cv.md`, with its own `draft-cv.typ` and `draft-cv.pdf` rendering target. Existing `cv.typ`, its PDF and its quality review remain available. Letters use the existing `outreach.md` path. Both guided PDFs are visibly labelled **DRAFT**, and their text stays editable in the library. The draft selector accepts a saved CV of 500 bytes to 96 KiB and up to 128 evidence sections, returns at most 40 selected sections and limits the editable preview to 64 KiB. It does not claim a passed application-CV quality review. Review the current advert and all facts yourself; nothing is sent.
 
 ## Feedback and employer notes
 

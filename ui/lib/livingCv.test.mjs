@@ -167,3 +167,14 @@ test('starting a scan recovers a pending CV approval before readiness or provide
   });
   assert.equal(livingCvStatus(root).state, 'current');
 });
+
+test('source checks do not mistake a generated master for a new external edit, and disconnect retires active evidence', (t) => {
+  const { root, source } = fixture(t);
+  configureLivingCv(root, source);
+  approveLivingCv(root, { revision: livingCvStatus(root).revision, confirmed: true });
+  fs.appendFileSync(path.join(root, 'cv/master-cv.md'), '\nA reviewed local presentation change.');
+  assert.equal(livingCvStatus(root).state, 'current');
+  configureLivingCv(root, null);
+  assert.equal(livingCv.approvedLivingCvEvidence(root), null);
+  assert.equal(livingCvStatus(root).versions.length, 2);
+});

@@ -886,7 +886,7 @@ test('saveCv persists the source without rendering', async () => {
     querySelectorAll: () => [],
   };
   scout.cvState = { path: 'applications/acme-eng-2026-07/cv.typ', dirty: true };
-  scout.post = (p, payload) => { calls.push([p, payload]); return Promise.resolve({ ok: true }); };
+  scout.api = (p, options) => { if (options?.method === 'POST') calls.push([p, JSON.parse(options.body)]); return Promise.resolve(p === '/api/cv' ? { entries: [], letters: [] } : { ok: true }); };
   scout.renderCvPreview = () => { calls.push(['RENDER_PREVIEW']); };
   await scout.saveCv();
   assert.deepEqual(calls.map((c) => c[0]), ['/api/cv/save']);

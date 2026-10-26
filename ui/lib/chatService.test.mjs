@@ -59,6 +59,24 @@ function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'scout-chat-service-'));
 }
 
+test('pending CV approval blocks ordinary chat and fit assessment before any provider call', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'cv'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'cv/living-cv-approval.json'), '{}');
+  let calls = 0;
+  const routes = routeFixture(root, {
+    runTurnFn() { calls++; return { stop() {}, finished: Promise.resolve({ ok: true, text: 'Synthetic', filesTouched: [] }) }; },
+    runStructuredTurnFn() { calls++; return Promise.resolve({ ok: true, value: {} }); },
+  });
+  for (const mode of [undefined, 'fit-assessment']) {
+    const response = await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'codex', mode, text: 'Review this role using the CV.' }));
+    assert.equal(response.statusCode, 409);
+    assert.match(response.text(), /CV.*recover|recover.*CV/i);
+  }
+  assert.equal(calls, 0);
+});
+
 function routeFixture(root, overrides = {}) {
   const routes = {};
   registerChatRoutes({

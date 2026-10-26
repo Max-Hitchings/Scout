@@ -1,7 +1,7 @@
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
 export function livingCvHtml(status = {}) {
-  const labels = { disconnected: 'No external source connected', current: 'Saved CV matches the source', changed: 'Source changed — review before using it', unavailable: 'Source needs attention', 'recovery-needed': 'Interrupted approval needs recovery — later edits are preserved' };
+  const labels = { disconnected: 'No external source connected', current: 'No new changes in the source', changed: 'Source changed — review before using it', unavailable: 'Source needs attention', 'recovery-needed': 'Interrupted approval needs recovery — later edits are preserved' };
   const diff = (status.diff || []).map(({ kind, text }) => `<div class="cv-diff-${esc(kind)}"><span aria-label="${esc(kind)}">${kind === 'added' ? '+' : kind === 'removed' ? '−' : ' '}</span> ${esc(text)}</div>`).join('');
   return `<details id="living-cv"><summary>Living CV — keep a notes file connected</summary>
     <p>Scout only reads the file you choose. Changes wait here for your approval; the external file is never edited.</p>

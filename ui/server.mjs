@@ -9,6 +9,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './lib/mainModule.mjs';
 import { atomicWriteFile } from './lib/atomicWrite.mjs';
+import { validatePhysicalWorkspacePath } from './lib/physicalPath.mjs';
+import { createApplicationDraft, saveApplicationDraft } from './lib/applicationDrafts.mjs';
 import {
   PROFILE_PUBLICATION_RUN_PREFIX, publishProfileGeneration,
   recoverPendingProfilePublications,
@@ -22,7 +24,7 @@ import { codexDeepLinkCapability } from './lib/codexDeepLink.mjs';
 import { triage } from './lib/derive.mjs';
 import { emptyTrackerView, pipeline } from './lib/pipeline.mjs';
 import { cvPdfPath, listCvFiles, renderCvTarget, safeCvPath } from './lib/cv.mjs';
-import { approveLivingCv, assertLivingCvReady, configureLivingCv, hasPendingLivingCvApproval, livingCvStatus, readLivingCvVersion, recoverLivingCvApproval } from './lib/livingCv.mjs';
+import { approveLivingCv, assertLivingCvReady, configureLivingCv, hasPendingLivingCvApproval, livingCvStatus, readLivingCvVersion, recoverLivingCvApproval, retireLivingCvSource } from './lib/livingCv.mjs';
 import { cvDownloadDecision, overrideCvQuality, readCvQuality, runCvQuality } from './lib/cvQuality.mjs';
 import {
   parseScanRuns, readPublicRunSummaries, readPublicScanQueue, readPublicStoragePressure,
@@ -582,6 +584,11 @@ function readScheduleSummary(config = loadWorkspaceConfig(WORKSPACE_ROOT), healt
 
 // Task 5 assigns handlers into this table: routes['POST /api/status'] = (req,res,body)=>{...}
 export const routes = {};
+const applicationDraftPreviews = new Map();
+function pruneApplicationDraftPreviews(reserve = false) {
+  for (const [id, entry] of applicationDraftPreviews) if (Date.now() - entry.createdAt > 60 * 60 * 1000) applicationDraftPreviews.delete(id);
+  while (applicationDraftPreviews.size > (reserve ? 15 : 16)) applicationDraftPreviews.delete(applicationDraftPreviews.keys().next().value);
+}
 
 function loopbackHost(hostHeader) {
   try {
@@ -983,7 +990,7 @@ async function handleRead(req, res, url) {
   }
   if (req.method === 'GET' && url.pathname === '/api/operations') {
     const type = url.searchParams.get('type');
-    if (type && !['proposal', 'scan', 'cv-render'].includes(type)) return sendJson(res, 400, { error: 'operation type must be proposal, scan or cv-render' });
+    if (type && !['proposal', 'scan', 'cv-render', 'application-draft'].includes(type)) return sendJson(res, 400, { error: 'operation type is invalid' });
     return sendJson(res, 200, { operation: operations.latest(type), operations: operations.list(type) });
   }
   if (req.method === 'GET' && url.pathname.startsWith('/api/operations/')) {
@@ -1170,6 +1177,11 @@ async function handleRead(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/cv') {
     return sendJson(res, 200, listCvFiles(WORKSPACE_ROOT));
   }
+  if (req.method === 'GET' && url.pathname === '/api/cv/drafts/preview') {
+    pruneApplicationDraftPreviews();
+    const entry = applicationDraftPreviews.get(url.searchParams.get('id'));
+    return entry ? sendJson(res, 200, entry.preview) : sendJson(res, 404, { error: 'This unsaved draft expired. Generate it again.' });
+  }
   if (req.method === 'GET' && url.pathname === '/api/cv/living') {
     try { if (hasPendingLivingCvApproval(WORKSPACE_ROOT)) recoverLivingCvApproval(WORKSPACE_ROOT); }
     catch { /* Project the pending state below; never overwrite a conflicting edit. */ }
@@ -1183,6 +1195,7 @@ async function handleRead(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/cv/file') {
     try {
       const abs = safeCvPath(WORKSPACE_ROOT, url.searchParams.get('path'));
+      validatePhysicalWorkspacePath(WORKSPACE_ROOT, abs, 'CV file');
       if (!fs.existsSync(abs)) return sendJson(res, 404, { error: 'no such file' });
       return sendText(res, 200, 'text/plain; charset=utf-8', fs.readFileSync(abs, 'utf8'));
     } catch { return sendJson(res, 400, publicApiError('CV file request is invalid.')); }
@@ -1192,7 +1205,7 @@ async function handleRead(req, res, url) {
     catch { return sendJson(res, 400, publicApiError('CV quality record could not be read.')); }
   }
   if (req.method === 'GET' && url.pathname === '/api/cv/pdf') {
-    const target = ['master', 'cover-letter'].includes(url.searchParams.get('target')) ? url.searchParams.get('target') : 'application';
+    const target = ['master', 'cover-letter', 'draft-cv'].includes(url.searchParams.get('target')) ? url.searchParams.get('target') : 'application';
     const slug = url.searchParams.get('slug') || '';
     let pdf;
     try { pdf = cvPdfPath(WORKSPACE_ROOT, { target, slug }); }
@@ -1205,7 +1218,7 @@ async function handleRead(req, res, url) {
     }
     const buf = fs.readFileSync(pdf);
     const headers = { 'Content-Type': 'application/pdf', 'Content-Length': buf.length };
-    if (url.searchParams.get('download') === '1') headers['Content-Disposition'] = `attachment; filename="${target === 'master' ? 'master-cv-reference' : target === 'cover-letter' ? `${slug}-cover-letter-DRAFT` : `${slug}-cv`}.pdf"`;
+    if (url.searchParams.get('download') === '1') headers['Content-Disposition'] = `attachment; filename="${target === 'master' ? 'master-cv-reference' : target === 'cover-letter' ? `${slug}-cover-letter-DRAFT` : target === 'draft-cv' ? `${slug}-cv-DRAFT` : `${slug}-cv`}.pdf"`;
     res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'self'");
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.writeHead(200, headers);
@@ -2367,6 +2380,35 @@ routes['POST /api/stage/complete'] = async (req, res, body) => {
     (d) => `ui: complete stage - ${company(d, b.id)}`, b.trackerRevision);
 };
 
+routes['POST /api/cv/drafts/generate'] = (req, res, body) => {
+  const value = parseBody(body);
+  if (!value || typeof value.opportunityId !== 'string' || !['cv', 'cover-letter'].includes(value.kind)) return replyJson(res, 400, { error: 'Choose a tracked job and draft type.' });
+  try {
+    const operation = operations.start('application-draft', async (update, { signal }) => {
+      update({ phase: 'Selecting confirmed CV evidence', current: 1, total: 2 });
+      const preview = await createApplicationDraft(WORKSPACE_ROOT, value, { signal });
+      pruneApplicationDraftPreviews(true);
+      applicationDraftPreviews.set(operation.id, { preview, createdAt: Date.now() });
+      update({ phase: 'Draft ready for your review', current: 2, total: 2 });
+      return { draftId: operation.id };
+    }, { total: 2 });
+    return replyJson(res, 202, { operation });
+  } catch { return replyJson(res, 409, publicApiError('Another draft may be generating. Wait for it to finish, then retry.')); }
+};
+
+routes['POST /api/cv/drafts/save'] = (req, res, body) => {
+  const value = parseBody(body);
+  pruneApplicationDraftPreviews();
+  const entry = applicationDraftPreviews.get(value?.draftId);
+  if (!entry) return replyJson(res, 409, { error: 'This unsaved draft expired. Generate it again.' });
+  try {
+    const saved = saveApplicationDraft(WORKSPACE_ROOT, { ...entry.preview, markdown: value.markdown, confirmed: value.confirmed });
+    applicationDraftPreviews.delete(value.draftId);
+    void scheduleCheckpoint('ui: save reviewed application draft');
+    return replyJson(res, 200, saved);
+  } catch { return replyJson(res, 409, publicApiError('The draft could not be saved. Confirm review and regenerate if its CV, job or saved draft changed. Your text is still in the editor.')); }
+};
+
 routes['POST /api/cv/living/source'] = (req, res, body) => {
   const value = parseBody(body);
   if (!value || !(value.sourcePath === null || typeof value.sourcePath === 'string')) return replyJson(res, 400, { error: 'Choose a Markdown or JSON source file, or disconnect it.' });
@@ -2402,6 +2444,7 @@ routes['POST /api/cv/save'] = (req, res, body) => {
     withWorkspaceMutationAuthority(WORKSPACE_ROOT, {
       kind: 'cv-save', phase: 'persist-cv',
     }, () => {
+      validatePhysicalWorkspacePath(WORKSPACE_ROOT, abs, 'CV file');
       if (path.resolve(abs) === path.resolve(WORKSPACE.cv, 'master-cv.md')) assertLivingCvReady(WORKSPACE_ROOT);
       atomicWriteFile(abs, b.content);
     });
@@ -2412,7 +2455,7 @@ routes['POST /api/cv/save'] = (req, res, body) => {
 
 routes['POST /api/cv/render'] = (req, res, body) => {
   const b = parseBody(body); if (!b) return replyJson(res, 400, { error: 'bad json' });
-  const target = ['master', 'cover-letter'].includes(b.target) ? b.target : 'application';
+  const target = ['master', 'cover-letter', 'draft-cv'].includes(b.target) ? b.target : 'application';
   const slug = target === 'master' ? '' : String(b.slug || '');
   try {
     const operation = operations.start('cv-render', async (update, { signal }) => {
@@ -2745,6 +2788,7 @@ routes['POST /api/setup/import-cv'] = (req, res, body) => {
   void withWorkspaceMutationAuthorityAsync(WORKSPACE_ROOT, {
     kind: 'cv-import', phase: 'import-cv',
   }, async () => {
+    assertLivingCvReady(WORKSPACE_ROOT);
     fs.mkdirSync(WORKSPACE.imports, { recursive: true });
     const extracted = path.join(WORKSPACE.imports, `${name}.txt`);
     let completed = false;
@@ -2752,6 +2796,7 @@ routes['POST /api/setup/import-cv'] = (req, res, body) => {
       atomicWriteFile(imported, bytes, { mode: 0o600 });
       const text = await extractCvText(imported);
       atomicWriteFile(extracted, `${text}\n`, { mode: 0o600 });
+      retireLivingCvSource(WORKSPACE_ROOT);
       completed = true;
       return { text, extracted };
     } finally {

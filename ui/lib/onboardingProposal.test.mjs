@@ -33,6 +33,29 @@ test('rebuilding a profile after Living CV approval uses the approved version in
   assert.ok(!result.evidence.some(({ text }) => text.includes('Built reliable software systems')));
 });
 
+test('a newer CV approval during profile generation cannot be overwritten by an old-evidence proposal', async (t) => {
+  const workspace = root();
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-reprofile-race-'));
+  t.after(() => { fs.rmSync(workspace, { recursive: true, force: true }); fs.rmSync(parent, { recursive: true, force: true }); });
+  const source = path.join(parent, 'cv.md');
+  fs.mkdirSync(path.join(workspace, 'cv'), { recursive: true });
+  fs.writeFileSync(path.join(workspace, 'cv/master-cv.md'), 'Earlier CV');
+  fs.writeFileSync(source, '# Approved CV\n' + 'Confirmed earlier evidence. '.repeat(30));
+  configureLivingCv(workspace, source);
+  approveLivingCv(workspace, { revision: livingCvStatus(workspace).revision, confirmed: true });
+  const newest = fs.readFileSync(source, 'utf8') + '\nThe newest confirmed fact must survive.\n';
+  await assert.rejects(createOnboardingProposal(workspace, 'codex', {
+    providerStatusFn: () => ({ installed: true, authenticated: true, capabilities: { structuredOutput: true } }),
+    runStructuredTurnFn: async ({ validate }) => {
+      const value = validate(proposal());
+      fs.writeFileSync(source, newest);
+      approveLivingCv(workspace, { revision: livingCvStatus(workspace).revision, confirmed: true });
+      return { ok: true, value, usage: {} };
+    },
+  }), /changed|regenerate/i);
+  assert.equal(fs.readFileSync(path.join(workspace, 'cv/master-cv.md'), 'utf8'), newest);
+});
+
 function root() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-onboarding-'));
   fs.mkdirSync(path.join(dir, 'data'), { recursive: true });
@@ -68,6 +91,22 @@ function proposal() {
 const status = () => ({ installed: true, authenticated: true, executable: 'codex', capabilities: { structuredOutput: true } });
 const run = async () => ({ value: proposal(), usage: { input_tokens: 50 } });
 const healthyDoctor = () => ({ checks: { config: { ok: true }, tracker: { ok: true }, providers: { codex: { installed: true, authenticated: true } } } });
+
+test('reviewing and activating a rebuilt profile preserves the configured scan jobs exactly', async (t) => {
+  const dir = root();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const config = JSON.parse(fs.readFileSync(path.join(dir, 'workspace.json'), 'utf8'));
+  const jobs = [
+    { id: 'synthetic-primary', enabled: true, provider: 'codex', mode: 'primary', time: '07:15', days: [1, 3, 5], model: 'synthetic-model' },
+    { id: 'synthetic-verification', enabled: false, provider: 'claude', mode: 'second-pass', time: '08:40', days: [2, 4], model: null },
+  ];
+  config.schedule = { jobs };
+  writeWorkspaceConfig(dir, config);
+  const staged = await createOnboardingProposal(dir, 'codex', { providerStatusFn: status, runStructuredTurnFn: run });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'workspace.json'), 'utf8')).schedule.jobs, jobs, 'proposal generation must leave live schedules alone');
+  activateOnboardingProposal(dir, staged.proposalId, true, { doctorFn: healthyDoctor });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'workspace.json'), 'utf8')).schedule.jobs, jobs, 'profile activation must retain each enabled flag, provider, model, day and time');
+});
 
 test('local setup generates and activates a validated proposal over HTTP without a provider CLI', async (t) => {
   const dir = root();

@@ -16,6 +16,8 @@ If an interrupted approval needs recovery, choose **Check for changes** again af
 
 Select the cover-letter draft in **CV**, save it, then choose **render PDF**. Cover letters use the same bundled Typst runtime as CVs and are always labelled **DRAFT**. An edit invalidates the old PDF until it is rendered again. If rendering fails, Scout keeps the previous file and shows the failure; repair or reinstall Scout if its Typst runtime is missing. Scout never sends the draft.
 
+If a local-model chat only returns text, use **Create reviewed CV draft** or **Create reviewed letter draft** in the CV library. Local models do not have file tools. The reviewed flow selects existing CV facts, lets you edit them, and requires confirmation before saving. If a preview expires or the CV/job/draft changes, generate it again. A source above 96 KiB or 128 evidence sections must be shortened before this bounded selection flow can run.
+
 ## Feedback did not change the order of jobs
 
 Feedback stays with the job unless you request a ranking suggestion. Open **Settings → Feedback & learning**, inspect the pending suggestion and publish it explicitly. The effect applies to future deterministic ranking; historical assessment evidence remains unchanged. Undo restores the previous version; **Reset all learned ranking changes** restores your published search preferences and keeps the feedback history.

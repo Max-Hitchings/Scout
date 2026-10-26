@@ -103,6 +103,20 @@ test('cover-letter drafts render through Typst, stay editable and become stale a
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('cover-letter rendering cannot write through a linked application folder into a sibling workspace', { skip: process.platform === 'win32' }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-linked-letter-'));
+  const sibling = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-sibling-letter-'));
+  try {
+    fs.mkdirSync(path.join(root, 'applications'));
+    fs.writeFileSync(path.join(sibling, 'outreach.md'), '# Private sibling draft\nKeep this unchanged.');
+    fs.writeFileSync(path.join(sibling, 'outreach.typ'), 'Existing sibling source');
+    fs.symlinkSync(sibling, path.join(root, 'applications', 'linked-role'), 'dir');
+    await assert.rejects(renderCvTarget(root, { target: 'cover-letter', slug: 'linked-role' }, { runtimeResolver: () => ({ available: false, error: 'synthetic missing runtime' }) }));
+    assert.equal(fs.readFileSync(path.join(sibling, 'outreach.typ'), 'utf8'), 'Existing sibling source');
+    assert.equal(fs.existsSync(path.join(sibling, 'outreach.pdf')), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(sibling, { recursive: true, force: true }); }
+});
+
 function successfulSpawn(root) {
   return (_command, args) => {
     const child = new EventEmitter();

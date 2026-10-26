@@ -2026,7 +2026,7 @@ const Setup = {
     const imported = this.imported;
     this.el('setup-body').innerHTML = `
       <h2>Import your existing CV (optional)</h2>
-      <p>Scout accepts PDF, DOCX, Markdown and plain text up to 10 MB. Text extraction happens locally. Scanned PDFs need OCR before they can be used.</p>
+      <p>Scout accepts PDF, DOCX, Markdown and plain text up to 10 MB. Text extraction happens locally. Scanned PDFs need OCR before they can be used. Importing another CV disconnects a Living CV source and keeps its saved versions.</p>
       <label class="setup-field"><span>CV file</span><input id="setup-cv-file" type="file" accept=".pdf,.docx,.md,.markdown,.txt"></label>
       ${imported ? `<h3>Extracted preview</h3><div id="setup-cv-preview" class="setup-preview"></div><p class="meta">Saved locally as ${this.escape(imported.extracted)}</p>` : ''}`;
     if (imported) this.el('setup-cv-preview').textContent = imported.text || '';

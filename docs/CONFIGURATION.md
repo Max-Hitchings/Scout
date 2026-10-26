@@ -32,10 +32,7 @@ scout doctor
   "sources": { "adzuna": { "country": null } },
   "ai": { "provider": null, "model": null, "models": { "codex": null, "claude": null } },
   "schedule": {
-    "jobs": [
-      { "id": "claude-primary", "enabled": true, "time": "07:30", "days": [0, 1, 3, 5], "provider": "claude", "mode": "primary", "model": null },
-      { "id": "codex-second-pass", "enabled": true, "time": "08:30", "days": [2, 4, 6], "provider": "codex", "mode": "second-pass", "model": null }
-    ]
+    "jobs": []
   },
   "setup": { "completedAt": null }
 }

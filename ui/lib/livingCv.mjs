@@ -97,18 +97,22 @@ function versions(root, { verify = false } = {}) {
 
 export function livingCvStatus(root) {
   const config = readConfig(root);
-  const result = { ...config, versions: versions(root), state: 'disconnected', revision: null, diff: [] };
+  let reviewed = false;
+  const marker = local(root, '.scout/onboarding/activated.json');
+  try { reviewed = Boolean(config.approvedMasterDigest && JSON.parse(fs.readFileSync(marker, 'utf8')).livingCvEvidenceDigest === config.approvedMasterDigest); } catch {}
+  const result = { ...config, profileReviewPending: Boolean(config.sourcePath && config.profileReviewPending && !reviewed), versions: versions(root), state: 'disconnected', revision: null, diff: [] };
   if (hasPendingLivingCvApproval(root)) return { ...result, state: 'recovery-needed', message: 'An interrupted CV approval needs recovery. Your versions and any later edits are preserved.' };
   if (!config.sourcePath) return result;
   try {
     const current = fs.existsSync(master(root)) ? fs.readFileSync(master(root), 'utf8') : '';
     const source = readSource(root, config.sourcePath);
+    const changed = config.approvedSourceDigest ? source.sourceDigest !== config.approvedSourceDigest : current !== source.markdown;
     return {
       ...result,
-      state: current === source.markdown ? 'current' : 'changed',
+      state: changed ? 'changed' : 'current',
       revision: digest(JSON.stringify([config, source.sourceDigest, digest(current)])),
       sourceDigest: source.sourceDigest,
-      diff: current === source.markdown ? [] : cvLineDiff(current, source.markdown),
+      diff: changed ? cvLineDiff(current, source.markdown) : [],
     };
   } catch {
     return { ...result, state: 'unavailable', message: 'The source cannot be read as a complete Markdown CV. Check the path, permissions, size and JSON format. Your saved CV is unchanged.' };
@@ -125,7 +129,20 @@ export function readLivingCvVersion(root, id) {
 export function approvedLivingCvEvidence(root) {
   assertLivingCvReady(root);
   const config = readConfig(root);
-  return config.approvedMasterDigest ? readLivingCvVersion(root, config.approvedMasterDigest) : null;
+  return config.sourcePath && config.approvedMasterDigest ? readLivingCvVersion(root, config.approvedMasterDigest) : null;
+}
+
+export function livingCvEvidenceRevision(root) {
+  assertLivingCvReady(root);
+  return fs.existsSync(configFile(root)) ? digest(fs.readFileSync(configFile(root))) : null;
+}
+
+// Caller holds the shared workspace mutation authority for a successful explicit import.
+export function retireLivingCvSource(root) {
+  assertLivingCvReady(root);
+  if (!fs.existsSync(configFile(root))) return;
+  const config = readConfig(root);
+  atomicWriteFile(configFile(root), JSON.stringify({ ...config, sourcePath: null, approvedMasterDigest: null, approvedSourceDigest: null, profileReviewPending: false }) + '\n', { mode: 0o600 });
 }
 
 export function configureLivingCv(root, sourcePath) {
@@ -178,7 +195,7 @@ export function approveLivingCv(root, { revision, confirmed } = {}, { writeFile 
     const additions = values.filter((text) => !history.some(({ id }) => id === digest(text)));
     if (history.length + additions.length > MAX_VERSIONS) throw new Error('CV version history is full. Archive it before approving another change.');
     for (const content of additions) { renew(); writeFile(local(root, `cv/versions/${digest(content)}.md`), content, { mode: 0o600 }); }
-    const configText = JSON.stringify({ ...config, approvedMasterDigest: digest(source.markdown), profileReviewPending: true }) + '\n';
+    const configText = JSON.stringify({ ...config, approvedMasterDigest: digest(source.markdown), approvedSourceDigest: source.sourceDigest, profileReviewPending: true }) + '\n';
     const intent = { schemaVersion: 1, beforeMaster: digest(previous), afterMaster: digest(source.markdown), beforeConfig: digest(fs.readFileSync(configFile(root))), afterConfig: digest(configText), configText };
     renew();
     writeFile(intentFile(root), JSON.stringify(intent) + '\n', { mode: 0o600 });

@@ -273,3 +273,14 @@ use live provider logins or personal workspaces.
 Owner-only release actions and acceptance remain governed by the final
 integration review and release gates. No release was published and no private
 source file was added to the public repository.
+
+Independent review added composition fixes: pending CV approvals gate ordinary
+chat, fit assessment and editable provider work; CV read/edit/render paths reject
+sibling workspace links; profile rebuilds preserve existing schedules and bind
+start/staging/activation evidence revisions; source checks compare the approved
+external digest and derive rebuild completion from the activation marker.
+Disconnect/import retires active external evidence while keeping versions.
+Local-only operation now has a trusted structured evidence-selector draft flow,
+an explicit editable preview/save step and a separate DRAFT CV PDF target.
+Fake HTTP/provider-to-save-to-render tests cover both draft kinds; generic
+operation projections contain an opaque draft ID and no CV text.

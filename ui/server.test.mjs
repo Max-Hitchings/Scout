@@ -2081,6 +2081,64 @@ test('POST /api/status accepts the shortlist status and persists it', async () =
   assert.equal(saved.status, 'shortlist');
 });
 
+test('the local-only reviewed draft API uses fake HTTP generation and saves only after explicit review', { concurrency: false }, async (t) => {
+  seedWorkspace(APP_ROOT, testWorkspace);
+  await drainScheduledCheckpoints();
+  const configFile = path.join(testWorkspace, 'workspace.json');
+  const cvFile = path.join(testWorkspace, 'cv/master-cv.md');
+  const trackerFile = path.join(testWorkspace, 'data/opportunities.json');
+  const previous = [configFile, cvFile, trackerFile].map((file) => [file, fs.readFileSync(file)]);
+  const model = http.createServer(async (req, res) => {
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw); const prompt = body.messages.find(({ role }) => role === 'user')?.content || '';
+    const selected = prompt.includes('INPUT_JSON\n') ? { evidenceIds: [JSON.parse(prompt.split('INPUT_JSON\n')[1]).evidence[0].id] } : { ready: true };
+    res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(selected) }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 2 } }));
+  });
+  await new Promise((resolve) => model.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { await drainScheduledCheckpoints(); model.closeAllConnections(); await new Promise((resolve) => model.close(resolve)); for (const [file, bytes] of previous) fs.writeFileSync(file, bytes); fs.rmSync(path.join(testWorkspace, 'applications/isolated-draft-api'), { recursive: true, force: true }); });
+  const config = loadWorkspaceConfig(testWorkspace);
+  writeWorkspaceConfig(testWorkspace, { ...config, ai: { ...config.ai, provider: 'local', local: { baseUrl: `http://127.0.0.1:${model.address().port}/v1`, model: 'synthetic/draft', timeoutMs: 2000, retries: 0 } } });
+  fs.writeFileSync(cvFile, '# Confirmed CV\n\n' + '- Supported a team with confirmed evidence.\n'.repeat(25));
+  fs.writeFileSync(trackerFile, JSON.stringify({ opportunities: [{ id: 'isolated-draft-api', role: 'Coordinator', company: 'Example Cooperative' }] }));
+  const generated = await request({ method: 'POST', path: '/api/cv/drafts/generate', headers: JSON_HEADERS(), body: JSON.stringify({ opportunityId: 'isolated-draft-api', kind: 'cv' }) });
+  assert.equal(generated.status, 202, generated.text);
+  const id = JSON.parse(generated.text).operation.id;
+  let operation;
+  for (let attempts = 0; attempts < 200; attempts++) {
+    operation = JSON.parse((await request({ path: `/api/operations/${id}` })).text).operation;
+    if (!['queued', 'running'].includes(operation.status)) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(operation.status, 'succeeded', JSON.stringify(operation));
+  assert.deepEqual(Object.keys(operation.result), ['draftId']);
+  assert.doesNotMatch(JSON.stringify(operation), /Supported a team/);
+  const preview = JSON.parse((await request({ path: `/api/cv/drafts/preview?id=${id}` })).text);
+  assert.match(preview.markdown, /Supported a team/);
+  assert.equal(fs.existsSync(path.join(testWorkspace, 'applications/isolated-draft-api/draft-cv.md')), false);
+  const unconfirmed = await request({ method: 'POST', path: '/api/cv/drafts/save', headers: JSON_HEADERS(), body: JSON.stringify({ draftId: id, markdown: preview.markdown }) });
+  assert.equal(unconfirmed.status, 409);
+  const saved = await request({ method: 'POST', path: '/api/cv/drafts/save', headers: JSON_HEADERS(), body: JSON.stringify({ draftId: id, markdown: preview.markdown + '\nHuman reviewed.\n', confirmed: true }) });
+  assert.equal(saved.status, 200, saved.text);
+  assert.match(fs.readFileSync(path.join(testWorkspace, JSON.parse(saved.text).path), 'utf8'), /Human reviewed/);
+});
+
+test('CV file reads and edits cannot cross into a linked sibling workspace', { concurrency: false, skip: process.platform === 'win32' }, async (t) => {
+  seedWorkspace(APP_ROOT, testWorkspace);
+  await drainScheduledCheckpoints();
+  const sibling = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-sibling-draft-'));
+  const link = path.join(testWorkspace, 'applications', 'linked-draft');
+  fs.mkdirSync(path.dirname(link), { recursive: true });
+  fs.writeFileSync(path.join(sibling, 'draft-cv.md'), 'A private sibling draft.');
+  fs.symlinkSync(sibling, link, 'dir');
+  t.after(() => { fs.rmSync(link, { force: true }); fs.rmSync(sibling, { recursive: true, force: true }); });
+  const read = await request({ path: '/api/cv/file?path=applications%2Flinked-draft%2Fdraft-cv.md' });
+  assert.notEqual(read.status, 200);
+  assert.doesNotMatch(read.text, /private sibling/);
+  const edited = await request({ method: 'POST', path: '/api/cv/save', headers: JSON_HEADERS(), body: JSON.stringify({ path: 'applications/linked-draft/draft-cv.md', content: 'An attempted replacement.' }) });
+  assert.notEqual(edited.status, 200);
+  assert.equal(fs.readFileSync(path.join(sibling, 'draft-cv.md'), 'utf8'), 'A private sibling draft.');
+});
+
 test('cover-letter drafts serve their own PDF and edits block stale downloads', { concurrency: false }, async () => {
   seedWorkspace(APP_ROOT, testWorkspace);
   const directory = path.join(testWorkspace, 'applications', 'synthetic-letter');

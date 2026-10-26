@@ -35,7 +35,7 @@ test('phone CV review requires exact approval and preserves an editable draft', 
   expect(approved).toBe(0);
   await page.getByRole('checkbox', { name: 'I reviewed this exact change' }).check();
   await page.getByRole('button', { name: 'Approve this CV change' }).click();
-  await expect(page.getByText('Saved CV matches the source', { exact: true })).toBeVisible();
+  await expect(page.getByText('No new changes in the source', { exact: true })).toBeVisible();
   expect(approved).toBe(1);
   await expect(page.getByRole('button', { name: 'Review my search preferences' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
@@ -87,5 +87,37 @@ test('phone cover-letter edits keep PDF download disabled until the saved draft 
   expect(saved).toMatchObject({ path: 'applications/synthetic-letter/outreach.md', content: source + '\nA reviewed edit.' });
   await expect(page.getByRole('button', { name: 'download PDF', exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'render PDF', exact: true })).toBeEnabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
+
+test('phone reviewed draft flow keeps local-model text editable and requires confirmation before saving', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let saves = 0; let savedText = ''; const source = '# DRAFT\n\nConfirmed synthetic CV experience.';
+  await page.route('**/api/cv', (route) => route.fulfill({ json: { applications: [], outreach: [], entries: [], draftCvs: saves ? [{ slug: 'new-systems-product-2026-07', pdf: false, current: false }] : [] } }));
+  await page.route('**/api/cv/drafts/generate', (route) => route.fulfill({ json: { operation: { id: 'synthetic-draft', status: 'succeeded', result: { draftId: 'synthetic-draft' } } } }));
+  await page.route('**/api/cv/drafts/preview**', (route) => route.fulfill({ json: { opportunityId: 'new-systems-product-2026-07', kind: 'cv', revision: 'synthetic-revision', provider: 'local', markdown: source } }));
+  await page.route('**/api/cv/drafts/save', async (route) => {
+    const payload = route.request().postDataJSON(); saves++; savedText = payload.markdown;
+    expect(payload).toMatchObject({ draftId: 'synthetic-draft', confirmed: true });
+    await route.fulfill({ json: { ok: true, path: 'applications/new-systems-product-2026-07/draft-cv.md', slug: 'new-systems-product-2026-07', target: 'draft-cv' } });
+  });
+  await page.route('**/api/cv/file**', (route) => route.fulfill({ contentType: 'text/plain', body: savedText || source }));
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => Boolean(window.Scout?.state?.cvFiles))).toBe(true);
+  await page.getByRole('button', { name: 'CV', exact: true }).click();
+  await page.getByRole('button', { name: 'Review CV options' }).click();
+  await page.locator('#cv-create-opportunity').selectOption('new-systems-product-2026-07');
+  await page.getByRole('button', { name: 'Create reviewed CV draft' }).click();
+  await page.getByRole('button', { name: 'Generate draft from confirmed CV facts' }).click();
+  await expect(page.getByLabel('Editable draft')).toHaveValue(source);
+  await page.getByLabel('Editable draft').fill(source + '\nMy human-reviewed edit.');
+  await page.getByRole('button', { name: 'Save reviewed draft' }).click();
+  expect(saves).toBe(0);
+  await expect(page.getByLabel('Editable draft')).toHaveValue(/human-reviewed edit/);
+  await page.getByRole('checkbox', { name: 'I reviewed the facts and my edits' }).check();
+  await page.getByRole('button', { name: 'Save reviewed draft' }).click();
+  await expect(page.locator('#cv-text')).toHaveValue(/human-reviewed edit/);
+  await expect(page.locator('#cv-status')).toContainText('nothing was sent');
+  expect(saves).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });
