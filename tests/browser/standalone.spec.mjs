@@ -112,6 +112,29 @@ test('phone job refresh preserves open controls and unsaved feedback while updat
   await expect(card.locator('.top')).toContainText('Updated Product Engineer');
   await expect(text).toHaveValue('Keep this unsaved explanation while checking for new jobs.');
   await expect(text).toBeFocused();
+  await page.evaluate(() => window.Scout.applyWorkspaceConfig({
+    ...window.Scout.workspaceConfig,
+    modePolicy: { triage: { actionScore: 1, checkScore: 0 } },
+  }));
+  await expect(card.locator('.chiprow > .score')).toHaveClass(/\bfit-strong\b/);
+  await expect(text).toHaveValue('Keep this unsaved explanation while checking for new jobs.');
+});
+
+test('open job actions refresh when its CV and cover-letter catalogue changes', async ({ page }) => {
+  const id = 'new-systems-product-2026-07';
+  let created = false;
+  await page.route('**/api/cv', (route) => route.fulfill({ json: {
+    applications: created ? [id] : [], outreach: created ? [id] : [], entries: [],
+  } }));
+  await page.goto('/');
+  await page.evaluate(() => window.Scout.loadOpportunities());
+  const card = page.locator('#tab-jobs .card[data-id="new-systems-product-2026-07"]');
+  await card.click();
+  await expect(card.getByRole('button', { name: 'create custom CV', exact: true })).toBeVisible();
+  created = true;
+  await page.evaluate(() => window.Scout.loadOpportunities());
+  await expect(card.getByRole('button', { name: 'see custom CV', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'see cover letter', exact: true })).toBeVisible();
 });
 
 test('phone reviewed draft flow keeps local-model text editable and requires confirmation before saving', async ({ page }) => {
