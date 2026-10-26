@@ -13,6 +13,7 @@ import { mergeWorkspaceDefaults, seedWorkspace, writeWorkspaceConfig } from '../
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROVIDER_FIXTURE = fs.readFileSync(new URL('./fixtures/provider.mjs', import.meta.url), 'utf8');
 const OFFLINE_FIXTURE = new URL('./fixtures/offline.mjs', import.meta.url).href;
+const RUNTIME_CONTROL = new URL('./fixtures/runtime-control.mjs', import.meta.url).href;
 const OPPORTUNITY_ID = 'synthetic-acceptance-role';
 const REQUEST = 'Review this synthetic opportunity.';
 const wait = (duration = 25) => new Promise((resolve) => setTimeout(resolve, duration));
@@ -35,8 +36,10 @@ async function freePort() {
   return port;
 }
 
-function command(args, options) {
-  const child = spawn(process.execPath, ['--import', OFFLINE_FIXTURE, ...args], { ...options, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
+function command(args, { runtimeControl = false, ...options }) {
+  const preloads = ['--import', OFFLINE_FIXTURE, ...(runtimeControl ? ['--import', RUNTIME_CONTROL] : [])];
+  const child = spawn(process.execPath, [...preloads, ...args], { ...options, windowsHide: true, shell: false,
+    stdio: ['ignore', 'pipe', 'pipe', ...(runtimeControl ? ['ipc'] : [])] });
   const result = { stdout: '', stderr: '' };
   child.stdout.setEncoding('utf8').on('data', (value) => { result.stdout += value; });
   child.stderr.setEncoding('utf8').on('data', (value) => { result.stderr += value; });
@@ -133,7 +136,7 @@ async function fixture(t, provider, remote) {
   if (remoteLogin) fs.writeFileSync(env.SCOUT_DEVICE_SETTINGS, JSON.stringify({
     remoteAccess: { enabled: true, ownerLogin: 'synthetic-owner', origin: 'https://scout.example.test' },
   }));
-  server = command(['ui/server.mjs'], { cwd: APP_ROOT, env });
+  server = command(['ui/server.mjs'], { cwd: APP_ROOT, env, runtimeControl: true });
   await until(() => {
     if (server.child.exitCode !== null) throw new Error('Synthetic Scout server exited before listening');
     return server.result.stdout.includes('Scout UI on');
@@ -171,12 +174,40 @@ async function fixture(t, provider, remote) {
     fs.renameSync(`${controlFile}.next`, controlFile);
   };
   const health = () => JSON.parse(fs.readFileSync(path.join(workspace, '.scout/provider-health/v1', `${provider}.json`), 'utf8'));
+  let controlId = 0;
+  const runtimeControl = (action) => new Promise((resolve, reject) => {
+    const id = ++controlId;
+    const timer = setTimeout(() => { cleanup(); reject(new Error(`Acceptance runtime control timed out: ${action}`)); }, 20_000);
+    const onExit = () => { cleanup(); reject(new Error('Acceptance server exited during runtime control')); };
+    const onMessage = (message) => {
+      if (message.id !== id) return;
+      cleanup();
+      if (message.error) reject(new Error(message.error));
+      else resolve();
+    };
+    function cleanup() {
+      clearTimeout(timer);
+      server.child.off('message', onMessage);
+      server.child.off('exit', onExit);
+    }
+    server.child.on('message', onMessage);
+    server.child.once('exit', onExit);
+    server.child.send({ id, action });
+  });
   const scheduled = async () => {
+    await runtimeControl('hold-checkpoint');
+    // These assertions exercise provider preflight with an idle workspace.
+    // Settle the owned server's startup/coalesced backup before launching the
+    // real scheduled command, which otherwise correctly queues on that fence.
+    await runtimeControl('drain-checkpoints');
     const scan = command(['tools/scout.mjs', 'scan', '--workspace', workspace, '--provider', provider,
       '--mode', 'primary', '--scheduled', '--schedule-id', `${provider}-primary`], { cwd: APP_ROOT, env });
     const timer = setTimeout(() => scan.child.kill('SIGKILL'), 20_000);
     timer.unref();
-    try { return await scan.closed; } finally { clearTimeout(timer); }
+    try { return await scan.closed; } finally {
+      clearTimeout(timer);
+      await runtimeControl('drain-checkpoints');
+    }
   };
   return { root, workspace, env, server, responses, deviceCode, privateDiagnostic, request, calls, change, health, scheduled };
 }
@@ -200,7 +231,12 @@ for (const [provider, failure] of [['claude', 'expired'], ['codex', 'revoked'], 
       assert.equal(h.health().remoteAuthBarrier, true, 'local credentials cannot clear remote revocation');
       const blocked = await h.scheduled();
       assert.equal(blocked.status, 1, 'the actual scheduler command must fail preflight');
-      assert.equal(JSON.parse(blocked.stdout).reason, 'sign-in-required');
+      const blockedResult = JSON.parse(blocked.stdout);
+      assert.equal(blockedResult.reason, 'sign-in-required', JSON.stringify({
+        status: ['queued', 'skipped', 'failed'].includes(blockedResult.status) ? blockedResult.status : 'other',
+        queued: blockedResult.status === 'queued',
+        reason: blockedResult.reason === 'sign-in-required' ? 'sign-in-required' : blockedResult.reason == null ? 'missing' : 'other',
+      }));
       assert.equal(turns(), 1, 'a blocked scheduler command must not send any provider work');
     }
     const banner = (await h.request('/api/provider-health')).json().providers.find((item) => item.provider === provider);
