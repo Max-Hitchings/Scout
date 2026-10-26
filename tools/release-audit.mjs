@@ -3,7 +3,6 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { isMainModule } from '../ui/lib/mainModule.mjs';
 
 const DEFAULT_BUILD_DIRS = ['dist', path.join('installer', 'output')];
@@ -30,12 +29,22 @@ const STATE_SHAPED_TEXT_EXTENSIONS = /\.(?:json|jsonl|ndjson|log|out|toml|txt|ya
 const CROSS_FORMAT_CONFIG_EXTENSIONS = /\.(?:toml|yaml|yml)$/i;
 // Ajv 8.20.0's public schema-security meta-schema describes untrusted data
 // beside a generic title. That exact reviewed description triggers the advert
-// heuristic. Exempt only that finding at these two staged vendor paths with
-// identical reviewed bytes; all markers, concrete secrets and other rules run.
-const REVIEWED_VENDOR_METADATA = new Map([
-  ['app/node_modules/ajv/dist/refs/json-schema-secure.json', 'b7840b4f1526eee47ac19780906a436d0c39df2aa3d505388caf18864085a421'],
-  ['app/node_modules/ajv/lib/refs/json-schema-secure.json', 'b7840b4f1526eee47ac19780906a436d0c39df2aa3d505388caf18864085a421'],
-]);
+// heuristic. Exempt only that finding at the two vendor paths beneath the
+// exact app roots produced by our packagers. Resolve the portable version
+// from this auditor's package, never from files in the tree being audited.
+// All markers, concrete secrets and other rules still run on identical bytes.
+const RELEASE_VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+const REVIEWED_VENDOR_APP_ROOTS = [
+  'app', // Common stage and Windows installer.
+  'deb/opt/scout/app',
+  `Scout-${RELEASE_VERSION}-linux-x64/app`,
+  'dmg-root/Scout.app/Contents/Resources/app',
+];
+const REVIEWED_VENDOR_METADATA = new Map(REVIEWED_VENDOR_APP_ROOTS.flatMap((app) =>
+  ['dist', 'lib'].map((directory) => [
+    `${app}/node_modules/ajv/${directory}/refs/json-schema-secure.json`,
+    'b7840b4f1526eee47ac19780906a436d0c39df2aa3d505388caf18864085a421',
+  ])));
 const EXACT_PROFILE_PLACEHOLDERS = new Set([
   'your', '<user>', '<username>', '<your-user>', '<your-username>',
 ]);

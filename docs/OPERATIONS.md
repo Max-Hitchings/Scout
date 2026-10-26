@@ -36,8 +36,9 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   outbox as CLI providers, including episode deduplication and deferred
   publication recovery; raw provider errors and key contents are never retained.
 - Staged release audits retain all dependency privacy checks. The only Ajv
-  metadata exception is bound to the exact two vendor paths, reviewed SHA-256
-  and single advert-body heuristic documented in
+  metadata exception is bound to two exact vendor paths beneath the enumerated
+  common, Windows, Linux and macOS packaging roots, reviewed SHA-256 and single
+  advert-body heuristic documented in
   [Supply-chain security](SUPPLY_CHAIN_SECURITY.md); byte drift fails closed.
 - When an authenticated installed Codex client supports catalogue discovery,
   Scout invokes only the fixed read-only `codex debug models` argument vector
