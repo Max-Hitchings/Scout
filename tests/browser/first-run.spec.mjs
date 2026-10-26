@@ -177,7 +177,8 @@ test('the first-run restore form can be dismissed again', async ({ page }) => {
   await expect(dialog.getByRole('button', { name: 'Restore existing workspace' })).toBeEnabled();
 });
 
-test('fresh onboarding publishes the reviewed search profile before offering the first scan', async ({ page }) => {
+for (const activated of [false, true]) {
+  test(`${activated ? 'activated first-run reload' : 'fresh onboarding'} publishes the reviewed search profile before offering the first scan`, async ({ page }) => {
   await stubSupportingRoutes(page);
   let scanStarts = 0;
   const workspace = process.env.SCOUT_WORKSPACE;
@@ -200,6 +201,8 @@ test('fresh onboarding publishes the reviewed search profile before offering the
       body: JSON.stringify({
         ...createdStatus,
         ready: true,
+        // Actual proposal activation records completedAt before a first scan.
+        setupComplete: activated,
         config: { ...createdStatus.config, ai: { ...createdStatus.config.ai, provider: 'codex' } },
       }),
     });
@@ -252,3 +255,5 @@ test('fresh onboarding publishes the reviewed search profile before offering the
   await run.click();
   await expect.poll(() => scanStarts).toBe(1);
 });
+
+}
