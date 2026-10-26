@@ -259,6 +259,12 @@ Access details differ by operator and must be discovered from the private operat
 
 ## Change and release path
 
+Provider recovery acceptance runs with `npm run test:acceptance`. It uses the real
+HTTP server, CLI subprocesses and scheduled scan command with disposable synthetic
+provider homes; it never contacts live providers or installs native schedules.
+Run it alongside the normal suite. The owner-only current-provider check is in
+[Acceptance](ACCEPTANCE.md).
+
 1. Update the public checkout from `main` and create a focused `codex/` branch.
 2. Use a disposable synthetic workspace for tests; never point development tests at the authoritative workspace.
 3. Implement the change with regression coverage and update affected documentation and in-app guidance.
