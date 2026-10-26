@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { test } from 'node:test';
 import {
   ONBOARDING_FILES, activateOnboardingProposal, buildOnboardingEvidence, createOnboardingProposal,
@@ -51,6 +52,32 @@ function proposal() {
 const status = () => ({ installed: true, authenticated: true, executable: 'codex', capabilities: { structuredOutput: true } });
 const run = async () => ({ value: proposal(), usage: { input_tokens: 50 } });
 const healthyDoctor = () => ({ checks: { config: { ok: true }, tracker: { ok: true }, providers: { codex: { installed: true, authenticated: true } } } });
+
+test('local setup generates and activates a validated proposal over HTTP without a provider CLI', async (t) => {
+  const dir = root();
+  let calls = 0;
+  const server = http.createServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    const request = JSON.parse(raw);
+    assert.equal(request.model, 'synthetic/model-27b');
+    assert.doesNotMatch(request.messages.at(-1).content, /apiKeyFile|baseUrl/);
+    calls += 1;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(proposal()) } }] }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); fs.rmSync(dir, { recursive: true, force: true }); });
+  const config = JSON.parse(fs.readFileSync(path.join(dir, 'workspace.json')));
+  config.ai = { provider: 'local', local: { baseUrl: `http://127.0.0.1:${server.address().port}/v1`, model: 'synthetic/model-27b' } };
+  writeWorkspaceConfig(dir, config);
+  const staged = await createOnboardingProposal(dir, 'local');
+  assert.equal(staged.valid, true);
+  assert.equal(readProviderHealth(dir, 'local').state, 'ready');
+  assert.equal(activateOnboardingProposal(dir, staged.proposalId, true, { doctorFn: () => ({ checks: { config: { ok: true }, tracker: { ok: true }, providers: { local: { installed: true, authenticated: true } } } }) }).ok, true);
+  assert.equal(calls, 1, 'approval must consume no additional provider call');
+  assert.match(fs.readFileSync(path.join(dir, 'cv', 'master-cv.md'), 'utf8'), /evidence: config-roles/);
+});
 
 test('onboarding production preflight keeps a known remote auth failure authoritative', async (t) => {
   const dir = root();

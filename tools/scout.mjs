@@ -14,6 +14,7 @@ import { fetchAdzuna, resolveAdzunaCredentials } from '../ui/lib/adzuna.mjs';
 import { fetchConfiguredPortals, loadPortals } from '../ui/lib/ats.mjs';
 import { collectEmployers } from '../ui/lib/careersAdapters.mjs';
 import { fetchHiringCafe } from '../ui/lib/hiringCafe.mjs';
+import { localProviderHealthSignal } from '../ui/lib/localProvider.mjs';
 import { loadEnv } from '../ui/lib/env.mjs';
 import {
   assertSafeModel, providerLocalHealthSignal, providerStatus,
@@ -118,6 +119,7 @@ function sourceConfigFingerprint(config) {
     sources: config.sources,
     triage: config.triage,
     commute: config.commute,
+    ...(config.ai?.local?.baseUrl ? { localProvider: { baseUrl: config.ai.local.baseUrl, model: config.ai.local.model } } : {}),
   });
 }
 
@@ -477,7 +479,7 @@ export function assertScanReady(root, provider, {
   const config = loadWorkspaceConfig(root);
   const tracker = readScanTracker(root);
   const selected = config.ai?.provider;
-  const providers = Object.fromEntries([...new Set([selected, provider].filter(Boolean))].map((name) => [name, providerStatusFn(name)]));
+  const providers = Object.fromEntries([...new Set([selected, provider].filter(Boolean))].map((name) => [name, providerStatusFn(name, { local: config.ai?.local, root })]));
   const readiness = setupReadiness(root, config, providers, tracker);
   if (readiness.checks.preferences && readiness.checks.evidence && readiness.checks.approved) {
     migrateSearchProfile(root);
@@ -787,13 +789,14 @@ export async function runScanWith(root, provider, mode, {
   signal = null,
 } = {}) {
   signal?.throwIfAborted();
-  if (!['codex', 'claude'].includes(provider)) throw new Error('provider must be codex or claude');
+  if (!['codex', 'claude', 'local'].includes(provider)) throw new Error('provider must be codex, claude or local');
   if (!['primary', 'second-pass', 'broadened'].includes(mode)) throw new Error('mode must be primary, broadened or second-pass');
   const providerHealthPurpose = requester === 'scheduled' ? 'scheduled-job' : 'manual-run';
   const config = loadWorkspaceConfig(root);
   const modePolicy = workspaceModePolicy(config);
+  model = provider === 'local' && model == null ? assertSafeModel(config.ai?.local?.model) : model;
   model = model === undefined
-    ? (config.ai?.provider === provider ? assertSafeModel(config.ai?.model) : null)
+    ? (provider === 'local' ? assertSafeModel(config.ai?.local?.model) : config.ai?.provider === provider ? assertSafeModel(config.ai?.model) : null)
     : assertSafeModel(model);
   const startedAt = new Date().toISOString();
   const injectedLegacyLock = claimedLease === null
@@ -923,11 +926,13 @@ export async function runScanWith(root, provider, mode, {
         const source = requester === 'scheduled' ? 'scheduled-preflight' : 'manual-preflight';
         // Startup can drain up to 128 older requests before this fenced
         // boundary, so select the executable only when this run is ready.
-        trustedProviderStatus = providerStatusFn(selectedProvider);
+        trustedProviderStatus = providerStatusFn(selectedProvider, { local: loadWorkspaceConfig(workspaceRoot).ai?.local, root: workspaceRoot });
         return providerPreflightFn(workspaceRoot, selectedProvider, providerHealthPurpose, {
           lease,
           source,
-          probe: async () => providerLocalHealthSignal(trustedProviderStatus, { source }),
+          probe: async () => selectedProvider === 'local'
+            ? localProviderHealthSignal(trustedProviderStatus, { source })
+            : providerLocalHealthSignal(trustedProviderStatus, { source }),
         });
       },
       prepare({ lease }) {
@@ -1307,7 +1312,7 @@ export async function runScanWith(root, provider, mode, {
 
 export function installSchedule(root, time, provider, { id = `${provider}-primary`, mode = 'primary', model = null, days = null } = {}) {
   assertDesktopScheduleAllowed(root);
-  if (!['codex', 'claude'].includes(provider)) throw new Error('schedule provider must be codex or claude');
+  if (!['codex', 'claude', 'local'].includes(provider)) throw new Error('schedule provider must be codex, claude or local');
   if (!['primary', 'second-pass'].includes(mode)) throw new Error('schedule mode must be primary or second-pass');
   model = assertSafeModel(model);
   const selectedDays = normaliseScheduleDays(days);
@@ -1529,7 +1534,7 @@ async function main() {
       }));
     }
   }
-  print(`Scout CLI\n\nCommands:\n  doctor [--workspace PATH]\n  household create ID --directory PATH --port PORT\n  household list|switch ID\n  notifications dispatch [--workspace PATH]\n  remote preflight [--require-enabled] [--url URL]\n  workspace init|migrate [--from PATH] [--to PATH]\n  workspace snapshot-beta22 [--workspace PATH]\n  workspace rollback-beta22 --workspace PATH --to PATH [--snapshot PATH]\n  cv quality <application-slug> [--workspace PATH]\n  lock acquire|release|status\n  source ats|adzuna|hiring-cafe\n  scan --provider codex|claude [--mode primary|second-pass] [--model MODEL]\n  schedule install|status|remove|run-now [--id ID] [--time HH:MM] [--days 0,1,2] [--provider PROVIDER] [--mode primary|second-pass] [--model MODEL]`);
+  print(`Scout CLI\n\nCommands:\n  doctor [--workspace PATH]\n  household create ID --directory PATH --port PORT\n  household list|switch ID\n  notifications dispatch [--workspace PATH]\n  remote preflight [--require-enabled] [--url URL]\n  workspace init|migrate [--from PATH] [--to PATH]\n  workspace snapshot-beta22 [--workspace PATH]\n  workspace rollback-beta22 --workspace PATH --to PATH [--snapshot PATH]\n  cv quality <application-slug> [--workspace PATH]\n  lock acquire|release|status\n  source ats|adzuna|hiring-cafe\n  scan --provider codex|claude|local [--mode primary|second-pass] [--model MODEL]\n  schedule install|status|remove|run-now [--id ID] [--time HH:MM] [--days 0,1,2] [--provider PROVIDER] [--mode primary|second-pass] [--model MODEL]`);
 }
 
 const isMain = isMainModule(import.meta.url);

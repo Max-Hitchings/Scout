@@ -10,7 +10,7 @@ export function providerRecoveryView(root, config, runs = [], read = readProvide
   const jobs = (config?.schedule?.jobs || []).filter((job) => job?.enabled === true);
   const providers = new Set([config?.ai?.provider, ...jobs.map((job) => job.provider)]);
   const view = [];
-  for (const provider of ['codex', 'claude']) {
+  for (const provider of ['codex', 'claude', 'local']) {
     if (!providers.has(provider)) continue;
     let record;
     try { record = read(root, provider); } catch { continue; }

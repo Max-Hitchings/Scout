@@ -1,10 +1,10 @@
 # AI-assisted Setup and Retuning
 
-Scout uses Codex or Claude for one bounded, schema-constrained proposal. The provider receives only validated setup fields and imported evidence, has no file-writing tools, cannot continue a prior session, and does not activate anything. Scout's trusted runtime validates evidence references and renders the five staged files itself.
+Scout uses your selected provider for one bounded, schema-validated proposal. Codex, Claude and [local OpenAI-compatible models](PROVIDERS.md#local-openai-compatible-model) are supported. The provider receives only validated setup fields and imported evidence, has no file-writing tools, cannot continue a prior session, and does not activate anything. Scout's trusted runtime validates evidence references and renders the five staged files itself.
 
 ## Before starting
 
-Create or select a private workspace, install and authenticate a compatible provider CLI, and import a CV if available. Never paste provider login tokens or Adzuna keys into chat. Provider login remains in the official CLI; source keys belong in the workspace `.env` or setup credential form.
+Create or select a private workspace, connect a compatible AI provider, and import a CV if available. Codex and Claude use their official CLI sign-in; local models use an explicit endpoint, model and optional API-key file. Never paste provider login tokens or Adzuna keys into chat. Source keys belong in the workspace `.env` or setup credential form.
 
 Imported evidence is not silently truncated. If extracted evidence exceeds 80,000 characters, Scout retains the import and asks you to provide a smaller source before spending an AI operation.
 

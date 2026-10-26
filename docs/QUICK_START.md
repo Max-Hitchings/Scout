@@ -1,6 +1,6 @@
 # Quick Start
 
-Scout is a local-first opportunity finder for Windows, macOS and Linux. It keeps your career data in a private workspace and uses Codex or Claude to help search and assess opportunities. It never sends applications or outreach.
+Scout is a local-first opportunity finder for Windows, macOS and Linux. It keeps your career data in a private workspace and uses a local model, Codex or Claude to help search and assess opportunities. It never sends applications or outreach.
 
 ## 1. Install and launch
 
@@ -35,7 +35,7 @@ The workspace contains `workspace.json`, your profile, CV, tracker, reports, app
 
 ## 3. Connect an AI provider
 
-Install and sign in to either Codex or Claude Code using the provider's official instructions. Scout does not collect the provider password or token.
+Choose **Local OpenAI-compatible** in the provider step to connect a model server you control; enter its URL, model and optional API-key file path. No provider CLI is needed for local models. See [local model setup](PROVIDERS.md#local-openai-compatible-model). For Codex or Claude Code, install and sign in using the provider's official instructions. Scout does not collect the provider password or token.
 
 ```powershell
 codex login

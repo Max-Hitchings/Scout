@@ -855,6 +855,46 @@ test('stage mode audits installed dependency JSON, YAML, TOML, text, log and run
   assert.match(writes.join(''), /Release audit failed with 6 finding/);
 });
 
+test('reviewed Ajv metadata passes only at the exact vendor paths with unchanged bytes', (t) => {
+  const root = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const payload = fs.readFileSync(path.join(ROOT, 'node_modules', 'ajv', 'dist', 'refs', 'json-schema-secure.json'));
+  const files = ['dist', 'lib'].map((directory) => `app/node_modules/ajv/${directory}/refs/json-schema-secure.json`);
+  for (const file of files) {
+    fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    fs.writeFileSync(path.join(root, file), payload);
+  }
+  const audit = (trackedFiles = files) => auditRelease({ root, trackedFiles, buildDirs: [] });
+  assert.equal(audit().ok, true, 'reviewed public schema metadata must not be classified as a private advert');
+  fs.appendFileSync(path.join(root, files[0]), '\n');
+  assert.deepEqual(audit().findings.map(({ file, rule }) => [file, rule]), [[files[0], 'advert-body']], 'even whitespace drift requires the vendor bytes to be reviewed again');
+  fs.writeFileSync(path.join(root, files[0]), payload);
+  for (const file of ['app/node_modules/ajv/dist/refs/other.json', 'app/node_modules/other-package/dist/refs/json-schema-secure.json']) {
+    fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    fs.writeFileSync(path.join(root, file), payload);
+    assert.deepEqual(audit([file]).findings.map(({ rule }) => rule), ['advert-body']);
+  }
+  const changed = JSON.parse(payload);
+  changed.prompt = 'A synthetic private provider prompt.';
+  changed.diagnostic = ['ghp_', 'A'.repeat(36)].join('');
+  fs.writeFileSync(path.join(root, files[0]), JSON.stringify(changed));
+  const rules = audit([files[0]]).findings.map(({ rule }) => rule);
+  assert.ok(rules.includes('advert-body'));
+  assert.ok(rules.includes('full-prompt'));
+  assert.ok(rules.includes('github-token'));
+});
+
+test('reviewed Ajv metadata never suppresses configured personal markers', (t) => {
+  const root = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = 'app/node_modules/ajv/dist/refs/json-schema-secure.json';
+  fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'node_modules', 'ajv', 'dist', 'refs', 'json-schema-secure.json'), path.join(root, file));
+  const result = auditRelease({ root, trackedFiles: [file], buildDirs: [], markers: ['untrusted data'] });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.findings.map(({ rule }) => rule), ['personal-marker-1']);
+});
+
 test('stage mode fails closed when a file appears after directory enumeration', () => {
   const root = fixture();
   fs.mkdirSync(path.join(root, 'app'), { recursive: true });

@@ -16,6 +16,7 @@ const TEMPLATES = {
   '/offline-rollover/lib/codexDeepLink.mjs': text('lib/codexDeepLink.mjs'),
   '/offline-rollover/lib/durableRunStates.mjs': text('lib/durableRunStates.mjs'),
   '/offline-rollover/lib/providerPresentation.mjs': text('lib/providerPresentation.mjs'),
+  '/offline-rollover/lib/modelIdentifier.mjs': text('lib/modelIdentifier.mjs'),
 };
 const ASSETS = Object.fromEntries([
   'scout-icon.ico', 'scout-icon.png', 'scout-idle.png', 'scout-thinking.png',

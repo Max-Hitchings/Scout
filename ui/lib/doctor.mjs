@@ -39,7 +39,7 @@ export function doctor(workspaceRoot, {
   const typst = typstResolver({ appRoot });
   checks.git = { ok: git.available, ...git, optional: true };
   checks.typst = { ok: typst.available, ...typst, optional: false };
-  const detected = providers || providerDetector();
+  const detected = providers || providerDetector({ local: checks.config.value?.ai?.local, root: workspaceRoot });
   // The HTTP response passes its already gated snapshot so every projection
   // in that response describes the same provider evidence.
   checks.providers = healthGated ? detected : publicProviderStatuses(detected, workspaceRoot);
@@ -60,7 +60,7 @@ function publicCheck(check) {
 export function publicDoctor(result) {
   const checks = result?.checks || {};
   const providers = {};
-  for (const provider of ['codex', 'claude']) {
+  for (const provider of ['codex', 'claude', 'local']) {
     const value = checks.providers?.[provider];
     if (!value) continue;
     providers[provider] = {

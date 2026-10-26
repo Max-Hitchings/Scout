@@ -24,7 +24,7 @@ workspace.
 
 ## Provider not found or not authenticated
 
-Run the provider's `--version` and authentication status command in a new PowerShell window. Restart Scout after `PATH` changes. Clear unsupported `ai.model` overrides. See [Providers](PROVIDERS.md).
+For Codex or Claude, run the provider's `--version` and authentication status command in a new PowerShell window. Restart Scout after `PATH` changes. For a local model, check the base URL, exact model name and service-account access to the optional API-key file in **Settings → AI providers**. A key rejection needs that file corrected; a network failure needs the server/private-network connection restored. Invalid structured output needs a model that can satisfy the schema. Clear unsupported model overrides. See [Providers](PROVIDERS.md).
 
 ## CV import fails
 
