@@ -60,6 +60,25 @@ A2 line 50 is now done. These stay open: A10 line 172 (#76, see A), A11 lines 18
 ## Appending your own progress
 Work done after this snapshot goes in its own section below, signed with the author or agent and dated. Leave the "What is done" table above as the record of this snapshot.
 
+## 2026-10-26 — Codex: process-boundary provider acceptance
+
+- Added `npm run test:acceptance` for Claude expiry, Codex revocation and Codex
+  refresh rejection. Each scenario starts the real HTTP server, provider CLI
+  subprocesses, scheduled scan command and guided-login manager in disposable
+  synthetic homes. No health manager or provider result is replaced in-process.
+- Checks local-versus-remote truth, failed remote confirmation, guided retry,
+  remote-owner CSRF/origin handling, one warning episode, saved single-use chat
+  resend, missed-scan evidence and an explicitly resumed scheduled scan. A source
+  HTTP preload prevents the successful recovery path from contacting job sources.
+- The three scenarios were observed RED against the original integration base:
+  chat SSE did not identify the actual authentication failure. They are GREEN
+  after the reviewed provider/notification integration. Full-suite and release
+  audit results are recorded in this package's pull request.
+- Added the packaged [acceptance guide](ACCEPTANCE.md), separating automated
+  composition from the owner's once-per-provider-version real-account check.
+  Native timers, Windows balloons, real accounts and private remote deployment
+  acceptance remain separate evidence; none is claimed from the synthetic run.
+
 ## 2026-10-25 — truth-docs (Codex)
 
 | Finding | Disposition and evidence |

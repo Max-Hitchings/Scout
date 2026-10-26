@@ -42,6 +42,7 @@ Read [CONTRIBUTING.md](../CONTRIBUTING.md), then use:
 
 - [repository layout](REPOSITORY_LAYOUT.md) for public/private data boundaries;
 - [operations context](OPERATIONS.md) for the maintained VPS topology and change path;
+- [provider acceptance](ACCEPTANCE.md) for synthetic expiry/recovery checks and the owner's real-account check;
 - [scan protocol](SCOUT_SCAN_PROTOCOL.md) for scan behaviour;
 - [release process](RELEASE.md) for packaging and publishing;
 - [release package verification and signing](SUPPLY_CHAIN_SECURITY.md) for checksums, attestations and platform-signing boundaries; and
