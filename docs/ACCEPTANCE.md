@@ -54,6 +54,13 @@ a legitimate workspace-busy result. The checkpoint guard, actual HTTP actions
 and operation deadlines remain intact; no request is retried and no production
 control endpoint is added.
 
+The source `npm test` suite also checks local HTTP providers against synthetic
+loopback servers. Known 401/403/429 status tests acquire actual response headers
+before exercising oversized or stalled error bodies. Separate controlled
+pre-header and real deadline checks require a network failure when no status
+arrives; an unreceived status cannot become an authentication claim. A bounded
+child process verifies this ordering without changing the operation deadline.
+
 ## Once with real accounts
 
 Use a separate test workspace and the same operating-system account that runs
