@@ -6,6 +6,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { artifactNames } from './build-platform.mjs';
+import { validateReleaseManifest } from '../ui/lib/releaseManifest.mjs';
+import { compareVersions, packageName } from '../ui/lib/updates.mjs';
+
+const CANDIDATE_VERSION = '0.1.0-beta.24-rc1';
 
 const workflow = fs.readFileSync(
   new URL('../.github/workflows/windows-release.yml', import.meta.url),
@@ -211,7 +215,7 @@ test('package, installer and release notes use one beta version', () => {
   const installer = fs.readFileSync(new URL('../installer/Scout.iss', import.meta.url), 'utf8');
   const release = fs.readFileSync(new URL(`../docs/releases/${pkg.version}.md`, import.meta.url), 'utf8');
   assert.equal(pkg.name, 'scout-opportunity-finder');
-  assert.equal(pkg.version, '0.1.0-beta.23');
+  assert.equal(pkg.version, CANDIDATE_VERSION);
   assert.equal(lock.name, pkg.name);
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[''].name, pkg.name);
@@ -225,6 +229,46 @@ test('package, installer and release notes use one beta version', () => {
     linuxDeb: `Scout-${pkg.version}-linux-x64.deb`,
     linuxTar: `Scout-${pkg.version}-linux-x64.tar.gz`,
   });
+});
+
+test('the requested candidate uses exact version-bound artifacts and signed metadata', () => {
+  const version = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+  const manifest = { schemaVersion: 1, repository: 'oliver-hitchings/Scout', version: CANDIDATE_VERSION,
+    artifacts: [{ name: `Scout-${CANDIDATE_VERSION}-windows-x64.exe`, bytes: 1, sha256: 'a'.repeat(64) }] };
+  assert.doesNotThrow(() => validateReleaseManifest(manifest, version));
+  for (const other of ['0.1.0-beta.23', '0.1.0-beta.24', '0.1.0-beta.24-rc2', '0.1.0']) {
+    assert.throws(() => validateReleaseManifest(manifest, other), /version/);
+  }
+  for (const [platform, arch, suffix] of [['win32', 'x64', 'windows-x64.exe'], ['darwin', 'arm64', 'macos-arm64.dmg'], ['darwin', 'x64', 'macos-x64.dmg'], ['linux', 'x64', 'linux-x64.deb']]) {
+    assert.equal(packageName(version, platform, arch), `Scout-${CANDIDATE_VERSION}-${suffix}`);
+  }
+  assert.ok(compareVersions(version, '0.1.0-beta.23') > 0);
+  assert.ok(compareVersions(version, '0.1.0-beta.24') < 0);
+  assert.ok(compareVersions(version, '0.1.0-beta.24-rc2') < 0);
+});
+
+test('the actual Windows workflow version guard accepts only the exact requested candidate tag', { skip: process.platform !== 'win32' }, (t) => {
+  const step = workflow.match(/- name: Select and validate version[\s\S]*?(?=\n      - (?:name:|run:|uses:))/)?.[0];
+  assert.ok(step, 'The real version-selection step is required');
+  const script = step.slice(step.indexOf('        run: |') + '        run: |'.length).trimEnd()
+    .split('\n').map((line) => line.replace(/^          /, '')).join('\n');
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-candidate-version-'));
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  const output = path.join(temporary, 'github-output.txt');
+  const run = (refName, requested = '') => {
+    fs.writeFileSync(output, '');
+    return spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `$ErrorActionPreference = 'Stop'\n${script}`], {
+      cwd: fileURLToPath(new URL('../', import.meta.url)), encoding: 'utf8', timeout: 15000,
+      env: { ...process.env, REQUESTED_VERSION: requested, RELEASE_REF_TYPE: 'tag', RELEASE_REF_NAME: refName, GITHUB_OUTPUT: output },
+    });
+  };
+  const accepted = run(`v${CANDIDATE_VERSION}`);
+  assert.equal(accepted.status, 0, 'The requested candidate tag must pass the unchanged workflow version guard');
+  assert.match(fs.readFileSync(output, 'utf8'), new RegExp(`value=${CANDIDATE_VERSION.replaceAll('.', '\\.')}\\s`));
+  for (const refName of ['v0.1.0-beta.23', 'v0.1.0-beta.24', 'v0.1.0-beta.24-rc2', CANDIDATE_VERSION, `vv${CANDIDATE_VERSION}`]) {
+    assert.notEqual(run(refName, CANDIDATE_VERSION).status, 0, 'A different tag must fail before packaging');
+    assert.equal(fs.readFileSync(output, 'utf8'), '', 'A rejected tag cannot publish a selected version');
+  }
 });
 
 test('Windows setup uses the tracked Scout icon', () => {
