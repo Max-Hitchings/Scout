@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import * as livingCv from './livingCv.mjs';
@@ -34,7 +35,9 @@ test('an external change stays a reviewable diff until the exact source and mast
   assert.equal(approved.profileReviewPending, true);
   assert.equal(fs.readFileSync(path.join(root, 'cv/master-cv.md'), 'utf8'), changed);
   assert.equal(approved.versions.length, 2);
-  assert.equal(fs.readFileSync(path.join(root, 'cv/versions', `${approved.versions[1].id}.md`), 'utf8'), changed);
+  const currentId = createHash('sha256').update(changed).digest('hex');
+  assert.ok(approved.versions.some(({ id }) => id === currentId));
+  assert.equal(fs.readFileSync(path.join(root, 'cv/versions', `${currentId}.md`), 'utf8'), changed);
 });
 
 test('source edits, local CV edits and workspace boundaries invalidate an old approval', (t) => {

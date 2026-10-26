@@ -65,3 +65,27 @@ test('phone thumbs-down feedback records a reason and stages a proposal without 
   expect(recorded).toMatchObject({ opportunityId: 'new-systems-product-2026-07', decision: 'not-interested', reason: 'responsibilities', learning: { field: 'title' } });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });
+
+test('phone cover-letter edits keep PDF download disabled until the saved draft is rendered again', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let saved;
+  const source = '# DRAFT\n\nA truthful synthetic cover letter.';
+  await page.route('**/api/cv', (route) => route.fulfill({ json: { applications: [], outreach: ['synthetic-letter'], entries: [], letters: [{ slug: 'synthetic-letter', pdf: true, current: true, pdfCurrent: true }] } }));
+  await page.route('**/api/cv/file**', (route) => route.fulfill({ contentType: 'text/plain', body: source }));
+  await page.route('**/api/cv/pdf**', (route) => route.fulfill({ contentType: 'application/pdf', body: '%PDF-1.7\nSynthetic draft PDF body.' }));
+  await page.route('**/api/cv/save', async (route) => { saved = route.request().postDataJSON(); await route.fulfill({ json: { ok: true } }); });
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => Boolean(window.Scout?.state?.cvFiles))).toBe(true);
+  await page.getByRole('button', { name: 'CV', exact: true }).click();
+  await page.locator('[data-cv-path="applications/synthetic-letter/outreach.md"]').click();
+  await expect(page.getByRole('button', { name: 'download PDF', exact: true })).toBeEnabled();
+  const editor = page.locator('#cv-text');
+  await editor.fill(source + '\nA reviewed edit.');
+  await expect(page.getByRole('button', { name: 'download PDF', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'save changes', exact: true }).click();
+  await expect(page.locator('#cv-status')).toContainText('Saved.');
+  expect(saved).toMatchObject({ path: 'applications/synthetic-letter/outreach.md', content: source + '\nA reviewed edit.' });
+  await expect(page.getByRole('button', { name: 'download PDF', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'render PDF', exact: true })).toBeEnabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});

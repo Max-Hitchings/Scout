@@ -1880,7 +1880,7 @@ const Scout = {
   },
 
   updateCvControls() {
-    const current = this.currentCvRenderState().current === true;
+    const current = !this.cvState.dirty && this.currentCvRenderState().current === true;
     for (const id of ['cv-download', 'cv-fullscreen', 'cv-open-pdf']) {
       const button = document.getElementById(id); if (button) button.disabled = !current;
     }
@@ -1909,6 +1909,13 @@ const Scout = {
     this.cvState.content = content;
     const dirty = document.getElementById('cv-dirty');
     if (dirty) dirty.textContent = '';
+    const request = this.currentCvRequest();
+    const catalogue = this.state.cvFiles;
+    const rendered = request?.target === 'master' ? catalogue?.masterRender
+      : (request?.target === 'cover-letter' ? catalogue?.letters : catalogue?.entries)?.find((entry) => entry.slug === request?.slug);
+    if (rendered) Object.assign(rendered, { current: false, pdfCurrent: false, stale: rendered.pdf === true, pdfStale: rendered.pdf === true });
+    this.updateCvControls();
+    await this.showStoredCv();
     this.setCvStatus('Saved. The PDF is out of date until you render it.');
   },
 
@@ -3167,6 +3174,7 @@ const Scout = {
       if (event.target.dataset.inputAction !== 'cv-dirty') return;
       this.cvState.dirty = true;
       this.cvState.content = event.target.value;
+      this.updateCvControls();
       const dirty = document.getElementById('cv-dirty');
       if (dirty) dirty.textContent = 'unsaved';
     });

@@ -2373,7 +2373,7 @@ routes['POST /api/cv/living/approve'] = (req, res, body) => {
     void scheduleCheckpoint('ui: approve Living CV');
     return replyJson(res, 200, status);
   } catch {
-    return replyJson(res, 409, publicApiError('The CV could not be approved. Confirm the exact diff, refresh it if either file changed, and retry when no scan is running. Your saved CV and history were kept.'));
+    return replyJson(res, 409, publicApiError('CV approval did not finish. Confirm the exact diff, refresh to recover or review any interrupted change, and retry when no scan is running. Existing versions and later edits are preserved.'));
   }
 };
 
