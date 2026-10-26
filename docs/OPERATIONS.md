@@ -36,6 +36,15 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   a compatible durable queue request; idle startup drains older compatible work
   before beginning new unqueued work, and interrupted claims resume under their
   original run identity.
+- Run-journal append authority uses a private process-local snapshot minted
+  only by full validation or a fenced, flushed append. Each warm append checks
+  the regular file's identity, size and nanosecond change/modify timestamps and
+  rereads up to 64 KiB of the exact validated tail. Changed or unavailable
+  metadata, a tail mismatch, a copied handle, reopen or interrupted write
+  requires full hash-chain validation. An existing writer also requires its
+  committed prefix to remain intact. Public handle fields and returned events
+  cannot supply cache authority. Recovery and inspection still validate the
+  complete journal; torn-tail classification and fencing are unchanged.
 - Recovery selects the newest run compatible with the requested mode, purpose,
   published profile, source/config fingerprint and versioned stage inputs. It
   records why newer incomplete candidates were skipped. Deterministic stages
