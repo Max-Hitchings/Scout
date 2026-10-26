@@ -106,6 +106,57 @@ for (const [status, reason] of [[401, 'authentication-required'], [403, 'authent
   }
 }
 
+test('a controlled deadline before HTTP response headers remains a network failure', async (t) => {
+  let requestSeen;
+  let expire;
+  const received = new Promise((resolve) => { requestSeen = resolve; });
+  let response;
+  const f = await fixture(t, (_req, res) => { response = res; requestSeen(); });
+  const schedule = globalThis.setTimeout;
+  // Keep the real HTTP request and AbortController; expose only the timer's
+  // firing so the ordering does not depend on a subsecond host scheduling race.
+  t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+    if (delay === 300 && new Error().stack.includes('localProvider.mjs')) {
+      expire = () => callback(...args);
+      return schedule(() => {}, 5000);
+    }
+    return schedule(callback, delay, ...args);
+  });
+  const selected = providerStatus('local', { root: f.root, local: { ...f.local, timeoutMs: 300 } });
+  const turn = runLocalTurn({ status: selected, prompt: 'Synthetic request.' });
+  let timer;
+  try {
+    await Promise.race([received, new Promise((_, reject) => {
+      timer = schedule(() => reject(new Error('Synthetic HTTP request did not reach its header boundary')), 5000);
+    })]);
+    assert.equal(response.headersSent, false);
+    assert.equal(typeof expire, 'function');
+    expire();
+    const result = await turn.finished;
+    assert.equal(result.reasonCode, 'network-unavailable', 'a status not yet received cannot become an authentication claim');
+    assert.equal(f.requests.length, 1);
+  } finally {
+    clearTimeout(timer);
+    turn.stop();
+    response?.end();
+    await turn.finished;
+  }
+});
+
+test('known-status body fixtures preserve their received-header boundary under controlled scheduling', () => {
+  const env = { ...process.env };
+  // This is an independent test runner, not a child in the parent's reporter
+  // protocol. Preserve every application/provider environment setting.
+  delete env.NODE_TEST_CONTEXT;
+  const child = spawnSync(process.execPath, [
+    '--import', new URL('./fixtures/knownHttpStatusClock.mjs', import.meta.url).href,
+    '--test', '--test-reporter=tap', '--test-name-pattern=stays authoritative', path.join(import.meta.dirname, 'localProvider.test.mjs'),
+  ], { env, encoding: 'utf8', timeout: 10000 });
+  assert.equal(child.status, 0, `Controlled HTTP header/deadline ordering failed: ${child.error?.code || child.stdout + child.stderr}`);
+  assert.match(child.stdout, /# tests 6\b/);
+  assert.match(child.stdout, /# pass 6\b/);
+});
+
 test('an oversized local authentication response establishes a durable barrier until real success', async (t) => {
   let healthy = false;
   const f = await fixture(t, (_req, res) => {
