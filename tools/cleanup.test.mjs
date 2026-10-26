@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { seedWorkspace } from '../ui/lib/workspace.mjs';
 import { initializeRecoveryBackup, verifyReviewedRunArchive } from '../ui/lib/recoveryBackup.mjs';
@@ -32,7 +32,7 @@ function fixture(t) {
   saveSyncSettings(root, { enabled: true, dataKey: key.dataKey.toString('base64url') });
   const env = { ...process.env, SCOUT_WORKSPACE: root, SCOUT_HOUSEHOLD_SETTINGS: path.join(parent, 'household.json'), SCOUT_DEVICE_SETTINGS: path.join(parent, 'device.json') };
   const cli = (...args) => spawnSync(process.execPath, [path.join(app, 'tools/scout.mjs'), 'cleanup', '--workspace', root, ...args], { env, cwd: app, encoding: 'utf8', timeout: 30000 });
-  return { root, parent, cli, key };
+  return { root, parent, cli, key, env };
 }
 test('actual cleanup CLI lists, reviews and archives only an explicit old selection', (t) => {
   const { root, parent, cli, key } = fixture(t);
@@ -234,4 +234,51 @@ test('cleanup plan creation detects a substituted canonical parent before writin
   assert.equal(replaced, true);
   assert.deepEqual(fs.readdirSync(displaced), []);
   assert.deepEqual(fs.readdirSync(directory), [], 'the exact newly created empty file is cleaned up');
+});
+
+test('reviewed queue apply refuses a legitimate overlapping enqueue after its caller precheck', async (t) => {
+  const { enqueueScanRequest, projectScanQueue } = await import('../ui/lib/scanQueue.mjs');
+  const { root, parent, cli, env } = fixture(t);
+  const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: 'synthetic-queue-race' });
+  try { enqueueScanRequest(root, { id: 'synthetic-expired-review', key: 'synthetic-expired-review', requester: 'manual', purpose: 'job-discovery',
+    requestedAt: '2020-01-01T00:00:00.000Z', expiresAt: '2020-01-02T00:00:00.000Z', windowAt: null,
+    compatibility: { schemaVersion: 1, profileFingerprint: 'a'.repeat(64), configFingerprint: 'b'.repeat(64) }, lease }); }
+  finally { releaseScanLease(lease); }
+  const file = path.join(parent, 'race-review.json');
+  const planned = cli('--plan', '--queue', '--output', file);
+  assert.equal(planned.status, 0, planned.stderr);
+  const review = JSON.parse(planned.stdout);
+  const preload = path.join(parent, 'concurrent-queue.mjs');
+  const trace = path.join(parent, 'concurrent-result.json');
+  const queueModule = pathToFileURL(path.join(app, 'ui/lib/scanQueue.mjs')).href;
+  const leaseModule = pathToFileURL(path.join(app, 'ui/lib/scanLease.mjs')).href;
+  fs.writeFileSync(preload, `
+import fs from 'node:fs';
+import path from 'node:path';
+import { enqueueOverlappingScanRequest } from ${JSON.stringify(queueModule)};
+import { readScanLease } from ${JSON.stringify(leaseModule)};
+const root = process.env.SCOUT_WORKSPACE;
+const queue = path.join(root, '.scout/scan-queue.jsonl');
+const original = fs.readFileSync;
+let submitted = false;
+fs.readFileSync = function(file, ...args) {
+  const stack = new Error().stack;
+  if (!submitted && file === queue && stack.includes('queueCleanupContents') && stack.includes('compactScanQueue')) {
+    submitted = true;
+    const at = new Date().toISOString();
+    const { leaseId, generation, runId, operation } = readScanLease(root);
+    const result = enqueueOverlappingScanRequest(root, { id: 'synthetic-concurrent', key: 'synthetic-concurrent', requester: 'manual', purpose: 'job-discovery',
+      requestedAt: at, expiresAt: new Date(Date.parse(at) + 86400000).toISOString(), windowAt: null,
+      compatibility: { schemaVersion: 1, profileFingerprint: 'a'.repeat(64), configFingerprint: 'b'.repeat(64) }, observedLease: { leaseId, generation, runId, operation } });
+    fs.writeFileSync(${JSON.stringify(trace)}, JSON.stringify({ status: result.status }));
+  }
+  return original.call(fs, file, ...args);
+};
+`);
+  const applied = spawnSync(process.execPath, ['--import', preload, path.join(app, 'tools/scout.mjs'), 'cleanup', '--workspace', root, '--apply', file, '--confirm', review.reviewDigest], { env, cwd: app, encoding: 'utf8', timeout: 30000 });
+  assert.equal(JSON.parse(fs.readFileSync(trace, 'utf8')).status, 'enqueued');
+  assert.notEqual(applied.status, 0, 'the compactor must use the reviewed queue digest, even after a legitimate new request');
+  assert.deepEqual(projectScanQueue(root).requests.map((item) => item.id).sort(), ['synthetic-concurrent', 'synthetic-expired-review']);
+  const operations = path.join(root, '.scout/queue-compactions');
+  assert.equal(fs.existsSync(operations) && fs.readdirSync(operations).length > 0, false, 'no unreviewed prepared intent is published');
 });
