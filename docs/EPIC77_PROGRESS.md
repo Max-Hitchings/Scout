@@ -237,3 +237,19 @@ a new request deliberately; automatic replay is never attempted.
   pending intent preserves failure/recovery episodes until publication. The
   independent 64-record operational reserve retires superseded/resolved history
   while retaining current warnings and monotonic episode identities.
+
+## 2026-10-26 — native and browser acceptance (Codex)
+
+The test-only native contract was pushed after a green full Linux Node suite.
+Hosted Windows run 40289028575, job121459460790 then observed RED at the actual
+C# compiler: CS0246, missing NotificationDeliveryState. Its implementation now
+shares real shown-event and receipt state with an executable C# assertion suite.
+The same native test measures staged/default Windows paths and a byte-preserving
+round trip beyond MAX_PATH. Linux skips that native test honestly.
+
+Expanded CI exercises all three browsers on Ubuntu, Windows and both macOS
+architectures. Initial WebKit execution exposed service-worker routing isolation,
+Safari modal return focus and a real unhandled backup-queue rejection. The
+queue rejection reproduced RED in a disposable child process and passed after
+its internal tail was observed. Hosted GREEN and installed-artifact acceptance
+remain pending until actually executed; F-1 packaging remains separately owned.

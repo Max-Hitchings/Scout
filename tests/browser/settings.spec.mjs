@@ -98,6 +98,8 @@ test('remote owner setup does not request the host-only recovery key', async ({ 
   await expect(page.getByRole('dialog')).toBeHidden();
 });
 
+test.describe('service worker installation', () => {
+  test.use({ serviceWorkers: 'allow' });
 test('first service worker installation does not pretend Scout has updated', async ({ page }) => {
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
@@ -106,6 +108,8 @@ test('first service worker installation does not pretend Scout has updated', asy
     }
   });
   await expect(page.locator('#ui-update-banner')).toBeHidden();
+});
+
 });
 
 test('a verified update download presents a safe package name and actionable location alias', async ({ page }) => {

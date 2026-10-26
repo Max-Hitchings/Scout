@@ -2971,6 +2971,9 @@ const Scout = {
   },
 
   runAction(element) {
+    // Safari does not focus buttons on a mouse click. Capture the actual
+    // trigger before a modal's mutation observer records its return target.
+    element.focus?.({ preventScroll: true });
     const { action, id, key, tab, date, index, slug, prefill, prompt, engine } = element.dataset;
     switch (action) {
       case 'review-search-profile': return window.ScoutSetup?.openSettings?.('search');
@@ -3312,11 +3315,15 @@ const Scout = {
     window.addEventListener?.('online', () => this.loadOpportunities().catch(() => this.setHostAvailable(false)));
     document.querySelectorAll('nav button').forEach((b) =>
       b.addEventListener('click', () => {
+        b.focus({ preventScroll: true });
         if (b.id === 'scout-settings') window.ScoutSetup?.openSettings?.();
         else if (b.dataset.tab) this.showTab(b.dataset.tab);
       }));
     document.getElementById?.('scan-now')?.addEventListener('click', () => this.scanNow());
-    document.getElementById?.('sync-status')?.addEventListener('click', () => window.ScoutSetup?.openBackupDetails?.());
+    document.getElementById?.('sync-status')?.addEventListener('click', (event) => {
+      event.currentTarget.focus({ preventScroll: true });
+      window.ScoutSetup?.openBackupDetails?.();
+    });
     document.getElementById?.('cv-options-cancel')?.addEventListener('click', () => this.closeCvOptions());
     document.getElementById?.('cv-options-continue')?.addEventListener('click', () => this.startCvFromOptions());
     this.bindDelegatedActions();

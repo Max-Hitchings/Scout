@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import { expect, test } from '@playwright/test';
 
+test.use({ serviceWorkers: 'allow' });
+
 const UI_ROOT = new URL('../../ui/', import.meta.url);
 const text = (name) => fs.readFileSync(new URL(name, UI_ROOT), 'utf8');
 const binary = (name) => fs.readFileSync(new URL(name, UI_ROOT));
