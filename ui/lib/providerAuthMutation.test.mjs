@@ -102,7 +102,7 @@ function mixedContender(root, kind) {
   });
 }
 
-function temporaryLiveGuard(root, holdMs = 100, { replaceDuringCleanup = false } = {}) {
+function temporaryLiveGuard(root, holdMs = 100, { replaceDuringCleanup = false, retireFailures = 0 } = {}) {
   const scanLeaseUrl = new URL('./scanLease.mjs', import.meta.url).href;
   const source = `
     import fs from 'node:fs';
@@ -125,15 +125,40 @@ function temporaryLiveGuard(root, holdMs = 100, { replaceDuringCleanup = false }
         return originalRemove(target, options);
       };
     }
+    let retireFailures = Number(process.env.RETIRE_FAILURES || 0);
+    const originalRename = fs.renameSync;
+    fs.renameSync = (source, target) => {
+      if (source === guard && String(target).includes('.fixture-retired-') && retireFailures-- > 0) {
+        throw Object.assign(new Error('synthetic transient sharing violation'), { code: 'EPERM' });
+      }
+      return originalRename(source, target);
+    };
     process.stdout.write('ready\\n');
     setTimeout(() => {
       const retired = guard + '.fixture-retired-' + process.pid;
-      fs.renameSync(guard, retired);
-      fs.rmSync(retired, { recursive: true, force: true });
+      const deadline = Date.now() + 1000;
+      const retire = () => {
+        try {
+          const record = JSON.parse(fs.readFileSync(path.join(guard, 'owner.json'), 'utf8'));
+          if (record.token !== ['temporary', 'live', 'guard', '0001'].join('-')) return;
+          fs.renameSync(guard, retired);
+        } catch (error) {
+          if (error.code === 'ENOENT') return;
+          if (['EPERM', 'EACCES', 'EBUSY'].includes(error.code) && Date.now() < deadline) {
+            setTimeout(retire, 5);
+            return;
+          }
+          throw error;
+        }
+        // Only this detached fixture directory is removed. Windows can hold
+        // short-lived sharing handles while the real contender reads it.
+        fs.rmSync(retired, { recursive: true, force: true, maxRetries: 10, retryDelay: 10 });
+      };
+      retire();
     }, Number(process.env.HOLD_MS));
   `;
   const child = spawn(process.execPath, ['--input-type=module', '--eval', source], {
-    env: { ...process.env, SCOUT_AUTH_ROOT: root, HOLD_MS: String(holdMs), REPLACE_DURING_CLEANUP: String(replaceDuringCleanup) },
+    env: { ...process.env, SCOUT_AUTH_ROOT: root, HOLD_MS: String(holdMs), REPLACE_DURING_CLEANUP: String(replaceDuringCleanup), RETIRE_FAILURES: String(retireFailures) },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -287,6 +312,15 @@ test('the temporary live guard fixture cannot remove a successor during cleanup'
   const file = path.join(root, '.scout', 'provider-auth', 'v1', 'codex.guard', 'owner.json');
   assert.equal(fs.existsSync(file), true, 'fixture cleanup must preserve the successor guard');
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).token, 'synthetic-successor-guard');
+});
+
+test('the temporary guard fixture settles after a transient Windows sharing violation', async (t) => {
+  const root = workspace(t);
+  const child = await temporaryLiveGuard(root, 100, { retireFailures: 1 });
+  const closed = await child.fixtureClosed;
+  assert.equal(closed.status, 0, closed.stderr || 'fixture retirement must tolerate a transient sharing violation');
+  const work = acquireProviderWork(root, 'codex', { owner, durationMs: 5_000, workId: 'after-sharing-failure' });
+  assert.equal(releaseProviderWork(root, work), true);
 });
 
 test('release reports bounded guard timeout and preserves durable authority', (t) => {
