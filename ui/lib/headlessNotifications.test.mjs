@@ -170,19 +170,33 @@ test('runtime quiescence stops further outbound alerts after the current child c
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-for (const condition of ['temporarily-busy', 'always-busy', 'shutdown', 'disk-error', 'lost-ownership']) {
-  test(`successful outbound transport settles its receipt safely under ${condition}`, async () => {
+for (const condition of ['temporarily-busy', 'always-busy', 'shutdown', 'shutdown-during-wait', 'budget-during-wait', 'disk-error', 'lost-ownership']) {
+  test(`successful outbound transport settles its receipt safely under ${condition}`, async (t) => {
     const { dispatchHeadlessNotifications } = await import('./headlessNotifications.mjs');
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-outbound-receipt-'));
     const file = path.join(root, 'outbound.json');
     fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, enabled: true, type: 'webhook',
       url: 'http://127.0.0.1:8000/notify', timeoutMs: condition === 'shutdown' ? 10000 : 100 }), { mode: 0o600 });
     let sent = 0; let attempts = 0; let admission = true;
+    let receiptClock = 0;
+    if (condition === 'budget-during-wait') {
+      const now = performance.now.bind(performance);
+      t.mock.method(performance, 'now', () => new Error().stack.includes('persistDeliveryReceipt') ? receiptClock : now());
+    }
     let replacement;
     const ownerFile = path.join(root, '.scout', 'outbound-dispatch.lock', 'owner.json');
     const api = { refreshNotificationDigest: () => ({ outbox: [alert] }), markNotification() {
       attempts++;
       if (condition === 'temporarily-busy' && attempts > 1) return;
+      if (condition === 'shutdown-during-wait' || condition === 'budget-during-wait') {
+        if (attempts > 1) return;
+        // Change admission/monotonic time after the busy catch has scheduled
+        // its wait, so the next attempt must independently recheck both.
+        queueMicrotask(() => {
+          if (condition === 'shutdown-during-wait') admission = false;
+          else receiptClock = 1000;
+        });
+      }
       if (condition === 'shutdown') admission = false;
       if (condition === 'lost-ownership') {
         replacement = { ...JSON.parse(fs.readFileSync(ownerFile)), token: randomUUID() };
