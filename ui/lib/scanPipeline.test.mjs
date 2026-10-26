@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
-  assessScanCandidates, assessmentCandidatesForSelection, buildAssessmentPrompt, compactCandidates, createRankedDiscoveryStages, DEFAULT_CANDIDATE_LIMIT, durableScanProjection, gateAssessment, inboxRecheckCandidates, prepareRankedDiscovery, promptCandidate,
+  assessScanCandidates, assessmentCandidatesForSelection, buildAssessmentPrompt, compactCandidates, coordinateScanArtifacts, createRankedDiscoveryStages, DEFAULT_CANDIDATE_LIMIT, durableScanProjection, gateAssessment, inboxRecheckCandidates, prepareRankedDiscovery, promptCandidate,
   filterVacancies, PipelineInterruptedError, readRejectedVacancyMemory, readVacancyDecisionHistory, runScanPipeline, validateAssessments, validateWrittenScanArtifacts,
   verificationCandidates, writeScanArtifacts,
 } from './scanPipeline.mjs';
@@ -1334,6 +1334,88 @@ test('failed assessment reconciles selected candidates as assessment failures', 
   });
   assert.equal(artifacts.run.funnel.assessmentFailed, 1);
   assert.equal(artifacts.run.selection_summary.assessmentFailed, 1);
+});
+
+function unchangedKeeperFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-unchanged-keeper-'));
+  fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'data', 'opportunities.json'), JSON.stringify({ opportunities: [] }));
+  const candidate = {
+    candidateId: 'candidate-001', vacancyId: 'vacancy-synthetic', company: 'Synthetic Studio', role: 'Synthetic role',
+    source: 'ats', url: 'https://example.test/job', preRankScore: 90,
+  };
+  const input = {
+    provider: 'codex', mode: 'primary', profileId: 'profile-synthetic', discoveryEngine: 'ranked-discovery',
+    sources: { ats: { configured: true, status: 'healthy', count: 1 } },
+    candidates: [candidate], ranked: [candidate], assessmentResult: { assessments: [assessment('met')] }, policy: {},
+    selectionDecision: { threshold: 50, selected: [candidate], notSelected: [], assessmentSkipped: [], reasons: [] },
+    funnel: {
+      sourceRecords: 1, sourceErrors: 0, failedSourceRecords: 0, parsed: 1, normalised: 1, duplicateObservations: 0,
+      uniqueVacancies: 1, deterministicallyExcluded: 0, eligible: 1, ranked: 1, aboveThreshold: 1,
+      selected: 1, assessed: 1, assessmentFailed: 0, added: 0, updated: 0, unchanged: 0, closed: 0,
+      bySource: { ats: { count: 1, failedRecords: 0, sourceErrors: 0 } },
+    },
+  };
+  return { root, candidate, input };
+}
+
+test('repeated assessed keeper content reconciles as unchanged while verification dates advance', () => {
+  const { root, candidate, input } = unchangedKeeperFixture();
+  try {
+    const first = writeScanArtifacts(root, { ...input, startedAt: '2026-10-23T10:00:00.000Z', timestamp: '2026-10-23T10:00:00.000Z' });
+    assert.equal(first.run.funnel.added, 1);
+    const second = writeScanArtifacts(root, { ...input, startedAt: '2026-10-24T10:00:00.000Z', timestamp: '2026-10-24T10:00:00.000Z' });
+    assert.equal(second.run.funnel.unchanged, 1);
+    assert.equal(second.run.funnel.updated, 0);
+    assert.equal(second.run.funnel.bySource.ats.unchanged, 1);
+    assert.equal(second.run.explanations[0].tracker_outcome, 'unchanged');
+    const tracker = JSON.parse(fs.readFileSync(path.join(root, 'data', 'opportunities.json')));
+    assert.equal(tracker.opportunities[0].lastChecked, '2026-10-24');
+    const changed = writeScanArtifacts(root, {
+      ...input, candidates: [{ ...candidate, preRankScore: 94 }],
+      startedAt: '2026-10-25T10:00:00.000Z', timestamp: '2026-10-25T10:00:00.000Z',
+    });
+    assert.equal(changed.run.funnel.updated, 1);
+    assert.equal(changed.run.funnel.unchanged, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('receipted scan projection preserves an unchanged keeper through the next coordinated scan', () => {
+  const { root, input, candidate } = unchangedKeeperFixture();
+  candidate.description = 'Design distributed database architecture deliver reliable cloud infrastructure implement observability tooling mentor engineers improve security automation';
+  const execute = (id) => {
+    const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: id });
+    const run = openRunJournal(root, id);
+    try {
+      appendRunEvent(run, {
+        type: 'run.started', stageId: 'initialise', idempotencyKey: `start-${id}`,
+        payload: { schemaVersion: 1, compatibility: RECOVERY_COMPATIBILITY },
+      }, lease);
+      return coordinateScanArtifacts(root, { ...input, startedAt: new Date().toISOString() }, { run, lease });
+    } finally {
+      releaseScanLease(lease);
+    }
+  };
+  try {
+    assert.equal(execute('synthetic-keeper-first').run.funnel.added, 1);
+    const second = execute('synthetic-keeper-second');
+    assert.equal(second.run.funnel.unchanged, 1);
+    assert.equal(second.run.funnel.bySource.ats.unchanged, 1);
+    assert.equal(second.run.explanations[0].tracker_outcome, 'unchanged');
+    assert.equal(second.run.reviewed[0].trackerOutcome, 'unchanged');
+    assert.deepEqual(second.tracker.opportunities[0].tags, []);
+    assert.ok(second.mutationReceipt);
+    assert.equal(execute('synthetic-keeper-third').run.funnel.unchanged, 1);
+    input.candidates = [{ ...candidate, description: 'Coordinate warehouse shipping transport inventory freight logistics procurement packaging distribution dispatch deliveries cargo stock returns' }];
+    const changed = execute('synthetic-keeper-changed');
+    assert.equal(changed.run.funnel.updated, 1);
+    assert.ok(changed.tracker.opportunities[0].tags.includes('Updated advert — review'));
+    assert.equal(execute('synthetic-keeper-changed-repeat').run.funnel.unchanged, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('forty zero-keeper candidates produce a bounded sanitised audit without tracker padding', () => {

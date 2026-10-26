@@ -8,6 +8,33 @@ import {
   publicStoragePressure, readPublicRunSummaries, readPublicStoragePressure, scanHealthFromText,
 } from './scanHealth.mjs';
 import { DURABLE_RUN_STATES, RUN_STATE_LABELS } from './durableRunStates.mjs';
+import { acquireScanLease, currentLeaseOwner, releaseScanLease } from './scanLease.mjs';
+import { enqueueScanRequest, projectScanQueue } from './scanQueue.mjs';
+
+test('scheduled queue requests are presented truthfully without changing durable deduplication', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-queue-purpose-'));
+  const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: 'synthetic-purpose' });
+  try {
+    enqueueScanRequest(root, {
+      id: 'synthetic-scheduled-request', key: 'synthetic-schedule', requester: 'scheduled',
+      purpose: 'manual-discovery',
+      requestedAt: '2026-10-25T10:00:00.000Z', windowAt: '2026-10-25T11:00:00.000Z',
+      expiresAt: '2026-10-25T11:00:00.000Z',
+      compatibility: { profileFingerprint: 'a'.repeat(64), configFingerprint: 'b'.repeat(64), schemaVersion: 1 },
+      lease,
+    });
+    const durable = projectScanQueue(root);
+    const before = JSON.stringify(durable);
+    const view = publicQueueSummary(durable);
+    assert.equal(view.requests[0].requester, 'scheduled');
+    assert.equal(view.requests[0].purpose, 'scheduled-discovery');
+    assert.equal(JSON.stringify(projectScanQueue(root).requests), JSON.stringify(durable.requests));
+    assert.equal(JSON.stringify(durable), before);
+  } finally {
+    releaseScanLease(lease);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('parseScanRuns parses jsonl and reports bad lines', () => {
   const out = parseScanRuns('{"timestamp":"2026-07-08T07:30:00"}\nnope\n');

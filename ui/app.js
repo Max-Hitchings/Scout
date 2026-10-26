@@ -349,6 +349,8 @@ const Scout = {
   },
 
   async loadOpportunities({ durableRuns: suppliedRuns, durableQueue: suppliedQueue } = {}) {
+    const generation = (this.opportunitiesGeneration || 0) + 1;
+    this.opportunitiesGeneration = generation;
     const [data, cvFiles, latest, durableRuns, durableQueue, feedbackLearning] = await Promise.all([
       this.api('/api/opportunities'),
       this.api('/api/cv'),
@@ -361,6 +363,7 @@ const Scout = {
         : Promise.resolve(suppliedQueue),
       this.api('/api/feedback-learning').catch(() => null),
     ]);
+    if (this.opportunitiesGeneration !== generation) return;
     this.state.data = data;
     this.state.cvFiles = cvFiles;
     this.latestScan = latest?.scan || null;
@@ -371,18 +374,19 @@ const Scout = {
       : { state: 'waiting', requests: [] };
     this.feedbackLearning = feedbackLearning;
     this.applyWorkspaceConfig(this.state.data.workspaceConfig, { render: false });
+    this.renderDiscoveryMode();
     const h = this.state.data.scanHealth;
     const activeRun = this.scanRuns.find((run) => !['complete', 'partial', 'abandoned', 'failed'].includes(run.state));
     const queuedCount = this.scanQueue.requests.filter((request) => request.status === 'queued').length;
     const status = document.getElementById('scan-status');
     if (status && !this.scanRunning) {
-      status.textContent = activeRun
+      this.setScanStatus(activeRun
         ? `${activeRun.label || 'Scan in progress'}${activeRun.assessment?.totalBatches ? ` · batch ${activeRun.assessment.currentBatch} of ${activeRun.assessment.totalBatchesExact ? '' : 'at least '}${activeRun.assessment.totalBatches}` : ''}`
         : queuedCount
         ? `${queuedCount} queued ${queuedCount === 1 ? 'request' : 'requests'}`
         : h?.lastRunAt
         ? `Last scan: ${Number(h.funnel?.assessed ?? h.candidatesFound ?? 0)} assessed · ${Number(h.keepersAdded || 0)} kept`
-        : 'Waiting to scan';
+        : 'Waiting to scan');
       status.dataset.action = h?.lastRunAt ? 'open-scan-result' : '';
       status.tabIndex = h?.lastRunAt ? 0 : -1;
       status.setAttribute('role', h?.lastRunAt ? 'button' : 'status');
@@ -395,12 +399,29 @@ const Scout = {
     this.queueStrongMatches();
   },
 
+  renderDiscoveryMode() {
+    const banner = document.getElementById('discovery-mode-banner');
+    if (!banner) return;
+    const legacy = this.state.data?.discoveryEngine === 'legacy-discovery';
+    banner.classList.toggle('hidden', !legacy);
+    banner.innerHTML = legacy
+      ? '<p><strong>Earlier search settings are active.</strong> Scout can still scan using your earlier setup. It starts ranking the complete pool only after you review and publish your search profile.</p><button class="act" type="button" data-action="review-search-profile">Review search profile</button>'
+      : '';
+  },
+
+  setScanStatus(message) {
+    const status = document.getElementById('scan-status');
+    if (!status) return;
+    status.textContent = message;
+    status.title = message;
+  },
+
   async scanNow({ provider } = {}) {
     if (this.scanRunning || this.chat?.streaming) return;
     const button = document.getElementById('scan-now');
     this.scanRunning = true;
     if (button) { button.disabled = true; button.textContent = 'Scanning…'; }
-    document.getElementById('scan-status').textContent = 'Scout is searching now…';
+    this.setScanStatus('Scout is searching now…');
     try {
       const response = await fetch('/api/scan', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -411,7 +432,7 @@ const Scout = {
       this.showOperation(result.operation);
       this.watchScanOperation(result.operation.id);
     } catch (error) {
-      document.getElementById('scan-status').textContent = error.message;
+      this.setScanStatus(error.message);
       this.scanRunning = false;
       if (button) { button.disabled = false; button.textContent = 'Scan now'; }
     }
@@ -439,10 +460,10 @@ const Scout = {
         remaining = lowMinutes < 1 ? `about ${highMinutes} min or less remaining` : `about ${lowMinutes}–${highMinutes} min remaining`;
       }
     }
-    status.textContent = operation.status === 'failed'
+    this.setScanStatus(operation.status === 'failed'
       ? `Scan needs attention: ${operation.error || 'unknown error'}`
       : operation.status === 'succeeded' ? 'Scan completed — refreshing results…'
-        : `${operation.phase || 'Scout is searching'} · ${step} · ${elapsed}${remaining ? ` · ${remaining}` : ''}`;
+        : `${operation.phase || 'Scout is searching'} · ${step} · ${elapsed}${remaining ? ` · ${remaining}` : ''}`);
   },
 
   discardBreakdown(scan = this.latestScan || this.state.data?.scanHealth) {
@@ -1073,7 +1094,7 @@ const Scout = {
     const overlay = document.getElementById('scan-result-overlay');
     document.getElementById('scan-result-body').innerHTML = `
       <p><strong>${this.esc(scan.funnel?.assessed ?? scan.candidatesFound)} assessed, ${this.esc(scan.keepersAdded)} kept</strong>${this.discardBreakdown(scan) ? ` — ${this.esc(this.discardBreakdown(scan))}` : ''}.</p>
-      ${scan.automaticBroadened ? '<div class="setup-callout"><strong>Discovery widened automatically</strong><p>Scout ran one broader query pass but kept every approved salary, location, commute, exclusion and evidence gate.</p></div>' : ''}
+      ${scan.automaticBroadened ? '<div class="setup-callout"><strong>Discovery widened automatically</strong><p>Scout ran one broader query pass but kept every approved salary, location, exclusion and evidence gate. Commute preferences guide assessments and dashboard display; they do not filter ranked discovery.</p></div>' : ''}
       ${coverage}
       ${coverageDimensions}
       ${failureReasons}
@@ -2932,6 +2953,7 @@ const Scout = {
   runAction(element) {
     const { action, id, key, tab, date, index, slug, prefill, prompt, engine } = element.dataset;
     switch (action) {
+      case 'review-search-profile': return window.ScoutSetup?.openSettings?.('search');
       case 'show-discovery': return this.showDiscovery();
       case 'dismiss-discoveries': return this.dismissDiscoveries();
       case 'sort': return this.setSort(key);
