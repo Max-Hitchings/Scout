@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { normaliseObservation } from './vacancyObservation.mjs';
 import {
   canonicaliseObservations, classifyVacancyChange, vacancyContentFingerprint,
@@ -387,4 +389,31 @@ test('canonicalisation rejects semantic responsibility overflow instead of trunc
     () => canonicaliseObservations([semantic]),
     /responsibility evidence exceeds the supported limit/,
   );
+});
+
+test('5,000 distinct vacancies and their durable identities canonicalise within a bounded scan budget', (t) => {
+  const benchmark = spawnSync(process.execPath, [fileURLToPath(new URL('./fixtures/canonical-scale.mjs', import.meta.url)), '5000'], {
+    encoding: 'utf8', timeout: 30000, windowsHide: true,
+  });
+  assert.equal(benchmark.status, 0, `scale fixture failed or exceeded 30 seconds: ${benchmark.error?.code || benchmark.stderr}`);
+  const measured = JSON.parse(benchmark.stdout);
+  t.diagnostic(`5,000 vacancies including durable reconciliation: ${measured.elapsedMs.toFixed(1)} ms wall; ${measured.cpuMs.toFixed(1)} ms CPU`);
+  assert.equal(measured.count, 5000);
+  assert.equal(measured.stable, true);
+  assert.ok(measured.cpuMs < 5000, `canonicalisation used ${measured.cpuMs.toFixed(1)} ms CPU; budget is 5000 ms`);
+});
+
+test('adding country-currency provenance preserves unchanged historical compensation fingerprints', () => {
+  const original = canonicaliseObservations([observation({
+    salaryMin: 60000, salaryMax: 70000, salaryCurrency: 'GBP', salaryPeriod: 'year', salaryRateType: 'salary',
+  })]).vacancies[0];
+  const refreshed = canonicaliseObservations([observation({
+    salaryMin: 60000, salaryMax: 70000, salaryCurrency: 'GBP', salaryPeriod: 'year', salaryRateType: 'salary',
+    salaryCurrencyProvenance: 'queried-country',
+  })]).vacancies[0];
+  assert.equal(refreshed.compensation.value.currencyProvenance, 'queried-country');
+  assert.equal(classifyVacancyChange({ ...original, contentFingerprint: vacancyContentFingerprint(original) }, refreshed), 'unchanged');
+  assert.equal(classifyVacancyChange(original, {
+    ...refreshed, compensation: { ...refreshed.compensation, value: { ...refreshed.compensation.value, currency: 'USD' } },
+  }), 'material');
 });

@@ -10,8 +10,14 @@ const REJECTED_OUTCOMES = new Set([
   'hard_exclusion',
 ]);
 
+export function normaliseVacancyOutcome(value) {
+  const supplied = String(value || '').trim().toLowerCase();
+  const canonical = supplied.replaceAll('-', '_');
+  return REJECTED_OUTCOMES.has(canonical) ? canonical : supplied;
+}
+
 export function rejected(previous) {
-  return REJECTED_OUTCOMES.has(String(previous?.outcome || previous?.status || '').toLowerCase());
+  return REJECTED_OUTCOMES.has(normaliseVacancyOutcome(previous?.outcome || previous?.status));
 }
 
 // A changed prompt, schema or model can overturn an earlier rejection, but re-testing every rejection at once would

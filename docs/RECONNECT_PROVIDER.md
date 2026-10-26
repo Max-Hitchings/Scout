@@ -28,12 +28,14 @@ Scout does not replay blocked work by itself, because that spends your provider 
 
 Both use the normal scan safeguards: only one scan runs at a time, and a second request waits or is refused rather than overlapping. **Not now** hides the notice until you reload the page; it returns if the work is still waiting.
 
-A chat message that failed because of the expired session stays in the conversation. Send it again once you have reconnected.
+A chat message that failed because of the expired session stays in the conversation, including after closing Scout. Once you have reconnected, choose **Resend with Codex** or **Resend with Claude** beside that saved message. Scout sends the same saved request only after you press the button, keeps one copy of your message, and refuses a second use of a completed resend. Writing a different message starts a new request.
+
+An installed provider can show **sign-in found but not yet verified**. That means its local command found credentials; it does not prove the remote provider accepts them. A known remote sign-in failure stays authoritative through refreshes, local login checks and sign-in progress until a real remote check succeeds. Guided sign-in performs that check. If a manual terminal login leaves the warning in place, use guided sign-in to complete verification; refreshing local status alone cannot clear a rejected remote session.
 
 ## Check that it worked
 
 1. The amber notice is gone, or reads "signed in again".
-2. **Settings -> AI providers** shows the provider as signed in.
+2. **Settings -> AI providers** shows the provider as signed in. Its card, sign-in panel and diagnostic readiness use the same health evidence.
 3. After **Run missed scan now** or **Retry now**, the scan status at the top of the page shows the scan in progress, and the new run appears among the latest scan results.
 
 If the notice returns straight away, the sign-in did not complete or the provider rejected it. Repeat the steps, and see [troubleshooting](TROUBLESHOOTING.md#scheduled-scan-does-not-run) and [AI providers](PROVIDERS.md) for other provider states such as a network problem, a rate limit or a CLI that needs updating.

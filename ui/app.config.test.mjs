@@ -33,6 +33,49 @@ function loadScout() {
   return { scout: context.window.Scout, context };
 }
 
+test('an earlier opportunities response cannot replace the latest rendered tracker', async () => {
+  const { scout, context } = loadScout();
+  context.document.getElementById = () => null;
+  const pending = [];
+  scout.api = (url) => url === '/api/opportunities'
+    ? new Promise((resolve) => pending.push(resolve))
+    : Promise.resolve({});
+  const rendered = [];
+  scout.renderJobs = () => rendered.push(scout.state.data.opportunities[0].notes);
+  for (const name of ['renderSpeculative', 'renderShortlist', 'renderPipeline', 'renderAll', 'queueStrongMatches', 'applyWorkspaceConfig']) scout[name] = () => {};
+  const older = scout.loadOpportunities();
+  const newer = scout.loadOpportunities();
+  pending[1]({ opportunities: [{ id: 'synthetic-role', notes: 'Latest saved note' }] });
+  await newer;
+  pending[0]({ opportunities: [{ id: 'synthetic-role', notes: 'Outdated note' }] });
+  await older;
+  assert.equal(scout.state.data.opportunities[0].notes, 'Latest saved note');
+  assert.deepEqual(rendered, ['Latest saved note']);
+});
+
+test('legacy search is disclosed until publication and opens the profile review', async () => {
+  const { scout, context } = loadScout();
+  const banner = { innerHTML: '', hidden: true, classList: { toggle(_name, hidden) { banner.hidden = hidden; } } };
+  context.document.getElementById = (id) => id === 'discovery-mode-banner' ? banner : null;
+  let section;
+  context.window.ScoutSetup = { openSettings(value) { section = value; } };
+  let engine = 'legacy-discovery';
+  scout.api = async (url) => url === '/api/opportunities'
+    ? { discoveryEngine: engine, opportunities: [] }
+    : {};
+  for (const name of ['renderJobs', 'renderSpeculative', 'renderShortlist', 'renderPipeline', 'renderAll', 'queueStrongMatches', 'applyWorkspaceConfig']) scout[name] = () => {};
+  await scout.loadOpportunities();
+  assert.match(banner.innerHTML, /Earlier search settings are active/);
+  assert.match(banner.innerHTML, /ranking the complete pool/);
+  assert.equal(banner.hidden, false);
+  scout.runAction({ dataset: { action: 'review-search-profile' } });
+  assert.equal(section, 'search');
+  engine = 'ranked-discovery';
+  await scout.loadOpportunities();
+  assert.equal(banner.hidden, true);
+  assert.equal(banner.innerHTML, '');
+});
+
 test('custom CV recommendations are preselected but remain optional', () => {
   const html = fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   assert.match(html, /id="cv-option-xyz"[^>]*checked/);

@@ -22,8 +22,8 @@ export function providerRecoveryView(root, config, runs = [], read = readProvide
     // Only the newest run counts: a later success means nothing is waiting.
     const manualBlocked = own[0]?.scheduleJobId === null && blockedBySignIn(own[0]);
     const signInRequired = record.state === 'sign-in-required';
-    // validateRecord ties a null alert to the usable states.
-    const signedIn = record.alert === null && record.checkedAt !== null;
+    const signedIn = ['ready', 'credentials-present-unverified'].includes(record.state)
+      && !record.remoteAuthBarrier && record.checkedAt !== null;
     if (!signInRequired && !(signedIn && (missedJobIds.length || manualBlocked))) continue;
     view.push({
       provider,

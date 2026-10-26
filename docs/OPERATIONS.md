@@ -84,8 +84,9 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   bundles, scan history, tracker entries, and reports retain HTTP(S)
   origin/path only. Semantic scan artifacts preserve bounded ordered clauses
   and operators, redact credential-shaped values as a whole fact, and retain
-  a fact for every non-empty description clause. More than 64 distinct
-  responsibility facts or mandatory signals fails the advert boundary
+  distinct bounded facts after stopword removal and duplicate elimination.
+  A clause reduced entirely to stopwords produces no responsibility fact.
+  More than 64 distinct responsibility facts or mandatory signals fails the advert boundary
   explicitly; neither set is silently truncated.
 - Ranked scan schema v5 retains one bounded explanation per unique vacancy and
   exact total/per-configured-source funnel equations. The configured collection
@@ -122,6 +123,19 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   completed jobs or batches. Durable request records contain only stable job
   references, input digests, bounded parameters and versioned provenance, not
   CVs, adverts, prompts, transcripts or raw provider responses.
+- Every workspace selects background watch or active hunting. The existing
+  ranking/assessment gates apply mode-dependent thresholds and scan caps.
+  Assessed-match notifications participate in the tracker/report mutation
+  receipt; provider-failure episodes enter the bounded private local outbox
+  independently of fenced health replacement, using a bounded pending intent.
+  Full notification storage cannot override a remote-authentication failure. Active hunting flushes a non-empty daily
+  digest; background watch has no routine digest. Polls atomically retain
+  consumed pending identities beside runtime alerts, including ordinary
+  active matches cleared by a switch to background watch. They never rewrite
+  the scan's receipted notification target. Windows tray delivery polls
+  only local endpoints and acknowledges delivery separately from dashboard
+  acknowledgement. No outbound notification service is configured. See
+  [Search modes and alerts](SEARCH_MODES_AND_ALERTS.md).
 - Device-local provider health uses `checking`, `ready`,
   `credentials-present-unverified`, `sign-in-required`, `login-in-progress`,
   `network-unavailable`, `rate-limited`, `cli-update-required` and
@@ -130,6 +144,13 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   auth failure remains authoritative until a real remote success. A blocked
   provider creates deduplicated durable alert/run evidence and blocks only its
   own work; there is no silent substitution or automatic missed-window resend.
+  Setup provider cards, guided sign-in advice and doctor readiness share one
+  health-gated provider snapshot. Local credentials remain visibly unverified;
+  checking and login progress do not create failure alerts. Chat, fit assessment
+  and onboarding use the production preflight, and commit a settled provider's
+  health evidence before releasing its provider-work exclusion. Saved failed
+  chat requests have an explicit, single-use resend action after reconnecting;
+  neither reconnection nor status refresh resends a message automatically.
 - Guided provider login is an owner-only, same-origin, CSRF-protected in-memory
   state machine. It uses only `codex login --device-auth` plus
   `codex login status`, or `claude auth login` with bounded code input when
@@ -155,14 +176,20 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   local merge as pending. Public status exposes only counts and sanitised
   affected areas.
 - Full journals and referenced artifacts are retained for the newest 20 runs,
-  all runs from the previous 30 days and every active, queued, partial, failed,
-  unrepaired or recovery-referenced run. Compact terminal summaries are kept
+  all runs from the previous 30 days and every current active, queued,
+  unrepaired or recovery-referenced run. A validated terminal recovery skip
+  releases historical partial, failed or abandoned work only when it has no
+  current lease, live queue claim or unreceipted mutation. Completed recoveries
+  are not pinned by an old selection. Compact terminal summaries are kept
   for one year. Storage pressure measures runs, artifacts and queue separately
   and refuses new durable work before journalling becomes unsafe.
   Reviewed cleanup validates and atomically writes an encrypted archive before
   deleting only explicitly selected eligible data under the active fence;
   interrupted cleanup resumes from the archive/receipt. Queue compaction keeps
-  live work and required terminal evidence.
+  live work and required terminal evidence. Scan-input bundles share the owning
+  run artifact lifecycle; older external bundles use the same reviewed encrypted
+  archive path. Selection compaction keeps recent records and every current run
+  disposition while preserving the full audit in encrypted archives.
 - The recovery, queue, provider-health and guided-login API/UI projections,
   diagnostics and release artifacts exclude credentials, retained or
   user-entered authentication codes, full prompts, CV/ad bodies, provider
@@ -178,6 +205,36 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   displayed in Scout and included under the documented private-backup policy.
 
 Do not assume a developer computer's local application checkout or workspace is live. Diagnose the VPS for production-like bugs unless the user explicitly reports a local-only installation.
+
+## Scan storage and reviewed cleanup
+
+Storage pressure is measured afresh for each response. Scout validates journal
+metadata and counts file sizes without hashing complete artifact bodies. Cleanup
+review and archive verification still hash the actual selected contents, so a
+file changed after review cannot be deleted under an earlier approval. Setup and
+opportunity responses reuse one scan-health measurement for their schedule view.
+
+New diagnostic scan inputs are private files inside the owning run's `artifacts`
+directory. Existing `.scout/scan-input` files count towards artifact pressure and
+can be selected for the same fenced, encrypted archive process as old runs. The
+newest 20 legacy bundles and the previous 30 days are kept by default; no legacy
+bundle is silently deleted or moved during upgrade.
+
+Maintenance integrations use `planRunCleanup` and `archiveSelectedRuns` from
+`ui/lib/runRetention.mjs`. The plan binds the explicit selection, file digests,
+queue and recovery evidence. Deletion requires the existing persisted recovery
+data key, a current fenced lease and a verified encrypted archive. The dashboard
+reports storage pressure; it does not currently provide a cleanup button or a
+public cleanup command. No automatic deletion is added by these changes.
+
+After reviewed cleanup, recovery-selection compaction retains the newest 256
+records plus the latest mention and terminal disposition for every run still on
+disk. The complete before/after journal is encrypted and verified before atomic
+replacement. A durable prepared intent lets a successor reconcile a crash, and
+one receipt records the compaction. Invalid or conflicting evidence fails closed.
+Encrypted archives have no automatic expiry; deleting them remains a separate
+explicit maintenance decision. Run journals, selection diagnostics and the live
+compaction receipt all count towards storage pressure.
 
 ## Task routing
 
@@ -209,6 +266,10 @@ Access details differ by operator and must be discovered from the private operat
    Platform packagers consume only the audit-created content snapshot, recheck
    its privacy-authorized digest immediately before and after packaging, and
    remove the sealed snapshot in a `finally` path.
+   Workflow-policy tests check immutable action pins throughout every workflow
+   receiving secrets. Allowlisted application and public-source trees exclude
+   nested dependency directories; production dependencies use the separate
+   lockfile-selected top-level staging pass and the same staged privacy audit.
 5. Commit intentionally, push the branch, and open a pull request against `main`.
 6. For release rehearsal, update the protected `codex/release-candidate` branch to the reviewed commit.
 7. Tag the reviewed package version. The protected release workflow builds every platform, deploys the exact tag to the VPS, verifies health and rollback, and only then publishes.
