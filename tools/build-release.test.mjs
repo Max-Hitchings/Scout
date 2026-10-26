@@ -361,6 +361,49 @@ test('sealing cannot authorize bytes that changed after the privacy inspection',
   assert.equal(injected, true);
 });
 
+for (const change of ['replacement', 'addition', 'writable-file', 'writable-directory']) {
+  test(`sealing rejects ${change} introduced during its permission transition`, (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-seal-transition-'));
+    const stage = path.join(root, 'stage');
+    fs.mkdirSync(stage);
+    fs.writeFileSync(path.join(stage, 'payload.txt'), 'Public synthetic content.');
+    const chmod = fs.chmodSync;
+    let injected = false;
+    let audit;
+    t.after(() => {
+      fs.chmodSync = chmod;
+      if (audit) removeAuditedStage(audit.stageDir, { expectedRecord: audit.stageRecord });
+      fs.rmSync(root, { recursive: true, force: true });
+    });
+    fs.chmodSync = (file, mode) => {
+      const target = String(file);
+      const directoryCase = change === 'writable-directory';
+      if (!injected && target.includes('.audited-')
+        && (directoryCase ? path.basename(target).includes('.audited-') : path.basename(target) === 'payload.txt')
+        && (mode & 0o222) === 0) {
+        injected = true;
+        if (change === 'replacement') {
+          const bytes = fs.readFileSync(file);
+          fs.renameSync(file, path.join(root, 'displaced.txt'));
+          fs.writeFileSync(file, bytes);
+        } else if (change === 'addition') {
+          fs.writeFileSync(path.join(path.dirname(target), 'uninspected.txt'), 'Public synthetic addition.');
+        }
+        chmod(file, mode);
+        if (change === 'writable-file' || directoryCase) chmod(file, 0o777);
+        return;
+      }
+      return chmod(file, mode);
+    };
+    assert.throws(() => {
+      audit = auditStageBeforePackaging(stage, {
+        authorizationRoot: root, env: { SCOUT_RELEASE_MARKERS: 'SyntheticSealTransitionMarker' },
+      });
+    }, /changed during sealing/);
+    assert.equal(injected, true);
+  });
+}
+
 test('sealed release authorization rejects the complete tamper matrix', () => {
   const cases = [
     ['content', ({ file }) => {

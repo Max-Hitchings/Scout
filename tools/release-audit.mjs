@@ -640,7 +640,34 @@ function auditedTreeIdentityDigest(root, files, directories, links = []) {
   return crypto.createHash('sha256').update(JSON.stringify(records)).digest('hex');
 }
 
-export function verifiedAuditTreeState(root) {
+function auditSealTransitionDigest(root, files, directories, links, { expectedSeal, sealedDirectoryModes }) {
+  // chmod must change mode/ctime only. Bind every other identity field and
+  // inspected byte while predicting precisely the permitted mode changes.
+  const identity = (stat, mode = Number(stat.mode & 0o777n)) => ({
+    dev: String(stat.dev), ino: String(stat.ino), size: String(stat.size),
+    mtimeNs: String(stat.mtimeNs), nlink: String(stat.nlink), mode,
+  });
+  const records = [
+    ...directories.map((record) => {
+      const relative = normaliseRelative(root, record.directory);
+      const mode = expectedSeal
+        ? (Object.hasOwn(sealedDirectoryModes, relative) ? sealedDirectoryModes[relative] : 0o555)
+        : undefined;
+      return { type: 'directory', path: relative, names: record.names, ...identity(record.identity, mode) };
+    }),
+    ...files.map((record) => ({
+      type: 'file', path: normaliseRelative(root, record.file), sha256: record.sha256,
+      ...identity(record.identity, expectedSeal ? Number(record.identity.mode & 0o555n) : undefined),
+    })),
+    ...links.map((record) => ({
+      type: 'link', path: normaliseRelative(root, record.file), target: record.target,
+      ...identity(record.identity),
+    })),
+  ].sort((a, b) => a.path.localeCompare(b.path, 'en') || a.type.localeCompare(b.type, 'en'));
+  return crypto.createHash('sha256').update(JSON.stringify(records)).digest('hex');
+}
+
+export function verifiedAuditTreeState(root, { expectedSeal = false, sealedDirectoryModes = {} } = {}) {
   const absoluteRoot = path.resolve(root);
   const directories = [];
   const links = [];
@@ -654,6 +681,9 @@ export function verifiedAuditTreeState(root) {
   return {
     treeDigest: auditedTreeDigest(absoluteRoot, files, directories, links),
     identityDigest: auditedTreeIdentityDigest(absoluteRoot, files, directories, links),
+    sealTransitionDigest: auditSealTransitionDigest(absoluteRoot, files, directories, links, {
+      expectedSeal, sealedDirectoryModes,
+    }),
   };
 }
 

@@ -357,7 +357,13 @@ authorship. The single operations-document conflict retains both procedures.
 The merged release tests reproduced the native vendor test's obsolete cleanup
 API and two umask-sensitive fixture assumptions. The test now supplies the
 snapshot creation identity and explicit authorization root; the mode fixtures
-set `0644` before capture. No production authorization or privacy gate changed.
+set `0644` before capture. Fresh independent review then reproduced a seal-transition race: a configured
+synthetic private marker inserted during chmod was authorized. A RED regression
+proved it, and authorization now binds the exact inspected content, paths,
+links, dev/inode, sizes, modification times and link counts across sealing,
+allowing only the prescribed permission changes. New race tests cover marker
+insertion, same-byte replacement, added files and writable file/directory modes.
+The existing complete tree/identity/ancestor checks remain in force.
 The six requested release suites pass 123/123 with umask 077, and the release
 fixture suites pass 31/31 with umask 022. Native install acceptance, all 21 hosted
 jobs and fresh independent merged-code security review remain required. Their

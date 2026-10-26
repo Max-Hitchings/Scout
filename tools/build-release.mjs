@@ -359,7 +359,8 @@ export function auditStageBeforePackaging(stageDir, {
       const findings = result.findings.map(({ file, line, rule }) => `${file}:${line} ${rule}`).join('\n');
       throw new Error(`pre-package release audit failed:\n${findings}`);
     }
-    if (verifiedAuditTreeDigest(snapshot) !== result.treeDigest) {
+    const inspectedState = verifiedAuditTreeState(snapshot, { expectedSeal: true, sealedDirectoryModes });
+    if (inspectedState.treeDigest !== result.treeDigest) {
       throw new Error('pre-package release audit snapshot differs from inspected bytes');
     }
     const seal = (entry) => {
@@ -380,6 +381,9 @@ export function auditStageBeforePackaging(stageDir, {
     };
     seal(snapshot);
     const sealedAuthorization = sealedState(snapshot);
+    if (sealedAuthorization.sealTransitionDigest !== inspectedState.sealTransitionDigest) {
+      throw new Error('pre-package release audit snapshot changed during sealing');
+    }
     const ancestorIdentityDigest = auditedAncestorIdentityDigest(snapshot, authorityRoot);
     const output = [
       `Release audit scanned ${result.filesScanned} files with ${result.markerCount} configured personal markers.`,
