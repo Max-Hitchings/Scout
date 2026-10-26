@@ -348,9 +348,9 @@ after(async () => {
   await removeTestWorkspace();
 });
 
-function request({ method = 'GET', path = '/', headers = {}, body = '' }) {
+function request({ method = 'GET', path = '/', headers = {}, body = '', signal }) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ hostname: '127.0.0.1', port, method, path, headers }, (res) => {
+    const req = http.request({ hostname: '127.0.0.1', port, method, path, headers, signal }, (res) => {
       let text = '';
       res.setEncoding('utf8');
       res.on('data', (chunk) => { text += chunk; });
