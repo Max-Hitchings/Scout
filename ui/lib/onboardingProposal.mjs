@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { approvedLivingCvEvidence } from './livingCv.mjs';
 import path from 'node:path';
 import { atomicWriteFile } from './atomicWrite.mjs';
 import { doctor } from './doctor.mjs';
@@ -177,7 +178,16 @@ export function buildOnboardingEvidence(root, config, limit = ONBOARDING_INPUT_L
   let importedCharacters = 0;
   const seenImportLines = new Set();
   const imports = workspacePaths(root).imports;
-  if (fs.existsSync(imports)) {
+  const approvedCv = approvedLivingCvEvidence(root);
+  if (approvedCv !== null) {
+    for (const [index, line] of approvedCv.split(/\r?\n/).entries()) {
+      const text = line.trim();
+      if (!text || seenImportLines.has(text)) continue;
+      seenImportLines.add(text);
+      importedCharacters += text.length;
+      evidence.push({ id: `cv-${String(index + 1).padStart(4, '0')}`, label: 'Approved Living CV version', text });
+    }
+  } else if (fs.existsSync(imports)) {
     validatePhysicalWorkspacePath(root, imports, 'onboarding import directory');
     const files = fs.readdirSync(imports).filter((name) => name.toLowerCase().endsWith('.txt')).sort();
     let lineNumber = 0;

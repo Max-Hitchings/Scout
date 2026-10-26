@@ -907,6 +907,7 @@ test('tracker read failures do not expose private diagnostic details at the API 
 
 test('a CV writing turn triggers installed-app quality validation when evidence exists', { concurrency: false }, async () => {
   const root = tmpRoot();
+  writeWorkspaceConfig(root, mergeWorkspaceDefaults({ locale: 'en-NZ' }));
   const app = path.join(root, 'applications', 'acme-role-2026-07');
   fs.mkdirSync(app, { recursive: true });
   fs.writeFileSync(path.join(app, 'cv.typ'), '#show: cv.with(name: "Example")\n');
@@ -919,7 +920,7 @@ test('a CV writing turn triggers installed-app quality validation when evidence 
       runCvQualityFn: (repoRoot, slug, options) => qualityCalls.push({ repoRoot, slug, options }),
     });
     await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'claude', text: 'hello' }));
-    assert.deepEqual(qualityCalls, [{ repoRoot: root, slug: 'acme-role-2026-07', options: { locale: 'en-GB' } }]);
+    assert.deepEqual(qualityCalls, [{ repoRoot: root, slug: 'acme-role-2026-07', options: { locale: 'en-NZ' } }]);
     const saved = loadChat(root, ID);
     assert.ok(saved.filesTouched.includes('applications/acme-role-2026-07/cv-quality.json'));
     assert.ok(saved.filesTouched.includes('applications/acme-role-2026-07/cv.pdf'));

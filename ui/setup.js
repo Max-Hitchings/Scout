@@ -183,9 +183,9 @@ export function buildConfig(form, current = {}) {
   const salary = String(form.salaryMinimum || '').trim();
   return {
     mode: form.mode || current.mode || 'background',
-    locale: String(form.locale || current.locale || 'en').trim(),
-    currency: String(form.currency || current.currency || 'USD').trim().toUpperCase(),
-    timezone: String(form.timezone || current.timezone || 'UTC').trim(),
+    locale: String(form.locale ?? current.locale ?? 'en').trim(),
+    currency: String(form.currency ?? current.currency ?? 'USD').trim().toUpperCase(),
+    timezone: String(form.timezone ?? current.timezone ?? 'UTC').trim(),
     profile: {
       ...(current.profile || {}),
       displayName: String(form.displayName || '').trim(),

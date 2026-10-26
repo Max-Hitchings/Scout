@@ -24,15 +24,23 @@ test('adzunaUrl encodes configurable country, credentials, query, and optional f
   assert.throws(() => adzunaUrl('x', { ...creds, country: '../' }), /country/);
 });
 
+test('an unchosen Adzuna country cannot silently search a default country', async () => {
+  let requested = false;
+  const result = await fetchAdzuna({ ...creds, queries: ['example role'] }, async () => { requested = true; return response({ results: [] }); });
+  assert.equal(requested, false);
+  assert.equal(result.available, false);
+  assert.match(result.reason, /country/i);
+});
+
 test('adzunaUrl omits unset personal filters', () => {
-  const params = new URL(adzunaUrl('designer', creds)).searchParams;
+  const params = new URL(adzunaUrl('designer', { ...creds, country: 'gb' })).searchParams;
   assert.equal(params.has('where'), false);
   assert.equal(params.has('distance'), false);
   assert.equal(params.has('salary_min'), false);
 });
 
 test('fetchAdzuna normalises jobs, locale/currency, and per-query counts', async () => {
-  const result = await fetchAdzuna({ ...creds, queries: ['product designer'], locale: 'en-GB', currency: 'GBP' }, async () => response({ results: [item] }));
+  const result = await fetchAdzuna({ ...creds, country: 'gb', queries: ['product designer'], locale: 'en-GB', currency: 'GBP' }, async () => response({ results: [item] }));
   assert.equal(result.available, true);
   assert.equal(result.status, 'healthy');
   assert.equal(result.count, 1);
@@ -48,7 +56,7 @@ test('fetchAdzuna normalises jobs, locale/currency, and per-query counts', async
 
 test('fetchAdzuna dedupes and fails soft per query', async () => {
   let call = 0;
-  const result = await fetchAdzuna({ ...creds, queries: ['bad', 'good', 'again'] }, async () => {
+  const result = await fetchAdzuna({ ...creds, country: 'gb', queries: ['bad', 'good', 'again'] }, async () => {
     call += 1;
     if (call === 1) return { ok: false, status: 500, json: async () => ({}) };
     return response({ results: [item] });
@@ -61,7 +69,7 @@ test('fetchAdzuna dedupes and fails soft per query', async () => {
 });
 
 test('fetchAdzuna keeps distinct provider openings with the same title', async () => {
-  const result = await fetchAdzuna({ ...creds, queries: ['designer'] }, async () => response({ results: [
+  const result = await fetchAdzuna({ ...creds, country: 'gb', queries: ['designer'] }, async () => response({ results: [
     item, { ...item, id: 'adzuna-456', redirect_url: 'https://adzuna/y', location: { display_name: 'Leeds' } },
   ] }));
   assert.equal(result.jobs.length, 2);

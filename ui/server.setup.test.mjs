@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { deflateSync } from 'node:zlib';
+import { approveLivingCv, approvedLivingCvEvidence, configureLivingCv, livingCvStatus } from './lib/livingCv.mjs';
+import { atomicWriteFile } from './lib/atomicWrite.mjs';
 
 const appRoot = path.resolve(import.meta.dirname, '..');
 const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-setup-http-'));
@@ -263,6 +265,25 @@ test('Living CV API requires exact review, rejects stale approval and preserves 
     fs.rmSync(source, { force: true });
     fs.writeFileSync(file, previous);
   }
+});
+
+test('the CV status API reconciles an interrupted approval before showing it as current', async () => {
+  const source = path.join(os.tmpdir(), `scout-synthetic-recovery-cv-${process.pid}.md`);
+  const content = '# Synthetic reviewed CV\n' + 'Current confirmed evidence. '.repeat(35);
+  fs.writeFileSync(source, content);
+  try {
+    await request({ method: 'POST', route: '/api/sync/backup', body: { reason: 'synthetic approval recovery' } });
+    configureLivingCv(workspace, source);
+    assert.throws(() => approveLivingCv(workspace, { revision: livingCvStatus(workspace).revision, confirmed: true }, {
+      writeFile(file, value, options) { if (file.endsWith('living-cv.json')) throw new Error('synthetic interruption'); atomicWriteFile(file, value, options); },
+    }), /interruption/);
+    assert.equal(livingCvStatus(workspace).state, 'recovery-needed');
+    const status = await request({ route: '/api/cv/living' });
+    assert.equal(status.status, 200);
+    assert.equal(status.json.state, 'current');
+    assert.equal(approvedLivingCvEvidence(workspace), content);
+    assert.ok(!fs.existsSync(path.join(workspace, 'cv/living-cv-approval.json')));
+  } finally { fs.rmSync(source, { force: true }); }
 });
 
 test('fresh setup cannot be marked complete before trusted proposal activation', async () => {

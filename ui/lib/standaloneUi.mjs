@@ -1,7 +1,7 @@
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
 export function livingCvHtml(status = {}) {
-  const labels = { disconnected: 'No external source connected', current: 'Saved CV matches the source', changed: 'Source changed — review before using it', unavailable: 'Source needs attention' };
+  const labels = { disconnected: 'No external source connected', current: 'Saved CV matches the source', changed: 'Source changed — review before using it', unavailable: 'Source needs attention', 'recovery-needed': 'Interrupted approval needs recovery — later edits are preserved' };
   const diff = (status.diff || []).map(({ kind, text }) => `<div class="cv-diff-${esc(kind)}"><span aria-label="${esc(kind)}">${kind === 'added' ? '+' : kind === 'removed' ? '−' : ' '}</span> ${esc(text)}</div>`).join('');
   return `<details id="living-cv"><summary>Living CV — keep a notes file connected</summary>
     <p>Scout only reads the file you choose. Changes wait here for your approval; the external file is never edited.</p>
@@ -9,7 +9,7 @@ export function livingCvHtml(status = {}) {
     <p><button class="act" data-action="living-cv-connect">Connect source</button> <button class="act" data-action="living-cv-refresh">Check for changes</button>${status.sourcePath ? ' <button class="act" data-action="living-cv-disconnect">Disconnect source</button>' : ''}</p>
     <p role="status">${esc(labels[status.state] || 'Checking source…')}${status.message ? ` — ${esc(status.message)}` : ''}</p>
     ${status.state === 'changed' ? `<p>Removed lines have a − sign; added lines have a + sign. Approving keeps both CV versions and changes the evidence used by future scans. Existing assessments retain their history; at most six older rejections are reassessed per scan.</p><div class="cv-diff" aria-label="CV changes">${diff}</div><label><input id="living-cv-confirm" type="checkbox"> I reviewed this exact change and confirm the CV facts</label><p><button class="act primary" data-action="living-cv-approve">Approve this CV change</button></p>` : ''}
-    ${status.profileReviewPending ? '<p>The new CV is saved. <button class="act" data-action="living-cv-profile">Review my search preferences</button> to update and publish any changed search rules. Scout never publishes new preferences automatically.</p>' : ''}
+    ${status.profileReviewPending ? '<p>The new CV is saved. <button class="act" data-action="living-cv-reprofile">Rebuild my profile from this CV</button> to generate a reviewable proposal, or <button class="act" data-action="living-cv-profile">Review my search preferences</button> to edit search rules. Scout never publishes new preferences automatically.</p>' : ''}
     <details><summary>Saved CV versions (${status.versions?.length || 0})</summary><ul>${(status.versions || []).map((version) => `<li><button class="act" data-action="living-cv-version" data-version="${esc(version.id)}">${esc(version.savedAt)} · ${esc(version.id.slice(0, 12))}</button></li>`).join('')}</ul><pre id="living-cv-version-text" class="cv-version-text" aria-label="Saved CV version"></pre></details>
     <p class="meta">Use a Markdown file or JSON with one field: <code>{"markdown":"your CV text"}</code>. Files must be 500 bytes to 256 KiB. The path is local to this workspace; copying the workspace to another computer may require reconnecting it.</p>
   </details>`;

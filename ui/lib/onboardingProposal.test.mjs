@@ -15,6 +15,22 @@ import {
 } from './providerAuthMutation.mjs';
 import { acquireScanLease, currentLeaseOwner } from './scanLease.mjs';
 import { DEFAULT_WORKSPACE_CONFIG, writeWorkspaceConfig } from './workspace.mjs';
+import { approveLivingCv, configureLivingCv, livingCvStatus } from './livingCv.mjs';
+
+test('rebuilding a profile after Living CV approval uses the approved version instead of stale imports', (t) => {
+  const workspace = root();
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-cv-reprofile-'));
+  const source = path.join(parent, 'source.md');
+  t.after(() => { fs.rmSync(workspace, { recursive: true, force: true }); fs.rmSync(parent, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(workspace, 'cv'), { recursive: true });
+  fs.writeFileSync(path.join(workspace, 'cv/master-cv.md'), 'Old CV evidence.');
+  fs.writeFileSync(source, '# Updated confirmed CV\n' + 'Current responsibilities with verified evidence. '.repeat(24));
+  configureLivingCv(workspace, source);
+  approveLivingCv(workspace, { confirmed: true, revision: livingCvStatus(workspace).revision });
+  const result = buildOnboardingEvidence(workspace, DEFAULT_WORKSPACE_CONFIG);
+  assert.ok(result.evidence.some(({ text }) => text.includes('Current responsibilities')));
+  assert.ok(!result.evidence.some(({ text }) => text.includes('Built reliable software systems')));
+});
 
 function root() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-onboarding-'));

@@ -159,7 +159,7 @@ export function validateWorkspaceConfig(value) {
   }
   if (Number(value.triage.checkScore) > Number(value.triage.actionScore)) throw new Error('workspace triage.checkScore cannot exceed actionScore');
   if (!value.sources || typeof value.sources !== 'object') throw new Error('workspace sources must be an object');
-  if (!/^[a-z]{2}$/.test(String(value.sources.adzuna?.country || ''))) throw new Error('workspace Adzuna country must be a two-letter lower-case code');
+  if (value.sources.adzuna?.country !== null && !/^[a-z]{2}$/.test(String(value.sources.adzuna?.country || ''))) throw new Error('workspace Adzuna country must be a two-letter lower-case code or null until chosen');
   if (value.commute && typeof value.commute !== 'object') throw new Error('workspace commute must be an object');
   if (value.ai && ![null, 'codex', 'claude'].includes(value.ai.provider ?? null)) throw new Error('workspace ai.provider must be codex, claude, or null');
   for (const [provider, model] of Object.entries(value.ai?.models || {})) {

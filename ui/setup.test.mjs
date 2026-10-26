@@ -33,6 +33,10 @@ test('first-run proposes local language, timezone and currency while preserving 
   assert.deepEqual(firstRunPreferenceDefaults(existing, { locale: 'ja-JP', timeZone: 'Asia/Tokyo' }), { locale: 'ja-JP', currency: 'JPY', timezone: 'Asia/Tokyo', country: 'jp' });
   assert.deepEqual(firstRunPreferenceDefaults(existing, { locale: 'en-CA', timeZone: 'America/Toronto', established: true }), { ...existing, country: '' });
   assert.equal(firstRunPreferenceDefaults({}, { locale: 'und', timeZone: 'UTC' }).currency, '');
+  const unanswered = buildConfig({ currency: '', locale: '', timezone: '' }, existing);
+  assert.equal(unanswered.currency, '');
+  assert.equal(unanswered.locale, '');
+  assert.equal(unanswered.timezone, '');
 });
 
 test('a blocked provider has consistent card, sign-in and verification advice', () => {

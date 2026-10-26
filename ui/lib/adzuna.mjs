@@ -17,13 +17,13 @@ export function adzunaCountryCurrency(country) {
 }
 
 export const DEFAULT_ADZUNA_OPTIONS = Object.freeze({
-  country: 'gb',
+  country: null,
   where: '',
   distanceKm: null,
   salaryMin: null,
   resultsPerPage: 50,
-  locale: 'en-GB',
-  currency: 'GBP',
+  locale: 'en',
+  currency: null,
 });
 
 export function resolveAdzunaCredentials(env) {
@@ -49,7 +49,7 @@ export function adzunaUrl(query, options) {
 }
 
 function salaryText(min, max, options) {
-  const formatter = new Intl.NumberFormat(options.locale || 'en-GB', {
+  const formatter = new Intl.NumberFormat(options.locale || 'en', {
     ...(options.currency ? { style: 'currency', currency: options.currency } : {}),
     maximumFractionDigits: 0,
   });
@@ -92,6 +92,7 @@ export async function fetchAdzuna(options, fetchImpl = globalThis.fetch) {
   const { appId, apiKey, queries = DEFAULT_ADZUNA_QUERIES } = values;
   if (!appId || !apiKey) return withSourceStatus({ jobs: [], sources: {}, errors: [], available: false }, { unavailableReason: 'Adzuna credentials are not configured' });
   if (!queries.length) return withSourceStatus({ jobs: [], sources: {}, errors: [], available: false, note: 'no Adzuna queries configured' });
+  if (!values.country) return withSourceStatus({ jobs: [], sources: {}, errors: [], available: false }, { unavailableReason: 'Choose an Adzuna search country in Settings before using this source' });
 
   const jobs = [];
   const sources = {};

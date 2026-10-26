@@ -2054,6 +2054,29 @@ test('POST /api/status accepts the shortlist status and persists it', async () =
   assert.equal(saved.status, 'shortlist');
 });
 
+test('cover-letter drafts serve their own PDF and edits block stale downloads', { concurrency: false }, async () => {
+  seedWorkspace(APP_ROOT, testWorkspace);
+  const directory = path.join(testWorkspace, 'applications', 'synthetic-letter');
+  fs.mkdirSync(directory, { recursive: true });
+  const content = '# DRAFT\nSynthetic confirmed cover-letter text.';
+  fs.writeFileSync(path.join(directory, 'outreach.md'), content);
+  fs.writeFileSync(path.join(directory, 'outreach.pdf'), '%PDF-1.7\nSynthetic cover-letter PDF');
+  const manifestFile = path.join(testWorkspace, '.scout/cv-renders.json');
+  fs.mkdirSync(path.dirname(manifestFile), { recursive: true });
+  const manifest = fs.existsSync(manifestFile) ? JSON.parse(fs.readFileSync(manifestFile)) : { schemaVersion: 1, renders: {} };
+  manifest.renders['cover-letter:synthetic-letter'] = { sourceSha256: crypto.createHash('sha256').update(content).digest('hex'), renderedAt: '2026-10-26T10:00:00.000Z' };
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
+  const pdf = await request({ path: '/api/cv/pdf?target=cover-letter&slug=synthetic-letter&download=1' });
+  assert.equal(pdf.status, 200, pdf.text);
+  assert.match(pdf.text, /Synthetic cover-letter PDF/);
+  assert.match(pdf.headers['content-disposition'], /cover-letter-DRAFT\.pdf/);
+  const saved = await request({ method: 'POST', path: '/api/cv/save', headers: JSON_HEADERS(), body: JSON.stringify({ path: 'applications/synthetic-letter/outreach.md', content: content + '\nReviewed edit.' }) });
+  assert.equal(saved.status, 200, saved.text);
+  const stale = await request({ path: '/api/cv/pdf?target=cover-letter&slug=synthetic-letter&download=1' });
+  assert.equal(stale.status, 409);
+  assert.equal(fs.readFileSync(path.join(directory, 'outreach.pdf'), 'utf8'), '%PDF-1.7\nSynthetic cover-letter PDF');
+});
+
 test('thumbs feedback proposes an interpretable ranking change and reset keeps all evidence', { concurrency: false }, async (t) => {
   seedWorkspace(APP_ROOT, testWorkspace);
   const learningFile = workspacePaths(testWorkspace).feedbackLearning;

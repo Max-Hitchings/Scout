@@ -1356,26 +1356,35 @@ const Scout = {
     const field = form.querySelector('[data-feedback-scope]').value;
     const status = form.querySelector('[data-feedback-status]');
     if (!explanation) { status.textContent = 'Add a reason in your own words before saving.'; return; }
-    if (!this.feedbackLearning?.revision) {
-      this.feedbackLearning = await this.api('/api/feedback-learning');
-    }
-    const result = await this.api('/api/feedback', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        revision: this.feedbackLearning.revision,
-        opportunityId: id,
-        decision,
-        reason,
-        explanation,
-        ...(field !== 'job' ? { learning: { field } } : {}),
-      }),
-    });
-    if (result?.ok) {
-      this.feedbackLearning = result.ledger;
-      status.textContent = result.proposed ? 'Feedback saved. A ranking suggestion is waiting for your review in Settings → Feedback & learning.' : 'Feedback saved for this job. Other jobs and ranking are unchanged.';
-    }
-    return result;
+    element.disabled = true;
+    try {
+      if (!this.feedbackLearning?.revision) {
+        this.feedbackLearning = await this.api('/api/feedback-learning');
+      }
+      const result = await this.api('/api/feedback', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          revision: this.feedbackLearning.revision,
+          opportunityId: id,
+          decision,
+          reason,
+          explanation,
+          ...(field !== 'job' ? { learning: { field } } : {}),
+        }),
+      });
+      if (result?.ok) {
+        this.feedbackLearning = result.ledger;
+        status.textContent = result.proposed ? 'Feedback saved. A ranking suggestion is waiting for your review in Settings → Feedback & learning.' : 'Feedback saved for this job. Other jobs and ranking are unchanged.';
+      } else {
+        status.textContent = result?.error || 'Feedback could not be saved. Your explanation is still here; retry when the workspace is ready.';
+        if (result?.conflict) this.feedbackLearning = null;
+      }
+      return result;
+    } catch (error) {
+      status.textContent = error.message || 'Feedback could not be saved. Your explanation is still here.';
+      return null;
+    } finally { element.disabled = false; }
   },
 
   async post(pathname, payload, { retryTrackerConflict = true } = {}) {
@@ -1726,10 +1735,17 @@ const Scout = {
 
   async refreshLivingCv(force = false) {
     const panel = document.getElementById('living-cv-panel');
-    if (!panel || (!force && panel.contains(document.activeElement))) return;
+    if (!force && panel?.contains(document.activeElement)) return;
     try {
       const status = await this.api('/api/cv/living');
       if (status.error) throw new Error(status.error);
+      const notice = document.getElementById('living-cv-notice');
+      if (notice) {
+        notice.classList.toggle('hidden', !['changed', 'unavailable', 'recovery-needed'].includes(status.state));
+        notice.textContent = status.state === 'changed' ? 'Your CV source changed. Review it before Scout uses the new facts. ' : status.state === 'recovery-needed' ? 'An interrupted CV approval needs attention. Scans wait until it is recovered. ' : 'Your CV source is unavailable. Scout is using your saved CV. ';
+        const button = document.createElement('button'); button.className = 'act'; button.textContent = 'Review CV source'; button.dataset.action = 'living-cv-open'; notice.append(button);
+      }
+      if (!panel) return;
       const signature = JSON.stringify(status);
       if (!force && panel.dataset.signature === signature) return;
       const open = panel.querySelector('details')?.open || force;
@@ -1737,7 +1753,14 @@ const Scout = {
       panel.querySelector('details').open = open;
       panel.dataset.signature = signature;
       this.livingCv = status;
-    } catch (error) { panel.textContent = error.message || 'Living CV status is unavailable. Your saved CV is unchanged.'; }
+    } catch (error) { if (panel) panel.textContent = error.message || 'Living CV status is unavailable. Your saved CV is unchanged.'; }
+  },
+
+  async openLivingCv() {
+    this.showTab('cv');
+    await this.waitFor('#living-cv');
+    document.getElementById('living-cv').open = true;
+    document.getElementById('living-cv').scrollIntoView?.({ block: 'start' });
   },
 
   async updateLivingCv(action) {
@@ -3091,7 +3114,9 @@ const Scout = {
       case 'living-cv-disconnect': return this.updateLivingCv('disconnect');
       case 'living-cv-approve': return this.updateLivingCv('approve');
       case 'living-cv-refresh': return this.refreshLivingCv(true);
+      case 'living-cv-open': return this.openLivingCv();
       case 'living-cv-profile': return window.ScoutSetup?.openSettings?.('search');
+      case 'living-cv-reprofile': return window.ScoutSetup?.resumeAt?.(5);
       case 'living-cv-version': return this.openLivingCvVersion(element.dataset.version);
       case 'restore': return this.restoreEntry(id);
       default: return undefined;
@@ -3407,13 +3432,14 @@ const Scout = {
     });
     this.loadOpportunities();
     this.loadProviderHealth();
+    this.refreshLivingCv();
     this.reattachScanOperation();
     this.refreshSyncStatus();
     this.checkUiBuild();
     window.setTimeout?.(() => this.checkForAppUpdate(false), 2500);
     window.setInterval?.(() => this.refreshSyncStatus(), 5 * 60 * 1000);
     window.setInterval?.(() => this.loadProviderHealth(), 5 * 60 * 1000);
-    window.setInterval?.(() => { if (this.state.tab === 'cv') this.refreshLivingCv(); }, 30 * 1000);
+    window.setInterval?.(() => this.refreshLivingCv(), 30 * 1000);
     window.setInterval?.(() => this.loadNotifications(), 60 * 1000);
     window.setInterval?.(() => {
       this.serviceWorkerRegistration?.update?.();

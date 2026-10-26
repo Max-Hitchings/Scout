@@ -218,9 +218,10 @@ test('syncManagedInstructions migrates .scout/ to track cv-renders.json while ig
   assert.equal(ignoreRenders.status, 1); // 1 means NOT ignored
 });
 
-test('workspace Adzuna country rejects malformed codes without changing existing country defaults', () => {
+test('workspace Adzuna country permits an unchosen source and rejects malformed codes', () => {
   const config = mergeWorkspaceDefaults();
-  assert.equal(config.sources.adzuna.country, 'gb');
+  assert.equal(config.sources.adzuna.country, null);
+  assert.doesNotThrow(() => validateWorkspaceConfig(config));
   config.sources.adzuna.country = '../us';
   assert.throws(() => validateWorkspaceConfig(config), /Adzuna country/);
 });

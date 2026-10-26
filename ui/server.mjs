@@ -22,7 +22,7 @@ import { codexDeepLinkCapability } from './lib/codexDeepLink.mjs';
 import { triage } from './lib/derive.mjs';
 import { emptyTrackerView, pipeline } from './lib/pipeline.mjs';
 import { cvPdfPath, listCvFiles, renderCvTarget, safeCvPath } from './lib/cv.mjs';
-import { approveLivingCv, configureLivingCv, livingCvStatus, readLivingCvVersion } from './lib/livingCv.mjs';
+import { approveLivingCv, assertLivingCvReady, configureLivingCv, hasPendingLivingCvApproval, livingCvStatus, readLivingCvVersion, recoverLivingCvApproval } from './lib/livingCv.mjs';
 import { cvDownloadDecision, overrideCvQuality, readCvQuality, runCvQuality } from './lib/cvQuality.mjs';
 import {
   parseScanRuns, readPublicRunSummaries, readPublicScanQueue, readPublicStoragePressure,
@@ -249,6 +249,18 @@ export function recoverOnboardingAtStartup({
 }
 
 recoverOnboardingAtStartup();
+
+export function recoverLivingCvAtStartup({ root = WORKSPACE_ROOT, initialised = workspaceInitialised, recover = recoverLivingCvApproval, pending = hasPendingLivingCvApproval, schedule = setTimeout, cancel = clearTimeout } = {}) {
+  if (!runtimeRecoveryAdmissionOpen || !initialised() || !pending(root)) return null;
+  try { return recover(root); }
+  catch (error) {
+    if (error?.reasonCode === 'mutation-busy') scheduleRuntimeRecovery(() => recoverLivingCvAtStartup({ root, initialised, recover, pending, schedule, cancel }), 1_000, schedule, cancel);
+    // Keep the UI available for a conflict; scans and profile generation remain gated.
+    return { state: 'recovery-needed' };
+  }
+}
+
+recoverLivingCvAtStartup();
 
 export function stageSearchProfileReviewAtStartup({
   initialised = workspaceInitialised,
@@ -1157,6 +1169,8 @@ async function handleRead(req, res, url) {
     return sendJson(res, 200, listCvFiles(WORKSPACE_ROOT));
   }
   if (req.method === 'GET' && url.pathname === '/api/cv/living') {
+    try { if (hasPendingLivingCvApproval(WORKSPACE_ROOT)) recoverLivingCvApproval(WORKSPACE_ROOT); }
+    catch { /* Project the pending state below; never overwrite a conflicting edit. */ }
     try { return sendJson(res, 200, livingCvStatus(WORKSPACE_ROOT)); }
     catch { return sendJson(res, 409, publicApiError('Living CV history needs review. Your saved CV is unchanged.')); }
   }
@@ -2374,7 +2388,10 @@ routes['POST /api/cv/save'] = (req, res, body) => {
   try {
     withWorkspaceMutationAuthority(WORKSPACE_ROOT, {
       kind: 'cv-save', phase: 'persist-cv',
-    }, () => atomicWriteFile(abs, b.content));
+    }, () => {
+      if (path.resolve(abs) === path.resolve(WORKSPACE.cv, 'master-cv.md')) assertLivingCvReady(WORKSPACE_ROOT);
+      atomicWriteFile(abs, b.content);
+    });
   } catch { return replyJson(res, 500, publicApiError('CV file could not be saved.')); }
   void scheduleCheckpoint(`edit cv - ${b.path}`);
   replyJson(res, 200, { ok: true, savedLocally: true, syncQueued: true });
@@ -2386,12 +2403,12 @@ routes['POST /api/cv/render'] = (req, res, body) => {
   const slug = target === 'master' ? '' : String(b.slug || '');
   try {
     const operation = operations.start('cv-render', async (update, { signal }) => {
-      update({ phase: target === 'master' ? 'Preparing master reference PDF' : 'Preparing tailored PDF', current: 1, total: 3 });
+      update({ phase: target === 'master' ? 'Preparing master reference PDF' : target === 'cover-letter' ? 'Preparing cover-letter draft PDF' : 'Preparing tailored PDF', current: 1, total: 3 });
       const result = await renderCvTarget(WORKSPACE_ROOT, { target, slug }, {
         appRoot: APP_ROOT, signal,
       });
       update({ phase: 'Validating PDF', current: 2, total: 3 });
-      void scheduleCheckpoint(target === 'application' ? `render cv - ${slug}` : 'render master cv');
+      void scheduleCheckpoint(target === 'master' ? 'render master cv' : target === 'cover-letter' ? `render cover-letter draft - ${slug}` : `render cv - ${slug}`);
       update({ phase: 'PDF ready', current: 3, total: 3 });
       return result;
     }, { phase: 'Queued for rendering', total: 3 });

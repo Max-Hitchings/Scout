@@ -1,5 +1,7 @@
 # Quick Start
 
+For a shorter first-use walkthrough, start with [Getting started](GETTING_STARTED.md). [Living CV and application drafts](LIVING_CV.md) covers external CV sources, reviewable versions, editable cover-letter PDFs, feedback suggestions and employer notes.
+
 Scout is a local-first opportunity finder for Windows, macOS and Linux. It keeps your career data in a private workspace and uses Codex or Claude to help search and assess opportunities. It never sends applications or outreach.
 
 ## 1. Install and launch
