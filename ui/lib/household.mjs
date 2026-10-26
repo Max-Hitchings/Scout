@@ -5,7 +5,9 @@ import { atomicWriteFile } from './atomicWrite.mjs';
 import { deviceSettingsPath } from './deviceSettings.mjs';
 
 export function householdSettingsPath(env = process.env) {
-  return path.resolve(env.SCOUT_HOUSEHOLD_SETTINGS || path.join(path.dirname(deviceSettingsPath(env, process.platform, { household: false })), 'household.json'));
+  const hostEnv = { ...env };
+  delete hostEnv.SCOUT_DEVICE_SETTINGS;
+  return path.resolve(env.SCOUT_HOUSEHOLD_SETTINGS || path.join(path.dirname(deviceSettingsPath(hostEnv, process.platform, { household: false })), 'household.json'));
 }
 function identity(root) {
   const stat = fs.lstatSync(root);
@@ -96,7 +98,7 @@ export function activateHouseholdRuntime(root, { env = process.env } = {}) {
   if (!instance) return null;
   env.SCOUT_HOUSEHOLD_SETTINGS = householdSettingsPath(env);
   env.SCOUT_WORKSPACE = instance.workspace;
-  env.SCOUT_DEVICE_SETTINGS ||= instance.deviceSettings;
+  env.SCOUT_DEVICE_SETTINGS = instance.deviceSettings;
   env.PORT ||= String(instance.port);
   env.HOME = instance.providerHome;
   env.USERPROFILE = instance.providerHome;

@@ -61,3 +61,49 @@ test('summary sanitises provider/scan state and states every omitted match expli
   assert.doesNotMatch(JSON.stringify(summary), /PRIVATE/);
   assert.deepEqual(summary.providers, [{ provider: 'local', state: 'ready', checkedAt: '2026-10-26T08:00:00.000Z' }]);
 });
+
+test('a real coordinated scan publishes first-seen dates and preserves them through rechecks', async () => {
+  const { coordinateScanArtifacts } = await import('./lib/scanPipeline.mjs');
+  const { acquireScanLease, currentLeaseOwner, releaseScanLease } = await import('./lib/scanLease.mjs');
+  const { openRunJournal } = await import('./lib/runJournal.mjs');
+  const { canonicalMutationRecipe, trackerMergeRecipe } = await import('./lib/scanMutationProjection.mjs');
+  fs.mkdirSync(root, { recursive: true });
+  seedWorkspace(path.resolve('.'), root);
+  const input = (at) => ({
+    provider: 'codex', mode: 'primary', startedAt: at,
+    candidates: [{ candidateId: 'candidate-001', vacancyId: 'synthetic-first-seen', company: 'Example', role: 'Synthetic role', source: 'ats', url: 'https://example.test/first-seen', preRankScore: 98 }],
+    sources: { ats: { status: 'healthy', count: 1 } },
+    assessmentResult: { assessments: [{ candidateId: 'candidate-001', recommendation: 'keep', mandatoryRequirements: [], responsibilityFit: { rating: 'strong' } }] },
+    policy: { actionScore: 95, checkScore: 85 },
+  });
+  function scan(id, at) {
+    const run = openRunJournal(root, id);
+    const lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: id });
+    try { assert.ok(coordinateScanArtifacts(root, input(at), { run, lease }).mutationReceipt); }
+    finally { releaseScanLease(lease); }
+  }
+  const server = createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const summary = async () => (await fetch(`http://127.0.0.1:${server.address().port}/api/summary`)).json();
+    scan('synthetic-first-seen-1', '2026-10-26T08:00:00.000Z');
+    assert.equal((await summary()).newMatches[0].firstSeen, '2026-10-26');
+    scan('synthetic-first-seen-1', '2026-10-26T08:00:00.000Z');
+    assert.equal((await summary()).newMatches[0].firstSeen, '2026-10-26', 'receipt recovery preserves the discovery date');
+    scan('synthetic-first-seen-2', '2026-10-27T08:00:00.000Z');
+    assert.equal((await summary()).newMatches[0].firstSeen, '2026-10-26');
+    const file = path.join(root, 'data', 'opportunities.json');
+    const legacy = JSON.parse(fs.readFileSync(file));
+    delete legacy.opportunities[0].firstSeen;
+    fs.writeFileSync(file, JSON.stringify(legacy));
+    scan('synthetic-first-seen-3', '2026-10-28T08:00:00.000Z');
+    assert.equal((await summary()).newMatches[0].firstSeen, null, 'unknown legacy discovery dates must not be invented');
+    const current = JSON.parse(fs.readFileSync(file));
+    current.opportunities[0].firstSeen = 'not a calendar date';
+    fs.writeFileSync(file, JSON.stringify(current));
+    scan('synthetic-first-seen-4', '2026-10-29T08:00:00.000Z');
+    assert.equal((await summary()).newMatches[0].firstSeen, null);
+    const legacyRecipe = trackerMergeRecipe(JSON.stringify(legacy), JSON.stringify(legacy));
+    assert.equal(Object.hasOwn(canonicalMutationRecipe('tracker', legacyRecipe).upserts[0], 'firstSeen'), false, 'old recipe canonical bytes keep the absent optional field absent');
+  } finally { await new Promise((resolve) => server.close(resolve)); fs.rmSync(root, { recursive: true, force: true }); }
+});

@@ -65,3 +65,28 @@ test('selected household runtime isolates provider homes and honours explicit wo
     assert.equal(resolveWorkspaceRoot({ appRoot: process.cwd(), argv: ['--workspace', first.workspace], env }), first.workspace);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('a real process switching from another household environment writes only the selected device settings', async () => {
+  const { createHouseholdInstance, householdSettingsPath } = await import('../ui/lib/household.mjs');
+  const { seedWorkspace } = await import('../ui/lib/workspace.mjs');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-household-inherited-'));
+  const file = path.join(directory, 'registry.json');
+  try {
+    const options = { appRoot: process.cwd(), directory, file, initialise: (root) => seedWorkspace(process.cwd(), root) };
+    const first = createHouseholdInstance({ ...options, id: 'person-a', port: 8460 });
+    const second = createHouseholdInstance({ ...options, id: 'person-b', port: 8461 });
+    fs.writeFileSync(first.deviceSettings, JSON.stringify({ schemaVersion: 3, updates: { policy: 'notify' } }));
+    const before = fs.readFileSync(first.deviceSettings, 'utf8');
+    assert.equal(householdSettingsPath({ XDG_CONFIG_HOME: directory, LOCALAPPDATA: directory, SCOUT_DEVICE_SETTINGS: first.deviceSettings }), path.join(directory, 'Scout', 'household.json'), 'an inherited device path cannot relocate the host registry');
+    const script = "const s=await import('./ui/server.mjs');const d=await import('./ui/lib/deviceSettings.mjs');d.saveDeviceSettings({schemaVersion:3,updates:{policy:'download'}});console.log(JSON.stringify({workspace:s.WORKSPACE_ROOT,device:d.deviceSettingsPath()}));";
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script, 'synthetic-entry', '--workspace', second.workspace], {
+      env: { ...process.env, SCOUT_HOUSEHOLD_SETTINGS: file, SCOUT_WORKSPACE: first.workspace, SCOUT_DEVICE_SETTINGS: first.deviceSettings }, encoding: 'utf8', timeout: 10000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.readFileSync(first.deviceSettings, 'utf8'), before, 'person A settings must not be changed by person B');
+    assert.deepEqual(JSON.parse(result.stdout), { workspace: second.workspace, device: second.deviceSettings });
+    assert.equal(JSON.parse(fs.readFileSync(second.deviceSettings)).updates.policy, 'download');
+    const { deviceSettingsPath } = await import('../ui/lib/deviceSettings.mjs');
+    assert.equal(deviceSettingsPath({ SCOUT_HOUSEHOLD_SETTINGS: file, SCOUT_WORKSPACE: second.workspace, SCOUT_DEVICE_SETTINGS: first.deviceSettings }), second.deviceSettings);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});

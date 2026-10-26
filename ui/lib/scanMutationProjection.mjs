@@ -88,6 +88,14 @@ function number(value, fallback = 0) {
   return Number.isFinite(Number(value)) ? Number(value) : fallback;
 }
 
+// Optional on older mutation recipes: absence must remain absence so their
+// canonical bytes and recovery digests stay compatible.
+export function trackerFirstSeenDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value ? value : null;
+}
+
 function isoTimestamp(value) {
   const text = String(value || '');
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(text) ? text : '';
@@ -276,6 +284,7 @@ function safeOpportunity(entry, existed, prior = null) {
     learningVersionId: identifier(entry?.learningVersionId),
     rankingHistory: safeRankingHistory(entry?.rankingHistory),
     ...(safeNotificationState(entry?.notificationState) ? { notificationState: safeNotificationState(entry.notificationState) } : {}),
+    ...(Object.hasOwn(entry, 'firstSeen') ? { firstSeen: trackerFirstSeenDate(entry.firstSeen) } : {}),
     lastChecked: /^\d{4}-\d{2}-\d{2}$/.test(entry?.lastChecked || '') ? entry.lastChecked : null,
     foundVia: code(entry?.foundVia),
     ...(entry?.advertUpdate ? {
@@ -537,6 +546,7 @@ function canonicalTrackerRecipe(recipe) {
       learningVersionId: identifier(item?.learningVersionId),
       rankingHistory: safeRankingHistory(item?.rankingHistory),
       ...(safeNotificationState(item?.notificationState) ? { notificationState: safeNotificationState(item.notificationState) } : {}),
+      ...(Object.hasOwn(item, 'firstSeen') ? { firstSeen: trackerFirstSeenDate(item.firstSeen) } : {}),
       lastChecked: /^\d{4}-\d{2}-\d{2}$/.test(item?.lastChecked || '') ? item.lastChecked : null,
       foundVia: code(item?.foundVia),
       ...(item?.advertUpdate ? {
@@ -592,6 +602,7 @@ function renderTracker(currentContent, recipe) {
       learningVersionId: upsert.learningVersionId,
       rankingHistory: upsert.rankingHistory,
       ...(safeNotificationState(upsert.notificationState) ? { notificationState: safeNotificationState(upsert.notificationState) } : {}),
+      ...(Object.hasOwn(upsert, 'firstSeen') ? { firstSeen: trackerFirstSeenDate(upsert.firstSeen) } : {}),
       lastChecked: upsert.lastChecked,
       foundVia: upsert.foundVia,
       ...(upsert.advertUpdate ? { advertUpdate: upsert.advertUpdate } : {}),
