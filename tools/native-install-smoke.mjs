@@ -161,9 +161,8 @@ try {
   await page.route('**/api/scan', scan.route);
   await page.route('**/api/operations/installed-synthetic-scan', (route) => route.fulfill({ json: { operation } }));
   await Promise.all([scan.completion, page.locator('#scan-now').click()]);
-  const resultCard = page.locator('#tab-jobs .card[data-id]').filter({ hasText: 'Synthetic Studio' });
-  await resultCard.getByText('Synthetic Studio', { exact: true }).waitFor({ state: 'visible', timeout: 60000 });
-  await resultCard.getByText('Synthetic Engineer', { exact: true }).waitFor({ state: 'visible', timeout: 60000 });
+  const resultCard = page.locator('#tab-jobs .card[data-id]').filter({ hasText: 'Synthetic Studio - Synthetic Engineer' });
+  await resultCard.getByText('Synthetic Studio - Synthetic Engineer', { exact: true }).waitFor({ state: 'visible', timeout: 60000 });
   const calls = fs.readFileSync(path.join(bin, 'calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
   assert.ok(calls.some(({ kind }) => kind === 'onboarding')); assert.ok(calls.some(({ kind }) => kind === 'assessment'));
   assert.ok(fs.existsSync(path.join(workspace, 'data/scan-runs.jsonl')));
