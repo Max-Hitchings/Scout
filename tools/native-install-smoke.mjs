@@ -159,7 +159,14 @@ try {
   await page.locator('#scout-settings').click();
   await page.getByRole('button', { name: 'Search & profile', exact: false }).click();
   await page.getByLabel('How should Scout help you?').selectOption('active');
-  await page.getByRole('button', { name: 'Save search mode', exact: true }).click();
+  // Make this browser boundary deterministic even when real Git is fast on
+  // the runner: the preceding owned checkpoint must finish before this save.
+  await runtimeControl.request('hold-checkpoint');
+  const [modeResponse] = await Promise.all([
+    page.waitForResponse((response) => new URL(response.url()).pathname === '/api/setup/config' && response.request().method() === 'POST'),
+    page.getByRole('button', { name: 'Save search mode', exact: true }).click(),
+  ]);
+  assert.ok(modeResponse.ok(), `Installed UI mode mutation failed (${modeResponse.status()})`);
   await until(() => JSON.parse(fs.readFileSync(path.join(workspace, 'workspace.json'), 'utf8')).mode === 'active', 'reviewed search mode');
   await page.keyboard.press('Escape');
   const operation = { id: 'installed-synthetic-scan', type: 'scan', status: 'succeeded', phase: 'Synthetic scan completed', progress: { current: 5, total: 5 } };
