@@ -49,7 +49,7 @@ import {
   applyPreparedMutation, loadPreparedMutation, markerFreeMutationContent, prepareMutation,
 } from './mutationCoordinator.mjs';
 import {
-  jsonReplaceRecipe, renderMutationRecipe, runLogAppendRecipe, scanReportRecipe, trackerMergeRecipe,
+  jsonReplaceRecipe, renderMutationRecipe, runLogAppendRecipe, scanReportRecipe, trackerFirstSeenDate, trackerMergeRecipe,
 } from './scanMutationProjection.mjs';
 import {
   deriveSearchLaneResults, loadSearchLanePlan, recordSearchLaneRun,
@@ -2254,7 +2254,7 @@ function sourceHealth(sources) {
 function keeperContent(entry, identityLimit = 80) {
   const encoded = JSON.stringify({ opportunities: [entry] });
   const content = trackerMergeRecipe(encoded, encoded).upserts[0];
-  for (const key of ['lastChecked', 'rankingHistory', 'notificationState']) delete content[key];
+  for (const key of ['lastChecked', 'rankingHistory', 'notificationState', 'firstSeen']) delete content[key];
   content.jobIdentity.evidenceTokenDigests = content.jobIdentity.evidenceTokenDigests.slice(0, identityLimit);
   return content;
 }
@@ -2346,6 +2346,7 @@ function mergeTracker(
         ))
       )).slice(-32),
       notes: previous && Object.hasOwn(previous, 'notes') ? previous.notes : assessment.summary,
+      firstSeen: previous ? trackerFirstSeenDate(previous.firstSeen) : trackerFirstSeenDate(date),
       lastChecked: date, foundVia: candidate.source, contacts: previous?.contacts || [], log: previous?.log || [],
       ...(changedAdvert ? { advertUpdate: { detectedAt: date, previousFingerprint: previous.jobIdentity?.advertFingerprint || '', currentFingerprint: jobIdentity(candidate).advertFingerprint } } : {}),
     };

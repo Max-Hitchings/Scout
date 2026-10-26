@@ -32,6 +32,9 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   configuration or key presence alone remains unverified. Endpoint/model changes
   invalidate incompatible queued/recovered scans. See [Providers](PROVIDERS.md)
   for setup, credentials, transport limits and local-chat capabilities.
+- Local provider failures use the same private durable notification intent and
+  outbox as CLI providers, including episode deduplication and deferred
+  publication recovery; raw provider errors and key contents are never retained.
 - Staged release audits retain all dependency privacy checks. The only Ajv
   metadata exception is bound to the exact two vendor paths, reviewed SHA-256
   and single advert-body heuristic documented in
@@ -50,6 +53,15 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   a compatible durable queue request; idle startup drains older compatible work
   before beginning new unqueued work, and interrupted claims resume under their
   original run identity.
+- Run-journal append authority uses a private process-local snapshot minted
+  only by full validation or a fenced, flushed append. Each warm append checks
+  the regular file's identity, size and nanosecond change/modify timestamps and
+  rereads up to 64 KiB of the exact validated tail. Changed or unavailable
+  metadata, a tail mismatch, a copied handle, reopen or interrupted write
+  requires full hash-chain validation. An existing writer also requires its
+  committed prefix to remain intact. Public handle fields and returned events
+  cannot supply cache authority. Recovery and inspection still validate the
+  complete journal; torn-tail classification and fencing are unchanged.
 - Recovery selects the newest run compatible with the requested mode, purpose,
   published profile, source/config fingerprint and versioned stage inputs. It
   records why newer incomplete candidates were skipped. Deterministic stages
@@ -220,6 +232,16 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
 
 Do not assume a developer computer's local application checkout or workspace is live. Diagnose the VPS for production-like bugs unless the user explicitly reports a local-only installation.
 
+## Optional household home-server deployment
+
+The [home server guide](HOME_SERVER.md) describes an owner-managed Linux alternative: an unprivileged `scout` account, immutable application under `/srv/apps/scout/app`, one private workspace/provider home/device settings file and loopback port per person, and system-level service/timer templates. Each instance keeps an explicit workspace for its lifetime. Household create/list/switch changes only host-local selection for the next process and never copies career data. Registered instances pin their device-settings file and provider home, overriding inherited sibling device paths. New keepers persist a bounded first-seen date through receipted tracker recipes and subsequent rechecks; unknown legacy dates remain null. The systemd filesystem sandbox exposes only the current instance's state; mutually untrusted household members require separate Unix accounts and separately authorised private routes.
+
+`GET /api/health` is a local-only versioned liveness/configuration check. `GET /api/summary` is a read-only schema-v1 dashboard projection of mode, bounded scan/provider status, above-threshold new/shortlisted matches and every pending alert within the durable storage boundary. It omits CV/profile/notes, private paths, raw errors/provider output and URL queries/fragments. It never marks results read or triggers work.
+
+Outbound command/webhook notification hooks are owner-configured and disabled by default. The headless process polls the existing alert/digest outbox at startup and every five minutes; CLI scans also dispatch after outcomes. Delivery uses fixed executable argv with `shell: false` or bounded HTTP(S) POST without redirects, and normal delivery receipts are recorded only after success. Shared workspace delivery locks prevent overlap; recovery preserves pending alerts and receipts. Back up complete quiesced workspaces, host selection/unit configuration and separately encrypted provider credentials. No home-server installation or private-network access is performed by application development.
+
+Registered household instances and explicit `SCOUT_HEADLESS=1` services cannot install/remove/run desktop-native schedules or query another person’s user-global task state. CLI/API status labels schedules owner-managed and the UI points to per-instance system timers. Direct scheduled scan execution remains supported.
+
 ## Scan storage and reviewed cleanup
 
 Storage pressure is measured afresh for each response. Scout validates journal
@@ -273,6 +295,12 @@ Access details differ by operator and must be discovered from the private operat
 
 ## Change and release path
 
+Provider recovery acceptance runs with `npm run test:acceptance`. It uses the real
+HTTP server, CLI subprocesses and scheduled scan command with disposable synthetic
+provider homes; it never contacts live providers or installs native schedules.
+Run it alongside the normal suite. The owner-only current-provider check is in
+[Acceptance](ACCEPTANCE.md).
+
 1. Update the public checkout from `main` and create a focused `codex/` branch.
 2. Use a disposable synthetic workspace for tests; never point development tests at the authoritative workspace.
 3. Implement the change with regression coverage and update affected documentation and in-app guidance.
@@ -280,6 +308,12 @@ Access details differ by operator and must be discovered from the private operat
    Platform packagers consume only the audit-created content snapshot, recheck
    its privacy-authorized digest immediately before and after packaging, and
    remove the sealed snapshot in a `finally` path.
+   Update downloads require an exact-version Ed25519 release manifest and
+   detached signature trusted by the locally bundled public-key registry.
+   Installer preflight uses the same verifier. CI uses generated temporary test
+   keys; production signing requires owner public-key enrollment and the
+   protected `release-signing` environment. Candidate `-rc` tags do not deploy, upload artifacts
+   or publish. Signed metadata does not supersede the F-1 packaging gate.
    Workflow-policy tests check immutable action pins throughout every workflow
    receiving secrets. Allowlisted application and public-source trees exclude
    nested dependency directories; production dependencies use the separate

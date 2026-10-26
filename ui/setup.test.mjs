@@ -542,7 +542,7 @@ test('backup details explain safe and manual divergence without exposing paths',
 // Renders renderFirstScan for real and inspects the output, so a behavioural
 // regression fails here even if the source text is rewritten, and a harmless
 // reformat does not.
-async function renderFirstScanHtml({ scanHealth, jobs = [], runs = [] }) {
+async function renderFirstScanHtml({ scanHealth, jobs = [], runs = [], schedule = {} }) {
   globalThis.window = globalThis.window || {};
   // A query string gives a module instance loaded after `window` exists, so the
   // module's `window.ScoutSetup = Setup` export runs. `document` is deliberately
@@ -559,7 +559,7 @@ async function renderFirstScanHtml({ scanHealth, jobs = [], runs = [] }) {
     view.view = 'section';
     view.operations = {};
     view.status = {
-      scanHealth, schedule: { runs },
+      scanHealth, schedule: { ...schedule, runs },
       config: { ai: { provider: 'claude' }, locale: 'en-GB', schedule: { jobs } },
       providers: {},
     };
@@ -630,4 +630,18 @@ test('day presets round-trip to the selection they describe', () => {
   }
   assert.equal(matchingPreset([1, 4], 'primary'), 'custom');
   assert.equal(matchingPreset([], 'primary'), 'every');
+});
+
+test('headless schedule settings explain owner system timers and keep the manual scan action', async () => {
+  const html = await renderFirstScanHtml({
+    scanHealth: { lastRunAt: '2026-10-26T08:00:00.000Z', healthy: true },
+    jobs: [{ id: 'claude-primary', enabled: true }],
+    runs: [{ id: 'claude-primary', configured: true }],
+    schedule: { managedExternally: true, managementMessage: 'Your server owner manages per-person system timers.' },
+  });
+  assert.match(html, /server owner manages per-person system timers/);
+  assert.match(html, /Home server guide/);
+  assert.doesNotMatch(html, /data-schedule-enable|data-schedule-disable|data-schedule-row/);
+  assert.match(html, /id="setup-run-scan"/);
+  assert.match(html, />Scan now</);
 });

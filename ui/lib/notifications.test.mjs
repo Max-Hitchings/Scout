@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,60 @@ import test from 'node:test';
 const at = '2026-10-25T08:00:00.000Z';
 const later = '2026-10-26T08:00:00.000Z';
 const good = (id, score = 98) => ({ id, score, outcome: 'kept', eligibility: { status: 'eligible' } });
+
+for (const [kind, failure, expectedState] of [
+  ['remote-auth-failure', { status: 401 }, 'sign-in-required'],
+  ['network-failure', { errorCode: 'ECONNREFUSED' }, 'network-unavailable'],
+]) {
+  test(`local ${kind} health creates one private-safe durable notification episode`, async (t) => {
+    const n = await import('./notifications.mjs');
+    const { recordProviderHealth, readProviderHealth } = await import('./providerHealth.mjs');
+    const { providerRemoteHealthSignal } = await import('./providers.mjs');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-local-provider-outbox-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const secret = randomBytes(24).toString('hex');
+    const marker = 'SYNTHETIC_PROVIDER_PRIVATE_RESPONSE';
+    const signal = providerRemoteHealthSignal({ ...failure, error: { message: `${marker} ${secret} ${root}` } });
+    assert.equal(signal.kind, kind);
+    recordProviderHealth(root, 'local', signal, { now: new Date(at) });
+    assert.equal(readProviderHealth(root, 'local').state, expectedState);
+    const first = n.notificationView(n.readNotifications(root));
+    assert.equal(first.outbox.length, 1, 'a real local health failure must reach the durable outbox');
+    assert.equal(first.outbox[0].provider, 'local');
+    assert.equal(first.outbox[0].title, 'Local model provider warning');
+    recordProviderHealth(root, 'local', signal, { now: new Date(later) });
+    n.refreshNotificationDigest(root, { mode: 'background' }, later);
+    const state = n.readNotifications(root);
+    assert.equal(state.providerEpisodes.local.episode, 1);
+    assert.equal(state.alerts.length, 1);
+    assert.equal(n.notificationView(state).outbox[0].id, first.outbox[0].id);
+    const durable = JSON.stringify({ health: readProviderHealth(root, 'local'), state, view: n.notificationView(state) });
+    for (const privateValue of [secret, marker, root]) assert.equal(durable.includes(privateValue), false);
+  });
+}
+
+test('a local provider warning survives deferred outbox publication and is replayed once', async (t) => {
+  const n = await import('./notifications.mjs');
+  const { recordProviderHealth, readProviderHealth } = await import('./providerHealth.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-local-provider-replay-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const rename = fs.renameSync;
+  try {
+    fs.renameSync = (source, target) => {
+      if (String(target).endsWith('provider-notifications.json')) throw new Error('synthetic deferred publication');
+      return rename(source, target);
+    };
+    recordProviderHealth(root, 'local', { kind: 'remote-auth-failure', source: 'provider-operation' }, { now: new Date(at) });
+  } finally { fs.renameSync = rename; }
+  assert.equal(readProviderHealth(root, 'local').remoteAuthBarrier, true);
+  assert.equal(fs.existsSync(path.join(root, '.scout', 'notification-pending-local.json')), true);
+  assert.equal(n.notificationView(n.readNotifications(root)).outbox.length, 0);
+  n.refreshNotificationDigest(root, { mode: 'background' }, later);
+  assert.equal(n.notificationView(n.readNotifications(root)).outbox.length, 1);
+  n.refreshNotificationDigest(root, { mode: 'background' }, later);
+  assert.equal(n.readNotifications(root).providerEpisodes.local.episode, 1);
+  assert.equal(n.notificationView(n.readNotifications(root)).outbox.length, 1);
+});
 
 test('background watch stays quiet for ordinary assessed matches and deduplicates exceptional vacancies', async () => {
   const n = await import('./notifications.mjs');

@@ -60,6 +60,71 @@ A2 line 50 is now done. These stay open: A10 line 172 (#76, see A), A11 lines 18
 ## Appending your own progress
 Work done after this snapshot goes in its own section below, signed with the author or agent and dated. Leave the "What is done" table above as the record of this snapshot.
 
+## 2026-10-26 — Codex: process-boundary provider acceptance
+
+- Added `npm run test:acceptance` for Claude expiry, Codex revocation and Codex
+  refresh rejection. Each scenario starts the real HTTP server, provider CLI
+  subprocesses, scheduled scan command and guided-login manager in disposable
+  synthetic homes. No health manager or provider result is replaced in-process.
+- Checks local-versus-remote truth, failed remote confirmation, guided retry,
+  remote-owner CSRF/origin handling, one warning episode, saved single-use chat
+  resend, missed-scan evidence and an explicitly resumed scheduled scan. A source
+  HTTP preload prevents the successful recovery path from contacting job sources.
+- The three scenarios were observed RED against the original integration base:
+  chat SSE did not identify the actual authentication failure. They are GREEN
+  after the reviewed provider/notification integration. Full-suite and release
+  audit results are recorded in this package's pull request.
+- Added the packaged [acceptance guide](ACCEPTANCE.md), separating automated
+  composition from the owner's once-per-provider-version real-account check.
+  Native timers, Windows balloons, real accounts and private remote deployment
+  acceptance remain separate evidence; none is claimed from the synthetic run.
+## 2026-10-26 — journal append cost (Codex)
+
+A-3 was independently reproduced using real journal writes and genuine renewed
+leases in disposable synthetic workspaces. At dependency head `84d8aad`, 500
+assessment events took 2,528 ms and reread 195,148,744 bytes; 2,500 took
+65,176 ms and reread 4,904,577,744 bytes. Their journals were 391,500 and
+1,965,501 bytes. This confirms repeated full validation, plus a second full
+delimiter read, caused the reported quadratic I/O.
+
+Warm appends now use a private process-local snapshot with exact bounded-tail
+verification and identity/size/nanosecond timestamp checks. Every unexpected
+change, reopen, forged handle or interrupted append falls back to complete
+validation. Known committed history, fencing, idempotency and the distinction
+between torn JSON and corrupt complete records remain protected. Returned
+events cannot mutate cache authority. The new real-file read-budget contract
+was observed RED at 110,200,650 bytes for 100 warm appends against a 7 MiB
+budget, then GREEN; its failure/replacement/restart cases exercise the actual
+writer and full replay rather than a model of the implementation.
+
+Independent review reproduced a canonical-equivalent root-spelling change
+discarding a minted handle's prefix anchor during fallback. Its exact
+regression was observed RED before the repair, then GREEN: spelling changes
+now force full validation while preserving the independently known prefix.
+
+The repeatable fixture is `node ui/lib/fixtures/run-journal-append.mjs 500 2500`.
+Local measurements after the repair were 284 ms / 29,973,727 bytes for 500
+events and 1,469 ms / 161,045,727 bytes for 2,500, with zero full journal reads
+during unchanged appends; final full validation independently confirmed every
+event. Timings are local Linux evidence. Native Windows/macOS and maintained
+VPS remeasurement remain operator acceptance, and this package does not alter
+the independent F-1 or D-1 work.
+## 2026-10-26 — signed release manifests (Codex)
+
+Implemented an Ed25519 detached release manifest with exact repository/version,
+package filename, byte length and SHA-256. The updater authenticates bounded
+metadata before requesting installer bytes and preserves streamed hashing,
+size limits and atomic writes. Offline installer preflight uses the same
+verifier. Tests generate keys at runtime only; no private key is committed.
+
+Observed RED: unsigned and forged metadata were accepted by the old updater;
+a successful download had no verified signing identity. The new offline
+signing/verification command was absent. All four regression tests then passed
+after implementation. Owner key enrollment, protected environment approval,
+native publisher certificates and the separate F-1 packaging gate remain open.
+Candidate `-rc` tags cannot deploy or publish. Full-suite and hosted native
+evidence will be recorded on the PR, without claiming an unexecuted release.
+
 ## 2026-10-25 — truth-docs (Codex)
 
 | Finding | Disposition and evidence |
@@ -284,3 +349,10 @@ Local-only operation now has a trusted structured evidence-selector draft flow,
 an explicit editable preview/save step and a separate DRAFT CV PDF target.
 Fake HTTP/provider-to-save-to-render tests cover both draft kinds; generic
 operation projections contain an opaque draft ID and no CV text.
+
+Independent review found candidate-version ordering still used a lexical fallback.
+Observed RED at the public update-check action for an installed candidate moving
+to the final beta; numeric `rc10` versus `rc2` was also wrong. Semantic candidate
+ordering and all supported version projections now agree. Candidate-tag artifact
+uploads are disabled as well as deployment/publication. Post-fix full Node
+verification passed 1,587 total, 1,581 passed, zero failed, six platform skips.

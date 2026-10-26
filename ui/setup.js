@@ -1783,6 +1783,7 @@ const Setup = {
       <label class="setup-field"><span><input id="setup-auto-download-updates" type="checkbox" ${device.updates?.policy === 'download' ? 'checked' : ''}> Download verified update packages automatically</span></label>
       ${device.startupStatus?.supported ? `<label class="setup-field"><span><input id="setup-start-with-windows" type="checkbox" ${device.startWithWindows ? 'checked' : ''}> Start Scout when I sign into Windows</span></label>` : ''}
       <p><button id="setup-save-device" class="act primary" type="button">Save device settings</button></p></div>
+      ${this.status?.platform === 'linux' ? '<div class="setup-callout"><strong>Always-on server</strong><p>Scout can run scheduled scans and deliver owner-configured alerts without a desktop. External alerts stay off until the server owner configures them. Each person needs a separate workspace and private address.</p><p><a href="https://github.com/oliver-hitchings/Scout/blob/main/docs/HOME_SERVER.md" target="_blank" rel="noreferrer">Home server guide</a></p></div>' : ''}
       <p><button id="setup-restart" class="act" type="button">Restart Scout</button></p>` :
       '<p>Device settings are unavailable on this host.</p>';
     this.el('setup-save-device')?.addEventListener('click', () => this.saveDeviceSetting());
@@ -1809,7 +1810,9 @@ const Setup = {
     const restored = this.restoredPreferences;
     const schedule = this.status?.schedule || {};
     const scheduleRuns = schedule.runs || [];
-    const scheduleText = schedule.enabled
+    const scheduleText = schedule.managedExternally
+      ? this.escape(schedule.managementMessage || 'Your server owner manages per-person system timers. Desktop schedule controls are unavailable here.')
+      : schedule.enabled
       ? `${scheduleRuns.map((run) => `${this.escape(run.provider)} ${this.escape(run.mode)} at ${this.escape(run.time)}`).join('; ')}; next run ${this.escape(formatLocalDateTime(schedule.nextRunAt, this.status?.config?.locale))}; last result ${this.escape(schedule.lastResult || 'unknown')}`
       : schedule.configured
         ? 'A daily scan is saved in the workspace, but this computer’s scheduler is not active.'
@@ -1826,7 +1829,7 @@ const Setup = {
         ${this.status?.device ? `<div class="setup-callout"><strong>Application updates</strong><p>Scout checks its official GitHub releases. Notifications are on; package downloads are optional and verified against the release SHA-256 manifest.</p><label class="setup-field"><span><input id="setup-auto-download-updates" type="checkbox" ${this.status.device.updates?.policy === 'download' ? 'checked' : ''}> Download verified update packages automatically</span></label>${this.status.device.startupStatus?.supported ? `<label class="setup-field"><span><input id="setup-start-with-windows" type="checkbox" ${this.status.device.startWithWindows ? 'checked' : ''}> Start Scout when I sign into Windows</span></label>` : ''}<p><button id="setup-save-device" class="act" type="button">Save device settings</button></p><p class="meta">Installation always asks first. Updates never replace your separate workspace, provider sign-ins or Tailscale Serve mapping.</p></div>` : ''}
       </div>
       ${this.remoteAccessPanelHtml()}
-      ${restored ? `<div class="setup-callout"><strong>Choose settings for this computer</strong><p>Your work has been restored. Device integrations stay off until you confirm them here.</p>${this.status?.device && restored.startWithWindows ? '<label class="setup-field"><span><input id="restore-start-with-windows" type="checkbox"> Start Scout with Windows on this computer</span></label>' : ''}${this.status?.schedule?.configured ? `<label class="setup-field"><span><input id="restore-daily-schedule" type="checkbox"> Enable the saved ${this.escape(this.status.schedule.time || '')} daily scan on this computer</span></label>` : ''}<p><button id="restore-apply-device" class="act primary" type="button">Apply selected settings</button> <button id="restore-keep-device-local" class="act" type="button">Keep them off</button></p></div>` : ''}
+      ${restored ? `<div class="setup-callout"><strong>Choose settings for this computer</strong><p>Your work has been restored. Device integrations stay off until you confirm them here.</p>${this.status?.device && restored.startWithWindows ? '<label class="setup-field"><span><input id="restore-start-with-windows" type="checkbox"> Start Scout with Windows on this computer</span></label>' : ''}${this.status?.schedule?.configured && !this.status?.schedule?.managedExternally ? `<label class="setup-field"><span><input id="restore-daily-schedule" type="checkbox"> Enable the saved ${this.escape(this.status.schedule.time || '')} daily scan on this computer</span></label>` : ''}<p><button id="restore-apply-device" class="act primary" type="button">Apply selected settings</button> <button id="restore-keep-device-local" class="act" type="button">Keep them off</button></p></div>` : ''}
       <p>You can move or back up the workspace independently. API credentials stay in its ignored <code>.env</code> file and are never shown again here.</p>
       <p class="meta">Something stuck? <button id="setup-restart" class="act" type="button">Restart Scout</button> restarts the local server and reloads this page.</p></div></div>
       ${established ? this.backupPanelHtml() : ''}`;
@@ -2103,10 +2106,11 @@ const Setup = {
       <div class="setup-callout"><strong>${hasHistory ? 'Supervised scan completed' : 'Supervised first scan'}</strong><p>${healthy ? `Last run: ${this.escape(formatLocalDateTime(health.lastRunAt, this.status?.config?.locale))}.` : 'A full source check can take several minutes and no application will be sent.'}</p>${outcome ? `<p><strong>${this.escape(outcome.headline)}</strong>${outcome.breakdown.length ? ` — ${this.escape(outcome.breakdown.join(', '))}` : ''}. Zero keepers can be a valid strict result.</p><p><a href="#reports" data-report-date="${this.escape(String(health.lastRunAt).slice(0, 10))}">Review the dated scan report</a></p>` : ''}</div>
       ${this.operationPanelHtml('scan')}
       <p><button id="setup-run-scan" class="act primary" type="button" ${(scanning || !profileReady) ? 'disabled' : ''}>${scanning ? 'Scan running…' : hasHistory ? 'Scan now' : 'Run first scan now'}</button></p>
-      <div class="setup-callout"><strong>Daily scan schedule</strong><p>Each provider job is independent. First-run setup only offers your selected provider.</p>
+      <div class="setup-callout"><strong>Daily scan schedule</strong>
+      ${schedule.managedExternally ? `<p>${this.escape(schedule.managementMessage || 'Your server owner manages per-person system timers. Desktop schedule controls are unavailable here.')}</p><p><a href="https://github.com/oliver-hitchings/Scout/blob/main/docs/HOME_SERVER.md" target="_blank" rel="noreferrer">Home server guide</a></p>` : `<p>Each provider job is independent. First-run setup only offers your selected provider.</p>
       ${scheduleRow(primaryId, provider, 'primary', primaryRun, '07:30')}
       ${this.view === 'section' && other && !showSecond ? '<p><button id="setup-add-verification" class="act" type="button">Add verification pass</button></p>' : ''}
-      ${showSecond ? scheduleRow(secondRun?.id || `${other}-second-pass`, secondRun?.provider || other, 'second-pass', secondRun, '08:30') : ''}
+      ${showSecond ? scheduleRow(secondRun?.id || `${other}-second-pass`, secondRun?.provider || other, 'second-pass', secondRun, '08:30') : ''}`}
       </div></div>
       ${includeBackup ? this.backupPanelHtml() : ''}`;
     this.el('setup-run-scan').addEventListener('click', () => this.runSupervisedScan());

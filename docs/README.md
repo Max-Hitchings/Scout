@@ -13,7 +13,9 @@ Scout stores career data locally by default. Read [privacy and data handling](PR
 
 ## I want Scout to run on an always-on server
 
-Start with the [VPS installation guide](INSTALL_VPS.md). It covers:
+For a household Linux server with one private instance per person, use the [home server guide](HOME_SERVER.md). It includes headless systemd services, timers, a local dashboard API, optional outbound notifications and restore steps.
+
+For the maintained VPS deployment, start with the [VPS installation guide](INSTALL_VPS.md). It covers:
 
 - private access through Tailscale;
 - the web service and reboot persistence;
@@ -43,6 +45,7 @@ Read [CONTRIBUTING.md](../CONTRIBUTING.md), then use:
 
 - [repository layout](REPOSITORY_LAYOUT.md) for public/private data boundaries;
 - [operations context](OPERATIONS.md) for the maintained VPS topology and change path;
+- [provider acceptance](ACCEPTANCE.md) for synthetic expiry/recovery checks and the owner's real-account check;
 - [scan protocol](SCOUT_SCAN_PROTOCOL.md) for scan behaviour;
 - [release process](RELEASE.md) for packaging and publishing;
 - [release package verification and signing](SUPPLY_CHAIN_SECURITY.md) for checksums, attestations and platform-signing boundaries; and
