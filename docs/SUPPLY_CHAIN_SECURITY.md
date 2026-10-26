@@ -173,11 +173,21 @@ their contents.
 
 The audit has one narrowly reviewed metadata exception for Ajv's pinned security
 meta-schema: the `advert-body` heuristic at line 5 of exactly
-`app/node_modules/ajv/dist/refs/json-schema-secure.json` and its `lib/refs` copy.
+`node_modules/ajv/dist/refs/json-schema-secure.json` and its `lib/refs` copy,
+beneath only these app roots relative to the audited stage:
+
+- `app` (common stage and Windows installer);
+- `deb/opt/scout/app` (Linux Debian package);
+- `Scout-<package-version>-linux-x64/app` (Linux portable package, using the
+  exact version from the auditor's own package); and
+- `dmg-root/Scout.app/Contents/Resources/app` (macOS disk-image bundle).
+
 Both must have SHA-256
 `b7840b4f1526eee47ac19780906a436d0c39df2aa3d505388caf18864085a421`.
-This is public schema-description text, not an advert. A byte change or different
-path removes the exception. Personal-marker, credential, prompt, transcript,
+This is public schema-description text, not an advert. A byte change, different
+path, additional parent directory or different portable version removes the
+exception. The audit still inspects the entire stage, including files outside
+these roots. Personal-marker, credential, prompt, transcript,
 private-path and all other checks still apply. Dependency upgrades must review
 any changed metadata before updating this exact digest.
 
