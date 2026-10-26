@@ -1019,6 +1019,17 @@ test('tracker recipes preserve bounded durable scan identity and ranking lineage
   assert.doesNotMatch(JSON.stringify(recipe), /must not persist|access_token/);
 });
 
+test('run-log assessment versions retain namespaced models while other identifiers stay strict', () => {
+  const version = { promptVersion: 'assessment-v1', assessmentSchemaVersion: 1, provider: 'local', model: 'synthetic/nested/model-27b:Q4_K_M' };
+  assert.deepEqual(runLogAppendRecipe({ assessment_version: version }).record.assessment_version, version);
+  for (const model of ['../model', '/private/model', 'synthetic/../model', 'synthetic//model', 'model with spaces', 'm'.repeat(129)]) {
+    assert.equal(runLogAppendRecipe({ assessment_version: { ...version, model } }).record.assessment_version, undefined);
+  }
+  for (const field of ['promptVersion', 'provider']) {
+    assert.equal(runLogAppendRecipe({ assessment_version: { ...version, [field]: 'synthetic/value' } }).record.assessment_version, undefined);
+  }
+});
+
 test('run-log recipes preserve URL vacancy IDs and full supported provider references', () => {
   const providerId = 'a'.repeat(129);
   const vacancyId = 'https://jobs.example.test/opening/42?tracking=private';

@@ -2382,6 +2382,66 @@ test('a scan records its assessment version and a model change assesses an earli
   assert.deepEqual(lastRun().explanations.map((item) => item.lifecycle.reason), ['assessment-change']);
 });
 
+test('changing a configured namespaced local model reassesses a durable earlier rejection', async (t) => {
+  const root = scanRoot();
+  enableRankedDiscovery(root);
+  const assessedModels = [];
+  const server = http.createServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    const request = JSON.parse(raw);
+    const prompt = request.messages.at(-1).content;
+    let value = { ready: true };
+    if (prompt.includes('Assess only the supplied Scout candidates')) {
+      const candidates = JSON.parse(prompt.split('\n\n').at(-1)).candidates;
+      assessedModels.push(request.model);
+      value = { assessments: candidates.map((item) => nuancedAssessment(item.candidateId, { recommendation: 'discard' })) };
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(value) } }] }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const selectModel = (model) => {
+    const config = loadWorkspaceConfig(root);
+    config.ai = { provider: 'local', local: { baseUrl: `http://127.0.0.1:${server.address().port}/v1`, model, retries: 0 } };
+    writeWorkspaceConfig(root, config);
+  };
+  const job = { company: 'Synthetic Rejected Co', title: 'Ideal Role', url: 'https://example.test/jobs/local-rejected', providerId: 'local-rejected', description: 'Deliver reliable systems.' };
+  const scan = () => runScanWith(root, 'local', 'primary', {
+    collectSourcesFn: async () => ({ generatedAt: new Date().toISOString(), queries: [], sources: {
+      ats: { configured: true, status: 'healthy', count: 1, jobs: [job] },
+    } }),
+    checkLivenessFn: async (items) => ({ live: items, removed: [], summary: { checked: items.length, gone: 0, unverified: 0 } }),
+    queueWorkspaceSyncFn: async () => ({ state: 'disabled', enabled: false }),
+    onProgress: () => {},
+  });
+  const lastRun = () => JSON.parse(fs.readFileSync(path.join(root, 'data', 'scan-runs.jsonl'), 'utf8').trim().split(/\r?\n/).at(-1));
+
+  selectModel('synthetic/model-a');
+  const first = await scan();
+  assert.equal(first.ok, true, first.error);
+  const firstRecord = lastRun();
+  assert.equal(firstRecord.reviewed[0].outcome, 'provider_discarded');
+  assert.deepEqual(assessedModels, ['synthetic/model-a']);
+
+  assert.equal((await scan()).ok, true);
+  assert.deepEqual(assessedModels, ['synthetic/model-a'], 'the unchanged local model leaves the rejection alone');
+
+  selectModel('synthetic/model-b');
+  const changed = await scan();
+  assert.equal(changed.ok, true, changed.error);
+  assert.deepEqual(assessedModels, ['synthetic/model-a', 'synthetic/model-b'], 'changing the configured local model must assess the rejection again');
+  assert.equal(firstRecord.assessment_version.model, 'synthetic/model-a');
+  assert.equal(lastRun().assessment_version.model, 'synthetic/model-b');
+  assert.equal(lastRun().assessment_version.provider, 'local');
+  assert.deepEqual(lastRun().explanations.map((item) => item.lifecycle.reason), ['assessment-change']);
+});
+
 test('persisted source country flows through collection and canonical compensation independently of workspace currency', async () => {
   const { fetchAdzuna } = await import('../ui/lib/adzuna.mjs');
   const { normaliseObservation } = await import('../ui/lib/vacancyObservation.mjs');
