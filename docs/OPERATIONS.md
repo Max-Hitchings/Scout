@@ -32,6 +32,9 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   configuration or key presence alone remains unverified. Endpoint/model changes
   invalidate incompatible queued/recovered scans. See [Providers](PROVIDERS.md)
   for setup, credentials, transport limits and local-chat capabilities.
+- Local provider failures use the same private durable notification intent and
+  outbox as CLI providers, including episode deduplication and deferred
+  publication recovery; raw provider errors and key contents are never retained.
 - Staged release audits retain all dependency privacy checks. The only Ajv
   metadata exception is bound to the exact two vendor paths, reviewed SHA-256
   and single advert-body heuristic documented in
