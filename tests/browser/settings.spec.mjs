@@ -1172,3 +1172,19 @@ test('a service-worker or build upgrade waits for CV edits, operations, and sett
     banner.getByRole('button', { name: 'Refresh Scout' }).click({ force: true }),
   ]);
 });
+
+test('Adzuna country can be reviewed and saved without replacing credentials', async ({ page }) => {
+  let saved;
+  await page.route('**/api/setup/config', async (route) => {
+    saved = route.request().postDataJSON();
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      ok: true, config: { ...establishedStatus.config, sources: { adzuna: { country: saved.sources.adzuna.country } } },
+    }) });
+  });
+  await page.evaluate(() => window.ScoutSetup.openSettings('sources'));
+  await expect(page.getByLabel('Adzuna search country')).toBeVisible();
+  await page.getByLabel('Adzuna search country').selectOption('us');
+  await page.getByRole('button', { name: 'Save search country' }).click();
+  await expect.poll(() => saved?.sources?.adzuna?.country).toBe('us');
+  await expect(page.locator('#setup-body')).toContainText('country');
+});

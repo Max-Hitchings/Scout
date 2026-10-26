@@ -347,7 +347,7 @@ export async function createOnboardingProposal(root, provider, {
   const prompt = [
     'Create one evidence-only Scout onboarding proposal from the JSON input below.',
     'Never invent or infer a fact. Every factual output item must cite one or more supplied evidence IDs.',
-    'Create concise UK-English profile and CV content, a 100-point rubric, mandatory gates, and distinct search lanes.',
+    `Create concise profile and CV content using the workspace locale ${config.locale}, a 100-point rubric, mandatory gates, and distinct search lanes.`,
     'Return only the required schema. Do not access files, run commands, browse, activate changes, apply for jobs, or send outreach.',
     JSON.stringify({ config, evidence: input.evidence }),
   ].join('\n\n');

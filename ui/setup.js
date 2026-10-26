@@ -4,6 +4,14 @@ const STEPS = ['Welcome', 'AI provider', 'Your search', 'Adzuna', 'Import CV', '
 // decision to finish the optional AI enrichment later.
 const SETUP_DEFERRED_KEY = 'scout.setup.legacySkipped.v1';
 const SUPPORTED_CV = /\.(pdf|docx|md|markdown|txt)$/i;
+const ADZUNA_COUNTRIES = ['at', 'au', 'be', 'br', 'ca', 'ch', 'de', 'es', 'fr', 'gb', 'in', 'it', 'mx', 'nl', 'nz', 'pl', 'sg', 'us', 'za'];
+
+function adzunaCountryField(config = {}) {
+  const selected = config.sources?.adzuna?.country || 'gb';
+  const countries = [...new Set([...ADZUNA_COUNTRIES, selected])];
+  const names = new Intl.DisplayNames([config.locale || 'en-GB'], { type: 'region' });
+  return `<label class="setup-field">Adzuna search country<select id="setup-adzuna-country">${countries.map((country) => `<option value="${escapeProfileText(country)}" ${selected === country ? 'selected' : ''}>${escapeProfileText(names.of(country.toUpperCase()) || country)}</option>`).join('')}</select></label><p class="meta">Adzuna searches this country's vacancies. Salary currencies come from that country, independently of your preferred currency.</p>`;
+}
 const DISMISSIBLE_VIEWS = new Set(['hub', 'section', 'retune', 'backup-details']);
 // Sunday = 0, matching ui/lib/scheduler.mjs. Kept as a literal here because
 // setup.js stays self-contained so a browser attached to a pre-update server
@@ -1648,11 +1656,22 @@ const Setup = {
     this.el('setup-body').innerHTML = `
       <div class="setup-callout"><strong>Public sources</strong><p>Scout uses its configured public job sources without requiring credentials.</p></div>
       <div class="setup-callout"><strong>Adzuna: ${this.status?.adzunaConfigured ? 'configured' : 'not configured'}</strong>
-      <p>Saved credentials are never displayed. Use Retune my search to add or replace them.</p></div>
+      <p>Saved credentials are never displayed. Use Retune my search to add or replace them.</p>
+      ${adzunaCountryField(this.status?.config)}<button id="settings-save-adzuna-country" class="act" type="button">Save search country</button></div>
       <p><button id="settings-retune-sources" class="act" type="button">Retune search and sources</button></p>`;
     this.el('settings-retune-sources').addEventListener('click', () => {
       this.enterRetune('sources');
       this.focusDialogTitle();
+    });
+    this.el('settings-save-adzuna-country').addEventListener('click', async () => {
+      try {
+        const result = await requestJson('/api/setup/config', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sources: { adzuna: { country: this.el('setup-adzuna-country').value } } }),
+        });
+        this.status.config = result.config;
+        this.setMessage('Adzuna search country saved.', 'good');
+      } catch (error) { this.setMessage(error.message, 'error'); }
     });
   },
 
@@ -1899,6 +1918,7 @@ const Setup = {
       <p>Register for an Adzuna developer account, then paste the application ID and API key below. Scout saves them only to the private workspace's ignored <code>.env</code> file.</p>
       ${this.status?.adzunaConfigured ? '<div class="setup-callout"><strong>Adzuna is configured</strong><p>The saved values are deliberately not displayed. Leave both fields empty to keep them unchanged.</p></div>' : ''}
       <div class="setup-grid">
+        ${adzunaCountryField(this.status?.config)}
         <label class="setup-field">Application ID<input id="setup-adzuna-id" type="password" autocomplete="off" spellcheck="false"></label>
         <label class="setup-field">API key<input id="setup-adzuna-key" type="password" autocomplete="off" spellcheck="false"></label>
       </div>
@@ -2487,6 +2507,11 @@ const Setup = {
         window.Scout?.applyWorkspaceConfig?.(result.config);
       }
       if (this.step === 3) {
+        const countryResult = await requestJson('/api/setup/config', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sources: { adzuna: { country: fieldValue('setup-adzuna-country') } } }),
+        });
+        this.status.config = countryResult.config;
         const appId = fieldValue('setup-adzuna-id').trim();
         const apiKey = fieldValue('setup-adzuna-key').trim();
         if ((appId && !apiKey) || (!appId && apiKey)) throw new Error('Enter both Adzuna values, or leave both blank to skip.');
