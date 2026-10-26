@@ -395,3 +395,112 @@ Local-only operation now has a trusted structured evidence-selector draft flow,
 an explicit editable preview/save step and a separate DRAFT CV PDF target.
 Fake HTTP/provider-to-save-to-render tests cover both draft kinds; generic
 operation projections contain an opaque draft ID and no CV text.
+
+## 2026-10-26 — completion inventory and release boundaries (Codex)
+
+The expanded request has been implemented in the package branches below and
+normally merged into `friend/integration-completion` for combined verification.
+PR #92 carries that prepared integration. This is a fork mirror: upstream write
+attempts were denied, so neither canonical `integration/epic77-progress` nor
+`main` has received these merges. GitHub checklist items and issues remain open
+until the canonical changes are merged and verified.
+
+| Prepared work | Branch | Pull request |
+| --- | --- | --- |
+| Reviewed discovery, provider truth, retention, modes, supply chain and portable fixtures | Original six `friend/` package branches | #86–#91 |
+| Signed manifests, updater verification, installer preflight and owner key lifecycle | `friend/release-signing` | #93 |
+| C# compilation, native receipts, Windows long paths, all-platform browser matrix and installed-artifact harness | `friend/native-acceptance` | #94 |
+| Bounded OpenAI-compatible HTTP provider, schema fallback, private key-file reads and durable failure alerts | `friend/local-provider` | #95 |
+| Isolated household instances, systemd examples, health/summary API and optional outbound hooks | `friend/home-server` | #96 |
+| Real server/CLI process acceptance for expiry, revocation, guided re-auth and failed scheduled preflight | `friend/provider-acceptance` | #97 |
+| Validated warm journal appends with full-validation fallback and immutable prefix authority | `friend/journal-append` | #98 |
+| Living CV approval/recovery, editable local-model drafts/PDFs, phone controls and first-run guidance | `friend/standalone-features` | #99 |
+| Windows-only temporary fixture rename contention | `friend/windows-guard-fixture` | #100 |
+| Patched production XML/schema dependencies and a production dependency-audit CI gate | `friend/dependency-hardening` | #101 |
+| Namespaced model assessment history and actual model-change reassessment | `friend/model-provenance` | #103 |
+| Explicit local-provider resend and provider retention when reopening chat | `friend/local-chat-recovery` | #104 |
+| Exact vendor metadata audit coverage for supported native packaging layouts | `friend/native-vendor-audit` | #105 |
+| Authentication/rate-limit status retained with oversized or stalled HTTP error bodies | `friend/local-http-status-truth` | #106 |
+| User mode/model input retained across delayed setup responses | `friend/settings-input-preservation` | #107 |
+| Unsaved draft transitions, busy-save exclusion and stale completion guards | `friend/draft-transition-preservation` | #108 |
+| Deterministic Windows setup-fixture ordering with the owned checkpoint drain | `friend/setup-acceptance-ordering` | #109 |
+| Open phone job cards and unfinished feedback retained while current facts update | `friend/card-refresh-preservation` | #110 |
+
+### Feature inventory
+
+The inventory covered epic #77, the audit ledger, open public feature requests,
+the current documentation and source TODOs. Existing implemented features were
+verified rather than duplicated:
+
+- Structured profile fields, explicit unknown-pay policy, six work domains,
+  diversity-aware selection and deterministic source ordering already have
+  production ranking and discovery coverage. Production-shaped migration tests
+  materialise a separate beta.22 rollback and preserve the newer live workspace.
+- Adaptive setup, selective lane regeneration, fair rotation, dated history and
+  reversible retirement already exist. New onboarding proposes editable browser
+  language, time zone and currency, and requires a chosen job-source country.
+- Employer watch lists, rotated careers-page monitoring, source guards and
+  employer health/history already exist. Private employer notes complete the
+  remaining requested interaction.
+- Feedback events already feed reviewed, interpretable, bounded ranking changes
+  with publication history and undo. Thumbs, reasons, scoped proposals and a
+  reversible reset complete the requested controls.
+- The responsive PWA, profile publication, application folders, CV quality checks
+  and Typst runtime are reused. New source approval and local draft flows bind
+  evidence and file revisions, retain immutable CV versions, require explicit
+  preview/save, label PDFs as drafts and reject stale downloads. Unsaved editor
+  text blocks an app refresh until the user saves or explicitly discards it.
+- Modes, local notification episodes, explicit provider resend, retention
+  maintenance, scan recovery and backup remain covered by their production
+  boundary tests. No automatic application sending or automatic retention
+  deletion is introduced.
+
+No additional unfinished public user feature was found outside these pieces and
+the ownership boundaries below. Historical sections above remain dated evidence,
+including limitations that later package evidence supersedes.
+
+### Verification and hardening evidence
+
+Every package received a separate non-author review before its mirror merge.
+Observed RED-to-GREEN repairs include disk-failed resend reservations,
+description-bearing unchanged keepers, notification consumption across mode
+changes, journal alias/prefix mutation, provider alert persistence, FIFO and
+symlink key-file boundaries, Living CV recovery/revision conflicts, linked
+application paths and unsaved preview preservation. Native acceptance commands
+receive an isolated environment before the first installer action; uninstall
+checks compare the complete retained workspace tree and file digests.
+
+At mirror `d66e390`, the full Node suite passed 1,639 tests with seven appropriate
+platform skips and zero failures; the production dependency audit reported zero
+vulnerabilities. At standalone `ca7ef1c`, 1,670 tests passed with six platform
+skips and zero failures. The combined final head, process acceptance, browser,
+staged privacy audit and per-job hosted results are recorded on PR #92 and
+summarised on PR #85. These earlier counts do not claim final-head clearance.
+
+Hosted run 40291322968 at `e2a2e7c` compiled the production Windows host, executed
+native notification receipts and the long-path round trip, and passed the twelve
+OS/browser jobs. Later combined heads must pass their own checks. Privacy audits
+here use a synthetic required marker; they do not claim the owner's private
+marker clearance. Tests use fake HTTP/process providers and disposable synthetic
+workspaces; no live account acceptance or private-host deployment is claimed.
+
+### Remaining owner boundaries and release gates
+
+- F-1 stays with PR #84's owner; D-1 stays with its separate owner. PR #84 received
+  a review comment without changes to its branch. Earlier native artifact builds
+  stopped before installation at the F-1 privacy-authorised snapshot check.
+  Final-head packaging findings and their repairs are also tracked on PR #92
+  and PR #85. The fresh-install harness exists, but installation/onboarding/
+  uninstall success must not be inferred until every packaging gate passes.
+- Canonical integration merges require upstream write access. Main must receive
+  only the normal merge of PR #85 after a clean final independent review, every
+  OS/browser/native job, full Node/process acceptance and the strict privacy
+  audit. No main write, release-candidate tag, release publication, artifact
+  upload or deployment has been performed by this completion work.
+- The owner enrolls production signing keys and controls rotation/revocation,
+  platform signing identities, private audit markers and any optional outbound
+  destination. The empty production trust registry fails closed until enrollment.
+- Real-account acceptance follows [Acceptance](ACCEPTANCE.md). Private routing,
+  service installation, backup/restore rehearsal and any private operator
+  context remain owner actions; the public systemd and household procedures are
+  in [Home server](HOME_SERVER.md). These tests did not access the private host.

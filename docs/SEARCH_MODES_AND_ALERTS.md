@@ -80,9 +80,11 @@ The local endpoints are `GET /api/notifications`,
 `POST /api/notifications/poll`, `POST /api/notifications/delivered` and
 `POST /api/notifications/acknowledge`. Polling and desktop delivery receipts are
 restricted to the local Scout host. The normal owner, origin and JSON checks
-protect mutations. There are no email, push, webhook or other outbound
-notification calls. macOS, Linux and a remote browser retain dashboard alerts;
-this change does not install a native notification daemon on those platforms.
+protect mutations. Outbound notifications are disabled by default. A headless
+host can use an [optional command or webhook](HOME_SERVER.md#optional-outbound-notifications)
+only after the owner explicitly configures and enables it; Scout never infers a
+destination. macOS, Linux and a remote browser retain dashboard alerts without
+that hook. Scout does not install a native notification daemon on those platforms.
 
 Each notification file is bounded to 4 MiB; the combined outbox retains at
 most 1,000 match/digest alerts plus 64 provider warnings. The provider reserve
