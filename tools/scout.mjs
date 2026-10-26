@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { atomicWriteFile } from '../ui/lib/atomicWrite.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1094,11 +1095,11 @@ export async function runScanWith(root, provider, mode, {
             }
           }
 
-          const bundleDir = path.join(root, '.scout', 'scan-input');
-          const bundleFile = path.join(bundleDir, `${startedAt.replace(/[:.]/g, '-')}-${provider}-${mode}.json`);
+          const bundleDir = path.join(run.directory, 'artifacts');
+          const bundleFile = path.join(bundleDir, 'scan-input.json');
           assertCurrentFence(lease, synchronousFenceCallback(() => {
             fs.mkdirSync(bundleDir, { recursive: true });
-            fs.writeFileSync(bundleFile, `${JSON.stringify(durableScanProjection({
+            atomicWriteFile(bundleFile, `${JSON.stringify(durableScanProjection({
               generatedAt: collected.generatedAt,
               queries: collected.queries,
               sources: Object.fromEntries(Object.entries(collected.sources).map(([name, value]) => [
@@ -1111,7 +1112,7 @@ export async function runScanWith(root, provider, mode, {
               hardExcluded: hardExcluded.map((item) => ({ vacancyId: item.vacancyId, code: item.code })),
               closedAdverts: closedAdverts.map((item) => ({ url: item.url, reason: item.liveness?.reason })),
               candidates,
-            }), null, 2)}\n`, 'utf8');
+            }), null, 2)}\n`, { mode: 0o600 });
           }));
           let assessmentResult = null;
           let usage = {};

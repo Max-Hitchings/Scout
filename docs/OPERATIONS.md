@@ -156,14 +156,20 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   local merge as pending. Public status exposes only counts and sanitised
   affected areas.
 - Full journals and referenced artifacts are retained for the newest 20 runs,
-  all runs from the previous 30 days and every active, queued, partial, failed,
-  unrepaired or recovery-referenced run. Compact terminal summaries are kept
+  all runs from the previous 30 days and every current active, queued,
+  unrepaired or recovery-referenced run. A validated terminal recovery skip
+  releases historical partial, failed or abandoned work only when it has no
+  current lease, live queue claim or unreceipted mutation. Completed recoveries
+  are not pinned by an old selection. Compact terminal summaries are kept
   for one year. Storage pressure measures runs, artifacts and queue separately
   and refuses new durable work before journalling becomes unsafe.
   Reviewed cleanup validates and atomically writes an encrypted archive before
   deleting only explicitly selected eligible data under the active fence;
   interrupted cleanup resumes from the archive/receipt. Queue compaction keeps
-  live work and required terminal evidence.
+  live work and required terminal evidence. Scan-input bundles share the owning
+  run artifact lifecycle; older external bundles use the same reviewed encrypted
+  archive path. Selection compaction keeps recent records and every current run
+  disposition while preserving the full audit in encrypted archives.
 - The recovery, queue, provider-health and guided-login API/UI projections,
   diagnostics and release artifacts exclude credentials, retained or
   user-entered authentication codes, full prompts, CV/ad bodies, provider
@@ -179,6 +185,36 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   displayed in Scout and included under the documented private-backup policy.
 
 Do not assume a developer computer's local application checkout or workspace is live. Diagnose the VPS for production-like bugs unless the user explicitly reports a local-only installation.
+
+## Scan storage and reviewed cleanup
+
+Storage pressure is measured afresh for each response. Scout validates journal
+metadata and counts file sizes without hashing complete artifact bodies. Cleanup
+review and archive verification still hash the actual selected contents, so a
+file changed after review cannot be deleted under an earlier approval. Setup and
+opportunity responses reuse one scan-health measurement for their schedule view.
+
+New diagnostic scan inputs are private files inside the owning run's `artifacts`
+directory. Existing `.scout/scan-input` files count towards artifact pressure and
+can be selected for the same fenced, encrypted archive process as old runs. The
+newest 20 legacy bundles and the previous 30 days are kept by default; no legacy
+bundle is silently deleted or moved during upgrade.
+
+Maintenance integrations use `planRunCleanup` and `archiveSelectedRuns` from
+`ui/lib/runRetention.mjs`. The plan binds the explicit selection, file digests,
+queue and recovery evidence. Deletion requires the existing persisted recovery
+data key, a current fenced lease and a verified encrypted archive. The dashboard
+reports storage pressure; it does not currently provide a cleanup button or a
+public cleanup command. No automatic deletion is added by these changes.
+
+After reviewed cleanup, recovery-selection compaction retains the newest 256
+records plus the latest mention and terminal disposition for every run still on
+disk. The complete before/after journal is encrypted and verified before atomic
+replacement. A durable prepared intent lets a successor reconcile a crash, and
+one receipt records the compaction. Invalid or conflicting evidence fails closed.
+Encrypted archives have no automatic expiry; deleting them remains a separate
+explicit maintenance decision. Run journals, selection diagnostics and the live
+compaction receipt all count towards storage pressure.
 
 ## Task routing
 

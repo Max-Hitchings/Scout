@@ -312,6 +312,31 @@ function request({ method = 'GET', path = '/', headers = {}, body = '' }) {
   });
 }
 
+test('opportunities and setup status reuse one fresh scan-health measurement per response', async () => {
+  seedWorkspace(APP_ROOT, WORKSPACE_ROOT);
+  const runsRoot = path.join(WORKSPACE_ROOT, '.scout', 'runs');
+  fs.mkdirSync(runsRoot, { recursive: true });
+  const originalRead = fs.readdirSync;
+  const originalDetect = providerDetection.detect;
+  providerDetection.detect = async () => ({});
+  let reads = 0;
+  fs.readdirSync = function read(file, ...args) {
+    if (String(file) === runsRoot) reads += 1;
+    return originalRead.call(this, file, ...args);
+  };
+  try {
+    for (const endpoint of ['/api/opportunities', '/api/setup/status']) {
+      reads = 0;
+      const response = await request({ path: endpoint });
+      assert.equal(response.status, 200);
+      assert.equal(reads, 1, `${endpoint} must share the scan-health result with the schedule summary`);
+    }
+  } finally {
+    fs.readdirSync = originalRead;
+    providerDetection.detect = originalDetect;
+  }
+});
+
 const JSON_HEADERS = () => {
   const host = `127.0.0.1:${port}`;
   return { host, origin: `http://${host}`, 'content-type': 'application/json' };

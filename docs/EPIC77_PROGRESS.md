@@ -149,3 +149,26 @@ currency-provenance metadata from semantic change detection. The provenance
 still persists with salary evidence; a real amount or currency correction
 still counts as material. An unchanged old salary therefore does not consume
 assessment capacity merely because it acquired provenance on upgrade.
+## 2026-10-25 — retention package (Codex)
+
+- A-1: real recovery selection no longer pins historical terminal skips or a
+  completed recovery forever. Current leases, queue claims, damaged journals and
+  unreceipted mutations remain protected. Reviewed encrypted cleanup retains the
+  selection audit. Bounded selection compaction preserves current dispositions
+  and full encrypted before/after evidence, including crash/successor recovery.
+- A-2: status measurement no longer reads artifact bodies; a synthetic 100 MiB
+  inventory took 2.5 ms with zero artifact body reads. Review/archive comparisons
+  still hash content. Setup/opportunity responses measure scan health once.
+- PROV-1: new diagnostic inputs are private run-owned artifacts. Legacy external
+  inputs count towards pressure and use the existing explicit reviewed archive
+  lifecycle; no silent deletion occurs.
+- Observed RED before fixes: historical terminal cleanup and completed-selection
+  release; mutation/damaged-journal composition; 100 MiB artifact-body read;
+  duplicate per-response inventory; legacy pressure/archive; two actual runtime
+  scan projections; compaction/crash receipt and stale-fence replacement.
+- Full Node and final focused verification are recorded in the package PR.
+  Linux execution only; no live workspace, provider, host or Windows/macOS check.
+
+Retention self-review also reproduced a corrupted prepared compaction count being
+accepted. The receipt now binds the removal count and archived file sizes/digests
+to the verified before/after bytes; the RED corruption composition is GREEN.
