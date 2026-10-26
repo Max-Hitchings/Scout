@@ -43,7 +43,7 @@ Verification status in this initial ledger is deliberately `unverified`: the aud
 
 | ID | Severity | Provenance | Verification | Beta gate | Workstream | Required disposition and evidence | Branch / commit / PR / tests / CI / review |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| F-1 | Critical | Epic-introduced | reproduced; repaired and independently approved at exact code head | **BLOCK: final evidence-only head CI** | 1 | Reproduce clean seal→assert failure; preserve pre-seal audit and read-only seal; authorise sealed digest; clean pass plus content/mode/path/link/add/delete/replace tamper failures; pre/post packager checks; primary error not masked by cleanup; execute real packager round trips; publish only authorized private temporary artifacts with atomic no-overwrite promotion. | Draft PR #84; exact code head `d165e1d9099b93b705e56aea0a170f2d9ab0b979`; focused 118/118; exact-SHA specification/code/security reviews APPROVE; CI run 30946243076 has six green jobs and one stalled Intel macOS attempt; see F-1 evidence below. |
+| F-1 | Critical | Epic-introduced | reproduced; repaired and independently approved at exact code head | **BLOCK: integration native acceptance and final review** | 1 | Reproduce clean seal→assert failure; preserve pre-seal audit and read-only seal; authorise sealed digest; clean pass plus content/mode/path/link/add/delete/replace tamper failures; pre/post packager checks; primary error not masked by cleanup; execute real packager round trips; publish only authorized private temporary artifacts with atomic no-overwrite promotion. | PR #84 carried unchanged into `friend/f1-sealed-release` after integration merge `592c3ed`; merge interactions reproduced and repaired; focused 123/123 under umask 077, release fixture focus 31/31 under 022. Final hosted/review evidence pending; original exact code head `d165e1d9099b93b705e56aea0a170f2d9ab0b979`; focused 118/118; exact-SHA specification/code/security reviews APPROVE; CI run 30946243076 has six green jobs and one stalled Intel macOS attempt; see F-1 evidence below. |
 | D-1 | Critical | Pre-existing but amplified by Epic authority model | unverified | **BLOCK** | 2 | Put adoption under shared mutation/OS exclusion; heartbeat and recheck fence through renames/receipt/publication; advance generation lineage; prove stale owners cannot write; crash-safe rollback; require service stop/restart ordering in workflow and operations docs. Synthetic roots only. | pending |
 | E-1 | Important | Epic-introduced | unverified | **BLOCK** | 3/7 | Upgraded users must be gated on publication or shown an explicit legacy-discovery disclosure; ranked-stage/UI claims must match the actual engine; update troubleshooting and composition/browser coverage. | pending |
 | E-2 | Important | Epic-introduced | unverified | **BLOCK** | 3 | Derive provider card, sign-in panel and verification offer from one health-gated presentation authority; contradictory signed-in/blocked states and suppressed remedies must be impossible. | pending |
@@ -347,6 +347,22 @@ Test order and acceptance:
   release hosts; and the later signing/attestation/publication/deployment gates.
   No merge, tag, release, package publication, deployment, retarget, approval,
   review resolution or issue closure occurred or is authorised here.
+
+## F-1 integration continuation — 2026-10-26
+
+PR #92 merged into integration as `592c3ed1efb1f8390a62a77ce817dae7bf8b7827`.
+The continuation branch `friend/f1-sealed-release` merges PR #84 at
+`033912444d920ea0919ff56ccfd1933eabf28a8f` without rewriting its 33 commits or
+authorship. The single operations-document conflict retains both procedures.
+The merged release tests reproduced the native vendor test's obsolete cleanup
+API and two umask-sensitive fixture assumptions. The test now supplies the
+snapshot creation identity and explicit authorization root; the mode fixtures
+set `0644` before capture. No production authorization or privacy gate changed.
+The six requested release suites pass 123/123 with umask 077, and the release
+fixture suites pass 31/31 with umask 022. Native install acceptance, all 21 hosted
+jobs and fresh independent merged-code security review remain required. Their
+exact pushed head and evidence will be recorded on the continuation PR and #85;
+none is inferred from PR #84's old-base results.
 
 ## Evidence update protocol
 

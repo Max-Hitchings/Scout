@@ -379,6 +379,9 @@ test('sealed release authorization rejects the complete tamper matrix', () => {
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), `scout-audit-${name}-outside-`));
     fs.writeFileSync(path.join(stageDir, 'a.txt'), 'audited-a');
     fs.writeFileSync(path.join(stageDir, 'b.txt'), 'audited-b');
+    // Replacement preserves the sealed modes independently of the host umask.
+    fs.chmodSync(path.join(stageDir, 'a.txt'), 0o644);
+    fs.chmodSync(path.join(stageDir, 'b.txt'), 0o644);
     const audit = auditStageBeforePackaging(stageDir, {
       env: { ...process.env, SCOUT_RELEASE_MARKERS: 'SyntheticPackagingMarker' },
       authorizationRoot,
@@ -434,6 +437,7 @@ test('a required packager directory mode keeps its files sealed and remains tamp
   const controlDir = path.join(stageDir, 'deb', 'DEBIAN');
   fs.mkdirSync(controlDir, { recursive: true });
   fs.writeFileSync(path.join(controlDir, 'control'), 'Package: scout\n');
+  fs.chmodSync(path.join(controlDir, 'control'), 0o644);
   const audit = auditStageBeforePackaging(stageDir, {
     env: { ...process.env, SCOUT_RELEASE_MARKERS: 'SyntheticPackagingMarker' },
     authorizationRoot,
