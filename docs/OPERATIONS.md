@@ -179,6 +179,14 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
 
 Do not assume a developer computer's local application checkout or workspace is live. Diagnose the VPS for production-like bugs unless the user explicitly reports a local-only installation.
 
+## Optional household home-server deployment
+
+The [home server guide](HOME_SERVER.md) describes an owner-managed Linux alternative: an unprivileged `scout` account, immutable application under `/srv/apps/scout/app`, one private workspace/provider home/device settings file and loopback port per person, and system-level service/timer templates. Each instance keeps an explicit workspace for its lifetime. Household create/list/switch changes only host-local selection for the next process and never copies career data. The systemd filesystem sandbox exposes only the current instance's state; mutually untrusted household members require separate Unix accounts and separately authorised private routes.
+
+`GET /api/health` is a local-only versioned liveness/configuration check. `GET /api/summary` is a read-only schema-v1 dashboard projection of mode, bounded scan/provider status, above-threshold new/shortlisted matches and every pending alert within the durable storage boundary. It omits CV/profile/notes, private paths, raw errors/provider output and URL queries/fragments. It never marks results read or triggers work.
+
+Outbound command/webhook notification hooks are owner-configured and disabled by default. The headless process polls the existing alert/digest outbox at startup and every five minutes; CLI scans also dispatch after outcomes. Delivery uses fixed executable argv with `shell: false` or bounded HTTP(S) POST without redirects, and normal delivery receipts are recorded only after success. Shared workspace delivery locks prevent overlap; recovery preserves pending alerts and receipts. Back up complete quiesced workspaces, host selection/unit configuration and separately encrypted provider credentials. No home-server installation or private-network access is performed by application development.
+
 ## Task routing
 
 - Application bug, UI, server, provider, installer, test, template, or public-documentation work: use the public application repository.

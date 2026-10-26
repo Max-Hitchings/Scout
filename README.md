@@ -134,3 +134,5 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. Use synthetic f
 Report vulnerabilities through the private route described in [SECURITY.md](SECURITY.md), not in a public issue.
 
 Scout is available under the [MIT License](LICENSE).
+
+For a private Linux household server, see the [home server guide](docs/HOME_SERVER.md) for isolated instances, systemd timers, a local summary API and optional outbound notifications.

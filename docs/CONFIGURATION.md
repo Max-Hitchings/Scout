@@ -164,3 +164,7 @@ record.
 Run `scout doctor` after edits. Do not store secrets in `workspace.json`; see [Privacy](PRIVACY.md).
 
 When upgrading a schema 1 workspace, Scout migrates the legacy singular schedule into one named primary job and saves the original configuration under `.scout/backups/`. Versions that understand only schema 1 refuse schema 2 rather than silently applying the wrong timer.
+
+## Household and headless configuration
+
+See [home server operation](HOME_SERVER.md) for `household create|list|switch`, `SCOUT_HOUSEHOLD_SETTINGS`, isolated instance ports/device settings, the read-only `/api/summary` schema, and the off-by-default outbound notification file or `SCOUT_NOTIFICATION_CONFIG`. `notifications dispatch --workspace PATH` consumes only that workspace's pending alert/digest outbox.

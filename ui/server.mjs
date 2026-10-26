@@ -1,4 +1,7 @@
 import http from 'node:http';
+import { dispatchHeadlessNotifications } from './lib/headlessNotifications.mjs';
+import { activateHouseholdRuntime, selectedHouseholdInstance } from './lib/household.mjs';
+import { buildHomeSummary } from './lib/homeSummary.mjs';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -104,7 +107,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const APP_ROOT = path.resolve(__dirname, '..');
 export const REPO_ROOT = APP_ROOT; // retained for API compatibility
 export const WORKSPACE_ROOT = resolveWorkspaceRoot({ appRoot: APP_ROOT });
-export const PORT = Number(process.env.PORT) || 8459;
+activateHouseholdRuntime(WORKSPACE_ROOT);
+export const PORT = Number(process.env.PORT) || selectedHouseholdInstance({ workspace: WORKSPACE_ROOT })?.port || 8459;
 export const APP_VERSION = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'package.json'), 'utf8')).version;
 // Every file the browser caches under this id. A module served to the shell
 // belongs here: leaving one out lets a release change behaviour while installed
@@ -183,7 +187,10 @@ function createRuntimeHttpHandlerBarrier() {
 function startRuntimeSyncTimer() {
   if (runtimeSyncTimer) return;
   runtimeSyncTimer = setInterval(() => {
-    if (workspaceInitialised()) void scheduleCheckpoint('periodic sync');
+    if (workspaceInitialised()) {
+      void scheduleCheckpoint('periodic sync');
+      void trackRuntimeBackgroundTask(dispatchHeadlessNotifications(WORKSPACE_ROOT, { shouldContinue: () => runtimeRequestAdmissionOpen })).catch(() => {});
+    }
   }, 5 * 60 * 1000);
   runtimeSyncTimer.unref();
 }
@@ -1073,6 +1080,28 @@ async function handleRead(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/search-profile') {
     try { return sendJson(res, 200, readSearchProfileState()); }
     catch { return sendJson(res, 400, publicApiError('Search profile could not be read.')); }
+  }
+  if (req.method === 'GET' && ['/api/health', '/api/summary'].includes(url.pathname)) {
+    if (req.scoutAccess !== 'local') return sendJson(res, 403, { error: 'local dashboard access required' });
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const initialised = workspaceInitialised();
+      const config = initialised ? loadWorkspaceConfig(WORKSPACE_ROOT) : {};
+      if (url.pathname === '/api/health') return sendJson(res, 200, {
+        schemaVersion: 1, status: initialised ? 'ready' : 'setup-required', version: APP_VERSION,
+      });
+      const names = [...new Set([config.ai?.provider, ...(config.schedule?.jobs || []).filter((job) => job.enabled).map((job) => job.provider)])].filter(Boolean);
+      let notifications = { alerts: [] };
+      try {
+        const api = await import('./lib/notifications.mjs');
+        notifications = api.notificationView(api.readNotifications(WORKSPACE_ROOT));
+      } catch (error) { if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error; }
+      return sendJson(res, 200, buildHomeSummary({
+        notifications,
+        config, tracker: readTracker(), scanHealth: readScanHealth(),
+        providers: names.map((provider) => readProviderHealth(WORKSPACE_ROOT, provider)),
+      }));
+    } catch { return sendJson(res, 503, { schemaVersion: 1, error: 'dashboard state needs attention' }); }
   }
   if (req.method === 'GET' && url.pathname === '/api/app-info') {
     return sendJson(res, 200, {
@@ -3012,6 +3041,7 @@ if (isMain) {
     console.log(`Scout UI on http://127.0.0.1:${PORT}`);
     if (workspaceInitialised()) {
       void scheduleCheckpoint('startup sync');
+      void trackRuntimeBackgroundTask(dispatchHeadlessNotifications(WORKSPACE_ROOT, { shouldContinue: () => runtimeRequestAdmissionOpen })).catch(() => {});
       void trackRuntimeBackgroundTask(checkStartupProviderHealth(WORKSPACE_ROOT)).catch(() => {});
       void trackRuntimeBackgroundTask(providerHealthMonitor.runNow()).catch(() => {});
     }

@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { activateHouseholdRuntime, createHouseholdInstance, readHousehold, switchHouseholdInstance } from '../ui/lib/household.mjs';
+import { dispatchHeadlessNotifications } from '../ui/lib/headlessNotifications.mjs';
 import { doctor } from '../ui/lib/doctor.mjs';
 import { fetchAdzuna, resolveAdzunaCredentials } from '../ui/lib/adzuna.mjs';
 import { fetchConfiguredPortals, loadPortals } from '../ui/lib/ats.mjs';
@@ -1345,6 +1347,24 @@ async function main() {
   const argv = process.argv.slice(2);
   const command = argv[0] || 'help';
   const root = selectedWorkspace(argv);
+  if (command !== 'household') activateHouseholdRuntime(root);
+  if (command === 'notifications') {
+    if (argv[1] !== 'dispatch') throw new Error('notifications action must be dispatch');
+    const result = await dispatchHeadlessNotifications(root);
+    print(result);
+    if (result.failed) process.exitCode = 1;
+    return;
+  }
+  if (command === 'household') {
+    const action = argv[1] || 'list';
+    if (action === 'list') return print({ ok: true, ...readHousehold() });
+    if (action === 'switch') return print(switchHouseholdInstance(argv[2]));
+    if (action === 'create') return print(createHouseholdInstance({
+      appRoot: APP_ROOT, directory: argValue('--directory', argv), id: argv[2],
+      port: Number(argValue('--port', argv)), initialise: initWorkspace,
+    }));
+    throw new Error('household action must be create, list, or switch');
+  }
   if (command === 'doctor') return print(doctor(root, { appRoot: APP_ROOT }));
   if (command === 'remote') {
     const action = argv[1] || 'preflight';
@@ -1415,6 +1435,7 @@ async function main() {
       scheduleId,
       logicalWindowId,
     });
+    await dispatchHeadlessNotifications(root).catch(() => {});
     print(result);
     if (!result.ok) process.exitCode = 1;
     return;
@@ -1500,7 +1521,7 @@ async function main() {
       }));
     }
   }
-  print(`Scout CLI\n\nCommands:\n  doctor [--workspace PATH]\n  remote preflight [--require-enabled] [--url URL]\n  workspace init|migrate [--from PATH] [--to PATH]\n  workspace snapshot-beta22 [--workspace PATH]\n  workspace rollback-beta22 --workspace PATH --to PATH [--snapshot PATH]\n  cv quality <application-slug> [--workspace PATH]\n  lock acquire|release|status\n  source ats|adzuna|hiring-cafe\n  scan --provider codex|claude [--mode primary|second-pass] [--model MODEL]\n  schedule install|status|remove|run-now [--id ID] [--time HH:MM] [--days 0,1,2] [--provider PROVIDER] [--mode primary|second-pass] [--model MODEL]`);
+  print(`Scout CLI\n\nCommands:\n  doctor [--workspace PATH]\n  household create ID --directory PATH --port PORT\n  household list|switch ID\n  notifications dispatch [--workspace PATH]\n  remote preflight [--require-enabled] [--url URL]\n  workspace init|migrate [--from PATH] [--to PATH]\n  workspace snapshot-beta22 [--workspace PATH]\n  workspace rollback-beta22 --workspace PATH --to PATH [--snapshot PATH]\n  cv quality <application-slug> [--workspace PATH]\n  lock acquire|release|status\n  source ats|adzuna|hiring-cafe\n  scan --provider codex|claude [--mode primary|second-pass] [--model MODEL]\n  schedule install|status|remove|run-now [--id ID] [--time HH:MM] [--days 0,1,2] [--provider PROVIDER] [--mode primary|second-pass] [--model MODEL]`);
 }
 
 const isMain = isMainModule(import.meta.url);
