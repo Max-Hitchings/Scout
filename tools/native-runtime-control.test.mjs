@@ -56,6 +56,33 @@ test('native preload skips unrelated worker and provider entry points', async (t
   } finally { await control.close(); }
 });
 
+test('an explicit foreign workspace is rejected before native server startup', async (t) => {
+  const f = fixture(t);
+  const other = path.join(f.temporary, 'other-workspace');
+  const socket = net.createServer();
+  await new Promise((resolve) => socket.listen(0, '127.0.0.1', resolve));
+  f.env.PORT = String(socket.address().port);
+  await new Promise((resolve) => socket.close(resolve));
+  const control = createNativeRuntimeControl(f);
+  const child = spawn(process.execPath, [path.join(app, 'ui/server.mjs'), '--workspace', other], {
+    cwd: app, env: f.env, stdio: 'ignore', windowsHide: true,
+  });
+  const closed = new Promise((resolve) => child.once('close', (status) => resolve(status)));
+  let timer;
+  try {
+    const status = await Promise.race([closed, new Promise((resolve) => { timer = setTimeout(() => resolve('still-running'), 5000); })]);
+    assert.notEqual(status, 'still-running', 'a mismatched runtime must never start');
+    assert.notEqual(status, 0);
+    assert.equal(fs.existsSync(path.join(f.env.SCOUT_NATIVE_CONTROL_DIR, 'ready.json')), false);
+    assert.equal(fs.existsSync(other), false);
+  } finally {
+    clearTimeout(timer);
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await closed;
+    await control.close();
+  }
+});
+
 test('owned native server drain orders actual import after its held real checkpoint without weakening the fence', async (t) => {
   const f = fixture(t);
   // The real provider adapters can inspect only synthetic executables/homes.
