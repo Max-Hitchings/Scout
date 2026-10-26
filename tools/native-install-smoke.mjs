@@ -2,13 +2,14 @@
 // Native runner only. Installs generated artifacts into disposable locations;
 // synthetic process/source boundaries never use provider accounts or career data.
 import assert from 'node:assert/strict';
-import { fork, spawn, spawnSync } from 'node:child_process';
+import { fork, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { nativeInstallEnvironment, nativeWorkspaceSnapshot, runIsolatedNativeCommand } from './nativeInstallBoundary.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const output = path.join(root, 'installer/output');
@@ -18,14 +19,16 @@ const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'scout-i
 const workspace = path.join(temporary, 'workspace');
 const home = path.join(temporary, 'home');
 fs.mkdirSync(home, { recursive: true });
+// Install and uninstall helpers can execute Scout code too. Isolate them
+// before the first native command, not only when launching the installed app.
+const env = nativeInstallEnvironment(process.env, { home, temporary, workspace });
 let installedRoot, appRoot, runtime, launcher, launcherArgs = [], uninstall;
 let host, worker, browser;
 let ownsServer = false;
 const base = 'http://127.0.0.1:8459';
 const wait = (ms = 100) => new Promise((resolve) => setTimeout(resolve, ms));
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { encoding: 'utf8', timeout: 180000, windowsHide: true, shell: false, ...options });
-  assert.equal(result.status, 0, `Native installation command failed: ${path.basename(command)}\n${result.stdout}\n${result.stderr}`);
+  return runIsolatedNativeCommand(command, args, { ...options, env });
 }
 async function until(check, label, ms = 60000) {
   const deadline = Date.now() + ms;
@@ -83,7 +86,7 @@ try {
     uninstall = () => removeOwnedInstall(installedRoot);
   } else if (process.platform === 'linux' && portable) {
     const archive = path.join(output, `Scout-${version}-linux-x64.tar.gz`);
-    const listing = spawnSync('tar', ['-tzf', archive], { encoding: 'utf8', timeout: 30000 });
+    const listing = run('tar', ['-tzf', archive], { timeout: 30000 });
     assert.equal(listing.status, 0, listing.stderr);
     const prefix = `Scout-${version}-linux-x64/`;
     assert.ok(listing.stdout.trim().split('\n').every((name) => name.startsWith(prefix) && !name.split('/').includes('..')));
@@ -107,10 +110,7 @@ try {
     if (process.platform === 'win32') fs.writeFileSync(path.join(bin, `${provider}.cmd`), `@"${runtime}" "${script}" %*\r\n`);
     else fs.writeFileSync(path.join(bin, provider), `#!${runtime}\n${fake}`, { mode: 0o700 });
   }
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => ['path', 'systemroot', 'comspec', 'pathext', 'windir', 'programfiles', 'programfiles(x86)', 'display', 'xauthority'].includes(key.toLowerCase())));
-  Object.assign(env, { HOME: home, USERPROFILE: home, APPDATA: path.join(home, 'AppData/Roaming'), LOCALAPPDATA: path.join(home, 'AppData/Local'),
-    TMPDIR: temporary, TEMP: temporary, TMP: temporary, SCOUT_WORKSPACE: workspace, SCOUT_ROOT: installedRoot,
-    SCOUT_DEVICE_SETTINGS: path.join(temporary, 'device.json'), PORT: '8459', BROWSER: '/bin/true' });
+  env.SCOUT_ROOT = installedRoot;
   host = spawn(launcher, launcherArgs, { env, stdio: 'ignore', windowsHide: true, shell: false });
   host.on('error', () => {});
   await until(async () => { try { return (await fetch(`${base}/api/app-info`)).ok; } catch { return false; } }, 'installed native first launch');
@@ -173,17 +173,23 @@ try {
   if (ownsServer) {
     try { await fetch(`${base}/api/shutdown`, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: '{}', signal: AbortSignal.timeout(10000) }); } catch {}
   }
-  host?.kill(); worker?.kill();
+  const stopChild = async (child) => {
+    if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
+    const closed = new Promise((resolve) => { child.once('close', resolve); child.once('error', resolve); });
+    child.kill();
+    const timeout = setTimeout(() => child.kill('SIGKILL'), 10000);
+    try { await closed; } finally { clearTimeout(timeout); }
+  };
+  await Promise.all([stopChild(host), stopChild(worker)]);
   if (ownsServer) await until(async () => {
     try { return !(await fetch(`${base}/api/app-info`, { signal: AbortSignal.timeout(1000) })).ok; }
     catch { return true; }
   }, 'installed runtime shutdown', 30000);
   await wait(250);
   if (uninstall) {
-    const careerData = path.join(workspace, 'workspace.json');
-    const before = fs.existsSync(careerData) ? fs.readFileSync(careerData) : null;
+    const before = nativeWorkspaceSnapshot(workspace);
     uninstall();
-    if (before) assert.deepEqual(fs.readFileSync(careerData), before, 'Uninstall must preserve the private workspace');
+    assert.deepEqual(nativeWorkspaceSnapshot(workspace), before, 'Uninstall must preserve every private workspace path and file digest');
     assert.equal(fs.existsSync(path.join(appRoot, 'ui/server.mjs')), false, 'Uninstall must remove application files');
   }
   fs.rmSync(temporary, { recursive: true, force: true });
