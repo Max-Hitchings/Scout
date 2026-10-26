@@ -9,6 +9,8 @@ import { test } from 'node:test';
 import { providerStatus, providerLocalHealthSignal } from './providers.mjs';
 import { runStructuredTurn } from './structuredTurn.mjs';
 import { mergeWorkspaceDefaults, validateWorkspaceConfig, modelForProvider } from './workspace.mjs';
+import { localProviderHealthSignal, runLocalTurn } from './localProvider.mjs';
+import { readProviderHealth, recordProviderHealth } from './providerHealth.mjs';
 
 const schema = { type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { const: true } } };
 const completion = (content = '{"ready":true}') => ({ choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 3 } });
@@ -77,6 +79,53 @@ for (const [status, reason] of [[401, 'authentication-required'], [429, 'rate-li
     assert.equal(f.requests.length, 1);
   });
 }
+
+for (const [status, reason] of [[401, 'authentication-required'], [403, 'authentication-required'], [429, 'rate-limited']]) {
+  for (const body of ['oversized', 'stalled']) {
+    test(`local HTTP ${status} stays authoritative with ${body} error content`, async (t) => {
+      let responseClosed;
+      const closed = new Promise((resolve) => { responseClosed = resolve; });
+      const f = await fixture(t, (_req, res) => {
+        res.once('close', responseClosed);
+        res.writeHead(status, { 'content-type': 'text/plain' });
+        if (body === 'oversized') res.end('synthetic private error '.repeat(100_000));
+        else { res.flushHeaders(); res.write('synthetic private error'); }
+      });
+      const selected = providerStatus('local', { local: { ...f.local, retries: 2, timeoutMs: 300 } });
+      const result = await runLocalTurn({ status: selected, prompt: 'Synthetic request.' }).finished;
+      assert.equal(result.reasonCode, reason, 'known HTTP status must survive the unneeded error-body boundary');
+      assert.equal(f.requests.length, 1, 'authentication and rate limits must never retry');
+      assert.doesNotMatch(JSON.stringify(result), /synthetic private error/);
+      let timer;
+      try {
+        await Promise.race([closed, new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('response body was not cancelled')), 1500);
+        })]);
+      } finally { clearTimeout(timer); }
+    });
+  }
+}
+
+test('an oversized local authentication response establishes a durable barrier until real success', async (t) => {
+  let healthy = false;
+  const f = await fixture(t, (_req, res) => {
+    if (healthy) respond(res, 200, completion());
+    else { res.writeHead(401); res.end('synthetic private error '.repeat(100_000)); }
+  });
+  const status = providerStatus('local', { local: f.local });
+  const failed = await localProviderHealthSignal(status, { source: 'manual-preflight' });
+  const blocked = recordProviderHealth(f.root, 'local', failed, { purpose: 'manual-run' });
+  assert.equal(blocked.state, 'sign-in-required');
+  assert.equal(blocked.remoteAuthBarrier, true);
+  const localOnly = recordProviderHealth(f.root, 'local', { kind: 'local-credentials-present', source: 'startup' }, { purpose: 'startup' });
+  assert.equal(localOnly.remoteAuthBarrier, true);
+  assert.equal(localOnly.state, 'sign-in-required');
+  assert.doesNotMatch(JSON.stringify(readProviderHealth(f.root, 'local')), /synthetic private error/);
+  healthy = true;
+  const recovered = recordProviderHealth(f.root, 'local', await localProviderHealthSignal(status, { source: 'manual-preflight' }), { purpose: 'manual-run' });
+  assert.equal(recovered.state, 'ready');
+  assert.equal(recovered.remoteAuthBarrier, false);
+});
 
 test('local retries only bounded transient HTTP errors and never auth failures', async (t) => {
   const f = await fixture(t, (_req, res, _request, count) => respond(res, count < 3 ? 503 : 200, completion()));

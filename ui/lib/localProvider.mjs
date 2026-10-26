@@ -110,6 +110,7 @@ function responseReason(status) {
 export function runLocalTurn({ status, prompt, messages, model, schema, timeoutMs, maxOutputBytes = MAX_RESPONSE_BYTES, onEvent = () => {} } = {}) {
   const controller = new AbortController();
   let stopped = false;
+  let authoritativeFailure = null;
   const stop = () => { stopped = true; controller.abort(); };
   const finished = (async () => {
     const config = status?.local;
@@ -156,6 +157,13 @@ export function runLocalTurn({ status, prompt, messages, model, schema, timeoutM
           }
           throw failure(controller.signal.aborted || error?.cause?.code !== undefined ? 'network-unavailable' : 'provider-error');
         }
+        if ([401, 403, 429].includes(response.status)) {
+          // These headers are conclusive. Their untrusted body cannot change
+          // authentication/rate-limit truth or hold a request open until timeout.
+          authoritativeFailure = responseReason(response.status);
+          try { await response.body?.cancel(); } catch { /* preserve known status */ }
+          throw failure(authoritativeFailure);
+        }
         const payload = await readResponse(response, maxBytes);
         // Capability fallback requires a bounded explicit schema rejection.
         // Other 400s must retain their actual failure, never silently retry.
@@ -186,7 +194,7 @@ export function runLocalTurn({ status, prompt, messages, model, schema, timeoutM
         return { ok: true, text, ...(validate ? { value } : {}), usage, filesTouched: [] };
       }
     } catch (error) {
-      return { ok: false, reasonCode: stopped ? 'stopped' : controller.signal.aborted ? 'network-unavailable' : error.reasonCode || 'provider-error', filesTouched: [] };
+      return { ok: false, reasonCode: stopped ? 'stopped' : authoritativeFailure || (controller.signal.aborted ? 'network-unavailable' : error.reasonCode || 'provider-error'), filesTouched: [] };
     } finally { clearTimeout(timer); }
   })();
   return { finished, stop };
