@@ -190,6 +190,31 @@ test('managed workspace upgrades keep chat transcripts out of Git without replac
   assert.match(value, /^data\/chats\/$/m);
 });
 
+test('managed instructions from a sealed install remain refreshable in the private workspace', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-sealed-managed-'));
+  const appRoot = path.join(root, 'app');
+  const workspace = path.join(root, 'workspace');
+  const source = path.join(appRoot, '.agents', 'skills', 'scan', 'SKILL.md');
+  fs.mkdirSync(path.dirname(source), { recursive: true });
+  fs.writeFileSync(source, 'Synthetic managed scan instruction.');
+  fs.chmodSync(source, 0o400);
+  t.after(() => {
+    const writable = (entry) => {
+      const stat = fs.lstatSync(entry);
+      fs.chmodSync(entry, stat.isDirectory() ? 0o700 : 0o600);
+      if (stat.isDirectory()) for (const name of fs.readdirSync(entry)) writable(path.join(entry, name));
+    };
+    writable(root);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  syncManagedInstructions(appRoot, workspace);
+  // The installed package is immutable. A second real scan refreshes the same
+  // private instruction tree, rather than unsealing its application source.
+  assert.doesNotThrow(() => syncManagedInstructions(appRoot, workspace));
+  assert.equal(fs.readFileSync(path.join(workspace, '.agents/skills/scan/SKILL.md'), 'utf8'), 'Synthetic managed scan instruction.');
+  assert.equal(fs.statSync(source).mode & 0o222, 0);
+});
+
 import { spawnSync } from 'node:child_process';
 test('syncManagedInstructions migrates .scout/ to track cv-renders.json while ignoring the rest of .scout', () => {
   const appRoot = temp();
