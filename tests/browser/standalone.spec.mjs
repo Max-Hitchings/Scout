@@ -90,6 +90,53 @@ test('phone cover-letter edits keep PDF download disabled until the saved draft 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });
 
+test('phone job refresh preserves open controls and unsaved feedback while updating job facts', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.evaluate(() => window.Scout.loadOpportunities());
+  const card = page.locator('#tab-jobs .card[data-id="new-systems-product-2026-07"]');
+  await card.click();
+  await page.evaluate(() => window.Scout.loadOpportunities());
+  await expect(card).toHaveClass(/\bopen\b/);
+  await card.getByRole('button', { name: 'Poor fit' }).click();
+  const text = card.getByLabel('What should Scout know?');
+  await text.fill('Keep this unsaved explanation while checking for new jobs.');
+  await text.press('End');
+  await page.evaluate(() => window.Scout.loadOpportunities());
+  await expect(text).toHaveValue('Keep this unsaved explanation while checking for new jobs.');
+  await expect(text).toBeFocused();
+  const data = await page.evaluate(() => window.Scout.state.data);
+  data.opportunities.find((entry) => entry.id === 'new-systems-product-2026-07').role = 'Updated Product Engineer';
+  await page.route('**/api/opportunities', (route) => route.fulfill({ json: data }));
+  await page.evaluate(() => window.Scout.loadOpportunities());
+  await expect(card.locator('.top')).toContainText('Updated Product Engineer');
+  await expect(text).toHaveValue('Keep this unsaved explanation while checking for new jobs.');
+  await expect(text).toBeFocused();
+  await page.evaluate(() => window.Scout.applyWorkspaceConfig({
+    ...window.Scout.workspaceConfig,
+    modePolicy: { triage: { actionScore: 1, checkScore: 0 } },
+  }));
+  await expect(card.locator('.chiprow > .score')).toHaveClass(/\bfit-strong\b/);
+  await expect(text).toHaveValue('Keep this unsaved explanation while checking for new jobs.');
+});
+
+test('open job actions refresh when its CV and cover-letter catalogue changes', async ({ page }) => {
+  const id = 'new-systems-product-2026-07';
+  let created = false;
+  await page.route('**/api/cv', (route) => route.fulfill({ json: {
+    applications: created ? [id] : [], outreach: created ? [id] : [], entries: [],
+  } }));
+  await page.goto('/');
+  await page.evaluate(() => window.Scout.loadOpportunities());
+  const card = page.locator('#tab-jobs .card[data-id="new-systems-product-2026-07"]');
+  await card.click();
+  await expect(card.getByRole('button', { name: 'create custom CV', exact: true })).toBeVisible();
+  created = true;
+  await page.evaluate(() => window.Scout.loadOpportunities());
+  await expect(card.getByRole('button', { name: 'see custom CV', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'see cover letter', exact: true })).toBeVisible();
+});
+
 test('phone reviewed draft flow keeps local-model text editable and requires confirmation before saving', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   let saves = 0; let savedText = ''; const source = '# DRAFT\n\nConfirmed synthetic CV experience.';

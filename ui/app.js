@@ -887,6 +887,28 @@ const Scout = {
     </div>`;
   },
 
+  replaceOpportunityCards(target, html) {
+    const previous = new Map([...(target.querySelectorAll?.('.card[data-id]') || [])]
+      .map((card) => [card.dataset.id, card]));
+    const focused = target.contains?.(document.activeElement) ? document.activeElement : null;
+    const selection = focused && typeof focused.selectionStart === 'number'
+      ? [focused.selectionStart, focused.selectionEnd, focused.selectionDirection] : null;
+    target.innerHTML = html;
+    for (const card of target.querySelectorAll?.('.card[data-id]') || []) {
+      const old = previous.get(card.dataset.id);
+      if (!old) continue;
+      if (old.classList.contains('open')) this.expandCard(card.dataset.id, card, true);
+      // Keep the live editor and any pending save handler, while rebuilding
+      // the job's details from current facts, settings and CV catalogue.
+      const feedback = old.querySelector('[data-feedback-form]');
+      if (feedback) card.append(feedback);
+    }
+    if (focused?.isConnected) {
+      focused.focus({ preventScroll: true });
+      if (selection) focused.setSelectionRange(...selection);
+    }
+  },
+
   renderJobs() {
     if (!this.state.data) return;
     const target = document.getElementById('tab-jobs');
@@ -897,9 +919,9 @@ const Scout = {
     const list = entries.length
       ? entries.map((e) => this.triageCardHtml(e)).join('')
       : (this.latestScanCard() || '<p class="inbox-empty">All caught up - nothing new to review.</p>');
-    target.innerHTML = this.filterBar()
+    this.replaceOpportunityCards(target, this.filterBar()
       + `<div class="label">${entries.length} new job${entries.length === 1 ? '' : 's'} to review</div>`
-      + list;
+      + list);
     this.updateJobsBadge(entries.length);
   },
 
@@ -921,9 +943,9 @@ const Scout = {
       .filter(([, items]) => items.length)
       .map(([label, items]) => `<div class="label">${label} (${items.length})</div>${items.map((e) => this.cardHtml(e)).join('')}`)
       .join('');
-    target.innerHTML = this.filterBar()
+    this.replaceOpportunityCards(target, this.filterBar()
       + `<div class="label">Speculative opportunities (${entries.length})</div>`
-      + (list || '<p class="inbox-empty">No speculative opportunities match the current commute filter.</p>');
+      + (list || '<p class="inbox-empty">No speculative opportunities match the current commute filter.</p>'));
   },
 
   updateJobsBadge(count) {
@@ -999,9 +1021,9 @@ const Scout = {
     const list = entries.length
       ? entries.map((e) => this.shortlistCardHtml(e)).join('')
       : '<p class="inbox-empty">Nothing shortlisted yet. Tap "Yes" on a job to add it here.</p>';
-    target.innerHTML = this.filterBar()
+    this.replaceOpportunityCards(target, this.filterBar()
       + `<div class="label">Shortlist (${entries.length})</div>`
-      + list;
+      + list);
   },
 
   removeFromShortlist(id) { this.post('/api/status', { id, status: 'ignore' }).then((r) => { if (r && r.ok) this.showUndo(id); }); },
