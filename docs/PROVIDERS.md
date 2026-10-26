@@ -35,6 +35,8 @@ Local chat retains the conversation in the private workspace and sends bounded r
 
 Run a local scan with `scout scan --provider local --mode primary`. Scheduled jobs accept `"provider": "local"`; a blank scan model uses `ai.local.model`. Exact namespaced model names are supported in the picker, queue, recovery and assessment provenance. Changing the local endpoint or configured model invalidates incompatible queued/recovered scan work.
 
+New scan history retains the exact model name, including its namespace. A model change can then reassess the strongest earlier rejections under Scout's existing per-scan limit; the unchanged model leaves those rejections alone. Older records with missing assessment provenance remain legacy history and are not rewritten.
+
 ## Codex and Claude
 
 For Codex, use the current [official Codex CLI installation guide](https://developers.openai.com/codex/cli/) and select the macOS, Linux or Windows instructions for the host. After installation, open Terminal or PowerShell, run `codex`, complete its sign-in flow, and verify `codex login status`. Scout needs that authenticated CLI session; signing in to a desktop app alone does not authenticate the command-line provider.

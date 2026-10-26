@@ -143,7 +143,11 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   strengths, concerns and a recommendation. Numeric scores, categories and
   deterministic exclusions remain trusted-runtime decisions. Each committed
   assessment binds provider, model, prompt, assessment-schema, profile and
-  pipeline provenance.
+  pipeline provenance. Receipted scan history retains the exact bounded model
+  identifier, including namespace separators, so a model change can trigger
+  the existing limited reassessment of earlier rejections. Records without
+  assessment provenance remain legacy evidence; Scout does not invent or
+  rewrite their missing versions.
   Valid job results are committed independently; invalid jobs receive one
   focused schema repair and one clean per-job retry. Recovery never resubmits
   completed jobs or batches. Durable request records contain only stable job

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { normaliseIdentityText } from './jobIdentity.mjs';
+import { isSafeModelId } from './modelIdentifier.mjs';
 import { serializeTracker } from './tracker.mjs';
 import { queryAddressedUrlIdentityDigest } from './vacancyObservation.mjs';
 
@@ -329,7 +330,7 @@ function safeAssessmentVersion(value) {
     promptVersion: identifier(value?.promptVersion),
     assessmentSchemaVersion: number(value?.assessmentSchemaVersion),
     provider: identifier(value?.provider),
-    model: identifier(value?.model),
+    model: isSafeModelId(value?.model) ? value.model : null,
   };
   return Object.values(version).every(Boolean) ? version : null;
 }
