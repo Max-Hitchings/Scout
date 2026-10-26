@@ -12,6 +12,7 @@ import { mergeWorkspaceDefaults, seedWorkspace, writeWorkspaceConfig } from '../
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROVIDER_FIXTURE = fs.readFileSync(new URL('./fixtures/provider.mjs', import.meta.url), 'utf8');
+const OFFLINE_FIXTURE = new URL('./fixtures/offline.mjs', import.meta.url).href;
 const OPPORTUNITY_ID = 'synthetic-acceptance-role';
 const REQUEST = 'Review this synthetic opportunity.';
 const wait = (duration = 25) => new Promise((resolve) => setTimeout(resolve, duration));
@@ -35,7 +36,7 @@ async function freePort() {
 }
 
 function command(args, options) {
-  const child = spawn(process.execPath, args, { ...options, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--import', OFFLINE_FIXTURE, ...args], { ...options, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
   const result = { stdout: '', stderr: '' };
   child.stdout.setEncoding('utf8').on('data', (value) => { result.stdout += value; });
   child.stderr.setEncoding('utf8').on('data', (value) => { result.stderr += value; });
@@ -63,6 +64,18 @@ function workspaceContents(root) {
 
 async function fixture(t, provider, remote) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'scout-provider-acceptance-')));
+  let server;
+  t.after(async () => {
+    if (server && server.child.exitCode === null) {
+      // The real shutdown route drains managed login/provider children on
+      // Windows too; terminating only the server would orphan those children.
+      try { await request('/api/shutdown', { method: 'POST', body: {} }); } catch { /* bounded fallback below */ }
+      const timer = setTimeout(() => server.child.kill('SIGKILL'), 10_000);
+      timer.unref();
+      try { await server.closed; } finally { clearTimeout(timer); }
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
   const workspace = path.join(root, 'workspace');
   const home = path.join(root, 'provider-home');
   const bin = path.join(home, process.platform === 'win32' ? 'AppData/Roaming/npm' : '.local/bin');
@@ -96,7 +109,6 @@ async function fixture(t, provider, remote) {
     profile: { displayName: 'Synthetic profile' },
     ai: { provider, model: null },
     search: { roleFamilies: ['Synthetic Engineer'], locations: ['Remote'], exclusions: [], salaryMinimum: null },
-    sources: { adzuna: { enabled: false }, hiringCafe: { enabled: false } },
     schedule: { jobs: [{ id: `${provider}-primary`, enabled: true, time: '00:00', days: [0, 1, 2, 3, 4, 5, 6], provider, mode: 'primary', model: null }] },
   }));
   fs.writeFileSync(path.join(workspace, 'profile/context.md'), 'Synthetic profile evidence. '.repeat(12));
@@ -117,16 +129,11 @@ async function fixture(t, provider, remote) {
     TMPDIR: root, TEMP: root, TMP: root, SCOUT_WORKSPACE: workspace,
     SCOUT_DEVICE_SETTINGS: path.join(root, 'device-settings.json'), PORT: String(port),
   });
-  const server = command(['ui/server.mjs'], { cwd: APP_ROOT, env });
-  t.after(async () => {
-    if (server.child.exitCode === null) {
-      server.child.kill();
-      const timer = setTimeout(() => server.child.kill('SIGKILL'), 10_000);
-      timer.unref();
-      try { await server.closed; } finally { clearTimeout(timer); }
-    }
-    fs.rmSync(root, { recursive: true, force: true });
-  });
+  const remoteLogin = remote === 'refresh-failed';
+  if (remoteLogin) fs.writeFileSync(env.SCOUT_DEVICE_SETTINGS, JSON.stringify({
+    remoteAccess: { enabled: true, ownerLogin: 'synthetic-owner', origin: 'https://scout.example.test' },
+  }));
+  server = command(['ui/server.mjs'], { cwd: APP_ROOT, env });
   await until(() => {
     if (server.child.exitCode !== null) throw new Error('Synthetic Scout server exited before listening');
     return server.result.stdout.includes('Scout UI on');
@@ -137,7 +144,10 @@ async function fixture(t, provider, remote) {
     return new Promise((resolve, reject) => {
       const req = http.request({ hostname: '127.0.0.1', port, path: route, method, headers: {
         host: `127.0.0.1:${port}`, origin: `http://127.0.0.1:${port}`,
-        ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...headers,
+        ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
+        ...(remoteLogin && route.startsWith('/api/provider-login/') ? {
+          host: 'scout.example.test', origin: 'https://scout.example.test', 'tailscale-user-login': 'synthetic-owner',
+        } : {}), ...headers,
       } }, (res) => {
         let output = '';
         res.setEncoding('utf8').on('data', (chunk) => { output += chunk; });
@@ -157,9 +167,10 @@ async function fixture(t, provider, remote) {
   const change = (patch) => {
     const state = JSON.parse(fs.readFileSync(controlFile, 'utf8'));
     Object.assign(state[provider], patch);
-    fs.writeFileSync(controlFile, JSON.stringify(state));
+    fs.writeFileSync(`${controlFile}.next`, JSON.stringify(state));
+    fs.renameSync(`${controlFile}.next`, controlFile);
   };
-  const health = () => JSON.parse(fs.readFileSync(path.join(workspace, '.scout/provider-health', `${provider}.json`), 'utf8'));
+  const health = () => JSON.parse(fs.readFileSync(path.join(workspace, '.scout/provider-health/v1', `${provider}.json`), 'utf8'));
   const scheduled = async () => {
     const scan = command(['tools/scout.mjs', 'scan', '--workspace', workspace, '--provider', provider,
       '--mode', 'primary', '--scheduled', '--schedule-id', `${provider}-primary`], { cwd: APP_ROOT, env });
@@ -189,7 +200,7 @@ for (const [provider, failure] of [['claude', 'expired'], ['codex', 'revoked'], 
       assert.equal(h.health().remoteAuthBarrier, true, 'local credentials cannot clear remote revocation');
       const blocked = await h.scheduled();
       assert.equal(blocked.status, 1, 'the actual scheduler command must fail preflight');
-      assert.equal(JSON.parse(blocked.stdout).reason, 'provider-blocked');
+      assert.equal(JSON.parse(blocked.stdout).reason, 'sign-in-required');
       assert.equal(turns(), 1, 'a blocked scheduler command must not send any provider work');
     }
     const banner = (await h.request('/api/provider-health')).json().providers.find((item) => item.provider === provider);
@@ -205,6 +216,7 @@ for (const [provider, failure] of [['claude', 'expired'], ['codex', 'revoked'], 
       const status = (await h.request(`/api/provider-login/status?provider=${provider}`)).json();
       const body = retry ? { provider, sessionId: retry } : { provider };
       const route = retry ? '/api/provider-login/retry' : '/api/provider-login/start';
+      assert.equal((await h.request(route, { method: 'POST', body })).status, 403, 'login requires an owner-bound CSRF token');
       const started = await h.request(route, { method: 'POST', body, headers: { 'x-scout-provider-login-csrf': status.csrfToken } });
       assert.equal(started.status, 202);
       const sessionId = started.json().session.sessionId;
@@ -229,7 +241,7 @@ for (const [provider, failure] of [['claude', 'expired'], ['codex', 'revoked'], 
     }
     const rejectedLogin = await login();
     assert.equal(rejectedLogin.state, 'failed', 'local CLI login success alone must not authenticate expired credentials');
-    assert.equal(rejectedLogin.reasonCode, 'credentials-expired');
+    assert.equal(rejectedLogin.reasonCode, provider === 'claude' ? 'credentials-expired' : 'health-confirmation-failed');
     assert.equal(h.health().remoteAuthBarrier, true);
     const recovered = await login({ retry: rejectedLogin.sessionId, succeeds: true });
     assert.equal(recovered.state, 'succeeded');
@@ -255,6 +267,11 @@ for (const [provider, failure] of [['claude', 'expired'], ['codex', 'revoked'], 
       assert.notEqual(call.pid, process.pid, 'login must run as an actual child process');
     }
     assert.equal(h.calls().filter((call) => call.provider === provider && call.kind === 'health-turn').length, 2);
+    const resumedScan = await h.scheduled();
+    assert.equal(resumedScan.status, 0, 'an explicit invocation after reconnecting must resume scheduled work');
+    assert.equal(JSON.parse(resumedScan.stdout).ok, true);
+    const cleared = (await h.request('/api/provider-health')).json().providers.find((item) => item.provider === provider);
+    assert.deepEqual(cleared?.missedJobIds || [], []);
     const durable = workspaceContents(h.workspace);
     for (const marker of [h.deviceCode, h.privateDiagnostic]) {
       assert.equal(durable.includes(marker), false, 'ephemeral login codes and raw provider diagnostics must not be persisted');

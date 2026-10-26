@@ -37,7 +37,8 @@ if (same('--version')) {
     if (state[provider].loginSucceeds) {
       state[provider].remote = 'ready';
       // The test controls this private, external stand-in for provider state.
-      fs.writeFileSync(controlFile, JSON.stringify(state));
+      fs.writeFileSync(`${controlFile}.next`, JSON.stringify(state));
+      fs.renameSync(`${controlFile}.next`, controlFile);
     }
     finish('Synthetic sign-in completed\n');
   };
