@@ -324,6 +324,10 @@ Run it alongside the normal suite. The owner-only current-provider check is in
    preserving its workspace. This uses disposable workspaces and a fake provider
    process. Chromium, Firefox and WebKit run on every supported host runner.
    Native packaging acceptance remains blocked if the separate F-1 gate fails.
+   CI additionally requires a clean production `npm audit --omit=dev` result;
+   dependency updates retain the CV-import, local-provider schema-validation and
+   complete staged privacy checks. Reviewed vendor metadata digests change only
+   after inspecting the new bytes, never to silence a dependency audit finding.
 5. Commit intentionally, push the branch, and open a pull request against `main`.
 6. For release rehearsal, update the protected `codex/release-candidate` branch to the reviewed commit.
 7. Tag the reviewed package version. The protected release workflow builds every platform, deploys the exact tag to the VPS, verifies health and rollback, and only then publishes.
