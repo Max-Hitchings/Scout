@@ -353,6 +353,7 @@ function request({ method = 'GET', path = '/', headers = {}, body = '', signal }
     const req = http.request({ hostname: '127.0.0.1', port, method, path, headers, signal }, (res) => {
       let text = '';
       res.setEncoding('utf8');
+      res.on('error', reject);
       res.on('data', (chunk) => { text += chunk; });
       res.on('end', () => resolve({ status: res.statusCode, text, headers: res.headers }));
     });
