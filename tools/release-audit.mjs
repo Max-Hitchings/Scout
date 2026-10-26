@@ -28,7 +28,7 @@ const PRIVATE_RUNTIME_ROOTS = new Set([
 ]);
 const STATE_SHAPED_TEXT_EXTENSIONS = /\.(?:json|jsonl|ndjson|log|out|toml|txt|yaml|yml)$/i;
 const CROSS_FORMAT_CONFIG_EXTENSIONS = /\.(?:toml|yaml|yml)$/i;
-// Ajv 8.17.1's public schema-security meta-schema describes untrusted data
+// Ajv 8.20.0's public schema-security meta-schema describes untrusted data
 // beside a generic title. That exact reviewed description triggers the advert
 // heuristic. Exempt only that finding at these two staged vendor paths with
 // identical reviewed bytes; all markers, concrete secrets and other rules run.

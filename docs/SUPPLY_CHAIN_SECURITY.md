@@ -181,6 +181,15 @@ path removes the exception. Personal-marker, credential, prompt, transcript,
 private-path and all other checks still apply. Dependency upgrades must review
 any changed metadata before updating this exact digest.
 
+CI runs `npm audit --omit=dev` against the locked production tree and fails if
+the registry reports a known vulnerability. Ajv is pinned to the patched
+8.20.0 release; Mammoth's compatible XML-parser dependency is locked to
+`@xmldom/xmldom` 0.8.15. These resolve the reported Ajv `$data` ReDoS and
+xmldom XML injection, parser-time and memory-consumption advisories. The two
+reviewed Ajv meta-schema files remain byte-for-byte identical after this update;
+their digest exception is unchanged. Use `npm ci` to reproduce the reviewed
+dependency tree before testing imports and provider validation.
+
 Release staging refuses symbolic links for both copied trees and individually
 allowlisted inputs, including a link in any ancestor component, except for the
 single exact DMG layout entry `dmg-root/Applications -> /Applications`. Regular files
