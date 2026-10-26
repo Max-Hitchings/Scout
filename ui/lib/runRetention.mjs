@@ -1231,6 +1231,7 @@ export function planScanQueueCleanup(root, { now = new Date(), summaryDays = 365
 export function compactScanQueue(root, lease, {
   now = new Date(),
   summaryDays = 365,
+  reviewedPlan = null,
   beforeQueueReplace,
   afterQueueReplace,
 } = {}) {
@@ -1244,6 +1245,21 @@ export function compactScanQueue(root, lease, {
     reduceCompletedQueueOperations(root);
   });
   const { snapshot, kept, next } = queueCleanupContents(root, now, summaryDays);
+  if (reviewedPlan) {
+    const current = {
+      schemaVersion: 1, generatedAt: now.toISOString(), summaryDays,
+      beforeDigest: sha256(snapshot.contents), afterDigest: sha256(next),
+      removedEvents: snapshot.events.length - kept.length, keptEvents: kept.length,
+    };
+    // Losing scans may legitimately append compatible requests while cleanup
+    // owns the lease. Bind the snapshot taken here, not only the CLI precheck.
+    const resumed = reviewedPlan.schemaVersion === 1
+      && current.beforeDigest === reviewedPlan.afterDigest
+      && current.afterDigest === reviewedPlan.afterDigest;
+    if (!resumed && stableJson(current) !== stableJson(reviewedPlan)) {
+      throw new Error('Queue changed after cleanup review; generate and inspect a new plan');
+    }
+  }
   if (next === snapshot.contents) {
     return reconcileQueueOperation(root, lease, sha256(snapshot.contents))
       || { changed: false, removedEvents: 0, keptEvents: kept.length };

@@ -304,8 +304,8 @@ from its verified archive, and completed operations return the same receipt.
 For queue-only pressure, generate a separate plan using `--plan --queue --output
 PRIVATE_PLAN_FILE`, inspect its event counts/digests, and apply with its review
 digest. Queue compaction preserves live requests and one year of terminal evidence,
-keeps durable before/after recovery snapshots and follows the existing bounded
-receipt policy. It never selects runs unless `--select` is also supplied.
+keeps durable before/after recovery snapshots until verified completion, then
+removes the completed plaintext snapshots and retains bounded audit receipts. It never selects runs unless `--select` is also supplied.
 
 The local dashboard summary includes bounded storage state and affected areas.
 Periodic daemon notification polls and completed CLI scan attempts record one

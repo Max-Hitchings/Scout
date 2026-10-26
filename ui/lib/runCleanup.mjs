@@ -136,7 +136,7 @@ export function applyRunCleanupReview(root, { file, confirm, secretFile = null }
           if (current.beforeDigest === review.queue.beforeDigest && stable(current) !== stable(review.queue)) throw new Error('Queue cleanup plan changed after review');
         }
         const runs = review.plan.selected.length ? archiveSelectedRuns(review.plan, lease) : {};
-        const queue = review.queue ? compactScanQueue(root, lease, { now: new Date(review.queue.generatedAt), summaryDays: review.queue.summaryDays }) : null;
+        const queue = review.queue ? compactScanQueue(root, lease, { now: new Date(review.queue.generatedAt), summaryDays: review.queue.summaryDays, reviewedPlan: review.queue }) : null;
         return { ok: true, ...runs, ...(queue ? { queue } : {}) };
       });
     } finally { releaseScanLease(lease); }
