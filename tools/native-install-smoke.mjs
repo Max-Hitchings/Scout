@@ -154,7 +154,12 @@ try {
   await post('/api/setup/activate', { proposalId: proposal.proposalId, confirmed: true });
   await page.reload();
   await page.getByLabel('I reviewed this complete profile and want to publish it').check();
-  await page.getByRole('button', { name: 'Publish this reviewed profile' }).click();
+  await runtimeControl.drain();
+  const [publicationResponse] = await Promise.all([
+    page.waitForResponse((response) => new URL(response.url()).pathname === '/api/search-profile/publish' && response.request().method() === 'POST'),
+    page.getByRole('button', { name: 'Publish this reviewed profile' }).click(),
+  ]);
+  assert.ok(publicationResponse.ok(), `Installed UI profile publication failed (${publicationResponse.status()})`);
   await page.keyboard.press('Escape');
   await page.locator('#scout-settings').click();
   await page.getByRole('button', { name: 'Search & profile', exact: false }).click();
@@ -162,6 +167,7 @@ try {
   // Make this browser boundary deterministic even when real Git is fast on
   // the runner: the preceding owned checkpoint must finish before this save.
   await runtimeControl.request('hold-checkpoint');
+  await runtimeControl.drain();
   const [modeResponse] = await Promise.all([
     page.waitForResponse((response) => new URL(response.url()).pathname === '/api/setup/config' && response.request().method() === 'POST'),
     page.getByRole('button', { name: 'Save search mode', exact: true }).click(),

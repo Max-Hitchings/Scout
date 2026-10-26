@@ -54,6 +54,12 @@ a legitimate workspace-busy result. The checkpoint guard, actual HTTP actions
 and operation deadlines remain intact; no request is retried and no production
 control endpoint is added.
 
+The real browser profile-publication and mode-save actions also await that
+owned boundary and require successful production HTTP responses. Mode-save
+acceptance deliberately holds a real preceding Git checkpoint before draining
+it, so a fast runner cannot hide missing browser-action ordering. The original
+stored-mode check remains required.
+
 ## Once with real accounts
 
 Use a separate test workspace and the same operating-system account that runs
