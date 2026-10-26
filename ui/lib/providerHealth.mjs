@@ -29,7 +29,7 @@ export const PROVIDER_HEALTH_STATES = Object.freeze({
 const SCHEMA_VERSION = 1;
 const HISTORY_LIMIT = 32;
 const FILE_LIMIT_BYTES = 16 * 1024;
-const PROVIDERS = new Set(['codex', 'claude']);
+const PROVIDERS = new Set(['codex', 'claude', 'local']);
 const STATES = new Set(Object.values(PROVIDER_HEALTH_STATES));
 const USABLE_STATES = new Set([
   PROVIDER_HEALTH_STATES.READY,

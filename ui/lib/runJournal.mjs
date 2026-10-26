@@ -1,3 +1,4 @@
+import { isSafeModelId } from './modelIdentifier.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -228,7 +229,9 @@ function validateVersion(value, ErrorType) {
   const version = requireExactKeys(value, ['kind', 'value'], 'version', ErrorType);
   if (!VERSION_KINDS.has(version.kind)) throw new ErrorType('journal payload version kind is invalid');
   try {
-    requireSafeToken(version.value, 'version value', ErrorType);
+    if (version.kind === 'model') {
+      if (!isSafeModelId(version.value)) throw new ErrorType('journal model version is invalid');
+    } else requireSafeToken(version.value, 'version value', ErrorType);
   } catch {
     throw new ErrorType('journal payload version value is invalid');
   }
@@ -270,7 +273,9 @@ function validateRecoveryCompatibility(value, ErrorType) {
     ...(compatibility.schemaVersion >= 2 ? ['scheduleJobId', 'logicalWindowId'] : []),
     ...(compatibility.schemaVersion >= 3 ? ['lanePlanGeneration'] : []),
   ]) {
-    requireSafeToken(compatibility[key], `recovery compatibility ${key}`, ErrorType);
+    if (key === 'model') {
+      if (!isSafeModelId(compatibility[key])) throw new ErrorType('journal recovery model is invalid');
+    } else requireSafeToken(compatibility[key], `recovery compatibility ${key}`, ErrorType);
   }
   if (typeof compatibility.sourceConfigFingerprint !== 'string' || !SHA256.test(compatibility.sourceConfigFingerprint)) {
     throw new ErrorType('journal recovery compatibility source/config fingerprint is invalid');
@@ -324,7 +329,9 @@ function validatePayload(type, payload, ErrorType = TypeError) {
   }
   if (type === 'recovery.provider-substituted') {
     for (const key of ['previousProvider', 'previousModel', 'nextProvider', 'nextModel']) {
-      requireSafeToken(value[key], `recovery substitution ${key}`, ErrorType);
+      if (key.endsWith('Model')) {
+        if (!isSafeModelId(value[key])) throw new ErrorType('journal recovery substitution model is invalid');
+      } else requireSafeToken(value[key], `recovery substitution ${key}`, ErrorType);
     }
     if (value.previousProvider === value.nextProvider && value.previousModel === value.nextModel) {
       throw new ErrorType('journal recovery substitution does not change provenance');

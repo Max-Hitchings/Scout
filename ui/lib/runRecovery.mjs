@@ -1,3 +1,4 @@
+import { isSafeModelId } from './modelIdentifier.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -188,7 +189,11 @@ function checkedCompatibility(input, { candidate = false } = {}) {
     'provider', 'purpose', 'rankingVersion', 'targetRevision',
     ...(input.schemaVersion >= 2 ? ['scheduleJobId', 'logicalWindowId'] : []),
     ...(input.schemaVersion >= 3 ? ['lanePlanGeneration'] : []),
-  ]) token(input[field], `recovery compatibility ${field}`);
+  ]) {
+    if (field === 'model') {
+      if (!isSafeModelId(input[field])) throw new TypeError('recovery compatibility model is invalid');
+    } else token(input[field], `recovery compatibility ${field}`);
+  }
   if (typeof input.sourceConfigFingerprint !== 'string' || !SHA256.test(input.sourceConfigFingerprint)) {
     throw new TypeError('recovery compatibility source/config fingerprint is invalid');
   }
@@ -225,7 +230,9 @@ function checkedProviderSubstitution(value, request) {
   exactKeys(value, ['allowed', 'fromProvider', 'fromModel', 'toProvider', 'toModel'], 'provider substitution');
   if (value.allowed !== true) throw new TypeError('provider substitution must be explicitly allowed');
   for (const field of ['fromProvider', 'fromModel', 'toProvider', 'toModel']) {
-    token(value[field], `provider substitution ${field}`);
+    if (field.endsWith('Model')) {
+      if (!isSafeModelId(value[field])) throw new TypeError('provider substitution model is invalid');
+    } else token(value[field], `provider substitution ${field}`);
   }
   if (value.toProvider !== request.provider || value.toModel !== request.model) {
     throw new TypeError('provider substitution does not match requested provenance');
