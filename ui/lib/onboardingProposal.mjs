@@ -355,13 +355,19 @@ export async function createOnboardingProposal(root, provider, {
 } = {}) {
   if (readActivationIntent(root)) throw new Error('an onboarding activation requires recovery');
   onProgress({ phase: 'Preparing approved evidence', current: 1, total: 4 });
-  const config = loadWorkspaceConfig(root);
-  assertLivingCvReady(root);
-  const initialTargetHashes = Object.fromEntries(ONBOARDING_FILES.map((relative) => [relative, sha256(targetPath(root, relative))]));
-  const livingCvEvidence = approvedLivingCvEvidence(root);
-  const livingCvEvidenceDigest = livingCvEvidence === null ? null : crypto.createHash('sha256').update(livingCvEvidence).digest('hex');
-  const livingCvSourceRevision = livingCvEvidenceRevision(root);
-  const input = buildOnboardingEvidence(root, config);
+  const { config, initialTargetHashes, livingCvEvidenceDigest, livingCvSourceRevision, input } = withWorkspaceMutationAuthority(root, { kind: 'onboarding-input', phase: 'snapshot-evidence' }, () => {
+    if (readActivationIntent(root)) throw new Error('an onboarding activation requires recovery');
+    assertLivingCvReady(root);
+    const config = loadWorkspaceConfig(root);
+    const livingCvEvidence = approvedLivingCvEvidence(root);
+    return {
+      config,
+      initialTargetHashes: Object.fromEntries(ONBOARDING_FILES.map((relative) => [relative, sha256(targetPath(root, relative))])),
+      livingCvEvidenceDigest: livingCvEvidence === null ? null : crypto.createHash('sha256').update(livingCvEvidence).digest('hex'),
+      livingCvSourceRevision: livingCvEvidenceRevision(root),
+      input: buildOnboardingEvidence(root, config),
+    };
+  });
   const initialEvidenceDigest = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
   const prompt = [
     'Create one evidence-only Scout onboarding proposal from the JSON input below.',
