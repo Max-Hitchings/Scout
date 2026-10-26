@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { randomBytes } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { localProviderStatus, runLocalTurn, validateLocalProviderConfig } from './lib/localProvider.mjs';
 
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-local-boundary-'));
@@ -177,4 +178,36 @@ test('legacy untrusted local settings remain readable for host repair without pr
   assert.equal(repaired.status, 200);
   assert.equal(loadWorkspaceConfig(root).ai.local.baseUrl, 'https://model.example.test/v1');
   assert.equal(calls, 0);
+});
+
+test('case-insensitive Windows key containment cannot hang its ancestor walk', () => {
+  // Exercise the real adapter/physical guard in a bounded child, modelling a
+  // valid Windows filesystem whose selector and workspace differ only in case.
+  // Before the fix the accepted path reaches the drive root and loops forever.
+  const script = `
+    import fs from 'node:fs';
+    import path from 'node:path';
+    import { randomBytes } from 'node:crypto';
+    import { localProviderStatus } from ${JSON.stringify(new URL('./lib/localProvider.mjs', import.meta.url).href)};
+    const root = 'c:\\\\synthetic\\\\workspace';
+    const file = 'C:\\\\SYNTHETIC\\\\WORKSPACE\\\\.scout\\\\model-key';
+    const key = randomBytes(24).toString('hex');
+    const fileStat = { dev: 1n, ino: 3n, size: BigInt(key.length), mtimeNs: 1n, ctimeNs: 1n,
+      isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false };
+    for (const name of ['resolve', 'relative', 'dirname', 'join', 'isAbsolute']) path[name] = path.win32[name];
+    path.sep = '\\\\';
+    fs.existsSync = () => true;
+    fs.realpathSync.native = (value) => String(value).toLowerCase();
+    fs.lstatSync = (value) => path.basename(String(value)) === 'model-key' ? fileStat : {
+      dev: 1n, ino: 2n, isDirectory: () => true, isFile: () => false, isSymbolicLink: () => false };
+    fs.openSync = () => 42;
+    fs.fstatSync = () => fileStat;
+    fs.readSync = (_fd, buffer) => buffer.write(key);
+    fs.closeSync = () => {};
+    const status = localProviderStatus({ root, local: { baseUrl: 'http://127.0.0.1:8000/v1', model: 'synthetic/model', apiKeyFile: file } });
+    process.stdout.write(JSON.stringify({ authenticated: status.authenticated, reasonCode: status.reasonCode }));
+  `;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 2000 });
+  assert.equal(child.status, 0, `Windows case-variant selector must settle: ${child.error?.code || child.stderr}`);
+  assert.deepEqual(JSON.parse(child.stdout), { authenticated: true });
 });
