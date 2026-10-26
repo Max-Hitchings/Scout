@@ -105,7 +105,10 @@ export function createRunCleanupReview(root, { selectedRunIds = [], output = nul
 }
 export function applyRunCleanupReview(root, { file, confirm, secretFile = null } = {}) {
   root = canonicalWorkspace(root);
-  const review = JSON.parse(readPrivateFile(path.resolve(file), MAX_PLAN_BYTES, 'Cleanup review').toString('utf8'));
+  const bytes = readPrivateFile(path.resolve(file), MAX_PLAN_BYTES, 'Cleanup review');
+  let review;
+  try { review = JSON.parse(bytes.toString('utf8')); }
+  catch { throw new Error('Cleanup review is invalid; generate and inspect a new plan'); }
   if (review?.schemaVersion !== 1 || !review.plan || review.plan.root !== root
     || review.workspaceIdentity !== workspaceIdentity(root) || !HASH.test(String(confirm || ''))
     || confirm !== review.reviewDigest || reviewedDigest(review) !== review.reviewDigest) throw new Error('Cleanup review or confirmation changed; generate and inspect a new plan');
