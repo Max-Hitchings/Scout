@@ -176,7 +176,8 @@ for (const condition of ['temporarily-busy', 'always-busy', 'shutdown', 'shutdow
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-outbound-receipt-'));
     const file = path.join(root, 'outbound.json');
     fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, enabled: true, type: 'webhook',
-      url: 'http://127.0.0.1:8000/notify', timeoutMs: condition === 'shutdown' ? 10000 : 100 }), { mode: 0o600 });
+      url: 'http://127.0.0.1:8000/notify',
+      timeoutMs: ['always-busy', 'budget-during-wait'].includes(condition) ? 100 : 10000 }), { mode: 0o600 });
     let sent = 0; let attempts = 0; let admission = true;
     let receiptClock = 0;
     if (condition === 'budget-during-wait') {
