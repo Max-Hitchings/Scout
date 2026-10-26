@@ -389,6 +389,11 @@ Run it alongside the normal suite. The owner-only current-provider check is in
 4. Run the complete test suite, release privacy audit, packaging checks, and relevant manual acceptance. For a workspace-format release, also migrate a production-shaped synthetic workspace, materialise its beta.22 rollback into a separate directory, compare every manifest digest and prove the live synthetic workspace retained its newer data.
    Platform packagers consume only the audit-created content snapshot, recheck
    its privacy-authorized digest immediately before and after packaging, and
+   prepare installable public payload permissions before that audit, including
+   generated platform metadata. The outer stage stays private; POSIX public
+   payload modes are independent of the host umask and Windows staging inherits
+   a verified owner-only DACL. Audited snapshots are never normalised afterward.
+   Packagers
    remove the sealed snapshot in a `finally` path. Each native artifact is first
    written inside a private, unpredictable directory on the destination
    filesystem (`0700` on Unix and a protected current-user-only DACL on
