@@ -131,6 +131,13 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   auth failure remains authoritative until a real remote success. A blocked
   provider creates deduplicated durable alert/run evidence and blocks only its
   own work; there is no silent substitution or automatic missed-window resend.
+  Setup provider cards, guided sign-in advice and doctor readiness share one
+  health-gated provider snapshot. Local credentials remain visibly unverified;
+  checking and login progress do not create failure alerts. Chat, fit assessment
+  and onboarding use the production preflight, and commit a settled provider's
+  health evidence before releasing its provider-work exclusion. Saved failed
+  chat requests have an explicit, single-use resend action after reconnecting;
+  neither reconnection nor status refresh resends a message automatically.
 - Guided provider login is an owner-only, same-origin, CSRF-protected in-memory
   state machine. It uses only `codex login --device-auth` plus
   `codex login status`, or `claude auth login` with bounded code input when

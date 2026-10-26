@@ -172,3 +172,34 @@ assessment capacity merely because it acquired provenance on upgrade.
 Retention self-review also reproduced a corrupted prepared compaction count being
 accepted. The receipt now binds the removal count and archived file sizes/digests
 to the verified before/after bytes; the RED corruption composition is GREEN.
+## 2026-10-25 — provider-truth (Codex)
+
+- Preserved definitive remote authentication failures through checking, sign-in
+  mutation and local credential evidence until real remote success. Ordinary
+  checking/login progress no longer produces a failure alert; old records remain
+  readable.
+- Shared provider presentation across cards, sign-in guidance and doctor/setup
+  projections. Local credentials are visibly unverified. Chat, fit assessment and
+  onboarding use production preflight and persist health before releasing work.
+- Saved authentication-failed chat requests gain an explicit single-use resend,
+  without duplicating the original user message. Asynchronous preflight reserves
+  admission and honours Stop for sends and handoffs. Transcript-save diagnostics
+  never expose filesystem paths.
+- New regressions were observed failing before their fixes, including real
+  health/auth-mutation/HTTP compositions, message resend replay, sign-out draft
+  preservation and handoff Stop/admission. Relevant Chromium chat/reconnect tests
+  passed; final exact-head suite counts are recorded in the draft PR.
+- Tests use disposable synthetic workspaces and stub only provider/process or
+  HTTP boundaries. This Linux container requires an outside-repository child
+  subreaper because PID 1 does not reap terminated orphan test processes. Native
+  provider, Windows/macOS and live acceptance remain unverified; #76 stays open.
+
+## 2026-10-26 — resend durability review repair (Codex)
+
+Explicit chat and fit-assessment resends consume their one-use token under the
+workspace mutation authority before provider execution. Failure to save that
+reservation blocks execution. A later transcript-save failure cannot revive
+the token. Three real-file regressions were observed failing before the repair;
+they cover reservation failure and completion persistence failure for both paths.
+If Scout exits after reservation, the user reviews the conversation and composes
+a new request deliberately; automatic replay is never attempted.

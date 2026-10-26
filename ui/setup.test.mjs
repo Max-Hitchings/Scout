@@ -26,6 +26,33 @@ import {
   validateCvName,
 } from './setup.js';
 
+test('a blocked provider has consistent card, sign-in and verification advice', () => {
+  const provider = {
+    installed: true, authenticated: true, healthState: 'network-unavailable',
+    capabilities: { structuredOutput: true },
+  };
+  assert.equal(providerCardPresentation(provider).available, false);
+  const panel = providerLoginPanelHtml('codex', provider);
+  assert.match(panel, /network (?:access|unavailable)|network access/i);
+  assert.doesNotMatch(panel, /Codex is signed in\./);
+});
+
+test('a completed local login still offers remote verification until the provider is usable', () => {
+  const panel = providerLoginPanelHtml('claude', {
+    installed: true, authenticated: false, healthState: 'sign-in-required',
+    capabilities: { structuredOutput: true },
+  }, { provider: 'claude', state: 'succeeded', sessionId: 'synthetic-session' });
+  assert.match(panel, /data-provider-login-action="retry"/);
+  assert.doesNotMatch(panel, /Sign-in succeeded\./);
+});
+
+test('fresh local sign-out still offers guided sign-in when remote health is older', () => {
+  const panel = providerLoginPanelHtml('codex', {
+    installed: true, authenticated: false, healthState: 'ready', capabilities: { structuredOutput: true },
+  });
+  assert.match(panel, /Sign in to Codex with Scout/);
+});
+
 test('feedback learning review separates job events, pending proposals and published undo', () => {
   const html = feedbackLearningHtml({
     revision: 'a'.repeat(64),
@@ -304,7 +331,7 @@ test('provider login panel exposes only accessible state-specific guided actions
   assert.match(pending, /disabled aria-disabled="true"/);
 
   const succeeded = providerLoginPanelHtml('codex', {
-    installed: true, authenticated: false,
+    installed: true, authenticated: true, healthState: 'ready', capabilities: { structuredOutput: true },
   }, {
     provider: 'codex',
     sessionId: 'synthetic-session',
