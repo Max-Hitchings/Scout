@@ -23,6 +23,29 @@ export function runIsolatedNativeCommand(command, args, { env, ...options }) {
   return result;
 }
 
+export function uninstallWindowsNative(installedRoot, { env, run = runIsolatedNativeCommand }) {
+  return run(path.join(installedRoot, 'unins000.exe'), ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], { env });
+}
+
+export async function finishNativeInstallCleanup(cleanup, { primaryError = null } = {}) {
+  await cleanup();
+}
+
+export function createNativeScanBoundary(invoke, operation) {
+  const completion = Promise.withResolvers();
+  void completion.promise.catch(() => {});
+  return {
+    completion: completion.promise,
+    async route(route) {
+      const result = await invoke('scan');
+      assert.equal(result.ok, true, result.error);
+      operation.result = result;
+      await route.fulfill({ status: 202, json: { operation } });
+      completion.resolve(result);
+    },
+  };
+}
+
 export function nativeWorkspaceSnapshot(root) {
   if (!fs.existsSync(root)) return null;
   const entries = {};
