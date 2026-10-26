@@ -1843,9 +1843,13 @@ const Scout = {
       }
       if (operation.status !== 'succeeded') throw new Error(operation.error || 'Draft generation failed. Your saved files are unchanged.');
       const preview = await this.api(`/api/cv/drafts/preview?id=${encodeURIComponent(operation.result.draftId)}`);
+      if (this.applicationDraft !== draft) return;
       if (preview.error) throw new Error(preview.error);
       this.applicationDraft = { ...preview, draftId: operation.result.draftId, message: 'DRAFT only. Edit and confirm the facts before saving. This preview expires after one hour or when Scout restarts.' };
-    } catch (error) { draft.message = error.message; draft.busy = false; }
+    } catch (error) {
+      if (this.applicationDraft !== draft) return;
+      draft.message = error.message; draft.busy = false;
+    }
     this.renderApplicationDraft();
   },
 
@@ -1860,8 +1864,10 @@ const Scout = {
     let saved;
     try {
       saved = await this.api('/api/cv/drafts/save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ draftId: draft.draftId, markdown: draft.markdown, confirmed: true }) });
+      if (this.applicationDraft !== draft) return;
       if (saved.error) throw new Error(saved.error);
     } catch (error) {
+      if (this.applicationDraft !== draft) return;
       draft.busy = false;
       draft.message = error.message;
       this.renderApplicationDraft();

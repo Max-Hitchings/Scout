@@ -66,6 +66,48 @@ test('busy reviewed draft transitions and discard retain the current work', asyn
   assert.equal(scout.applicationDraft, original);
 });
 
+test('a stale reviewed draft save completion cannot clear a newer preview', async () => {
+  const { scout, context } = loadScout();
+  const original = { opportunityId: 'synthetic-role-a', kind: 'cv', draftId: 'original-preview', markdown: '# DRAFT\n\nEdited source.' };
+  const newer = { opportunityId: 'synthetic-role-b', kind: 'cover-letter', draftId: 'new-preview', markdown: '# DRAFT\n\nNewer source.' };
+  scout.applicationDraft = original;
+  context.document.getElementById = (id) => id === 'application-draft-confirm'
+    ? { checked: true } : { value: original.markdown };
+  scout.renderApplicationDraft = () => {};
+  let completeSave;
+  scout.api = () => new Promise((resolve) => { completeSave = resolve; });
+  let fileOpens = 0;
+  scout.renderCv = async () => { fileOpens++; };
+  scout.openCv = async () => {};
+  scout.setCvStatus = () => {};
+  const pending = scout.saveReviewedDraft();
+  scout.applicationDraft = newer;
+  completeSave({ path: 'applications/synthetic-role-a/draft-cv.md', slug: 'synthetic-role-a' });
+  await pending;
+  assert.equal(scout.applicationDraft, newer);
+  assert.equal(fileOpens, 0);
+});
+
+test('a stale reviewed draft generation cannot replace a newer preview', async () => {
+  const { scout } = loadScout();
+  const original = { opportunityId: 'synthetic-role-a', kind: 'cv' };
+  const newer = { opportunityId: 'synthetic-role-b', kind: 'cover-letter', markdown: '# DRAFT\n\nNewer source.' };
+  scout.applicationDraft = original;
+  scout.renderApplicationDraft = () => {};
+  let completePreview;
+  let previewRequested;
+  const previewStarted = new Promise((resolve) => { previewRequested = resolve; });
+  scout.api = async (url) => url.endsWith('/generate')
+    ? { operation: { id: 'synthetic-operation', status: 'succeeded', result: { draftId: 'original-preview' } } }
+    : new Promise((resolve) => { completePreview = resolve; previewRequested(); });
+  const pending = scout.generateReviewedDraft();
+  await previewStarted;
+  scout.applicationDraft = newer;
+  completePreview({ opportunityId: 'synthetic-role-a', kind: 'cv', markdown: '# DRAFT\n\nOlder generated source.' });
+  await pending;
+  assert.equal(scout.applicationDraft, newer);
+});
+
 test('an earlier opportunities response cannot replace the latest rendered tracker', async () => {
   const { scout, context } = loadScout();
   context.document.getElementById = () => null;
