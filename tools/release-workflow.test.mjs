@@ -271,6 +271,16 @@ test('the actual Windows workflow version guard accepts only the exact requested
   }
 });
 
+test('candidate refs retain every artifact-upload, deployment and publication guard', () => {
+  assert.equal(`v${CANDIDATE_VERSION}`.includes('-rc'), true);
+  const uploads = [...workflow.matchAll(/uses: actions\/upload-artifact@/g)];
+  const guardedUploads = [...workflow.matchAll(/- if: \$\{\{ !contains\(github\.ref_name, '-rc'\) \}\}\s+uses: actions\/upload-artifact@/g)];
+  assert.equal(uploads.length, 3, 'All three platform artifact uploads are checked');
+  assert.equal(guardedUploads.length, uploads.length, 'Every platform upload must exclude release-candidate refs');
+  assert.match(workflow, /deploy-vps:[\s\S]*?if: \(startsWith\(github\.ref, 'refs\/tags\/'\) && !contains\(github\.ref_name, '-rc'\)\)/);
+  assert.match(workflow, /publish:[\s\S]*?if: startsWith\(github\.ref, 'refs\/tags\/'\) && !contains\(github\.ref_name, '-rc'\)/);
+});
+
 test('Windows setup uses the tracked Scout icon', () => {
   const installer = fs.readFileSync(new URL('../installer/Scout.iss', import.meta.url), 'utf8');
   assert.match(installer, /#define IconFile "\.\.\\ui\\assets\\scout-icon\.ico"/);
