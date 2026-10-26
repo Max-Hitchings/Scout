@@ -384,6 +384,12 @@ function sendJson(res, status, obj) {
   res.end(body);
 }
 
+// Preserve each endpoint's existing config fields while projecting the current
+// trusted policy identically for initial loads, refreshes and saved settings.
+function withModePolicy(config) {
+  return { ...config, modePolicy: workspaceModePolicy(config) };
+}
+
 export function publicApiError(fallback = 'Request could not be completed.', _error = null) {
   return { error: fallback, reasonCode: 'request-failed' };
 }
@@ -1017,7 +1023,7 @@ async function handleRead(req, res, url) {
         appRoot: APP_ROOT,
         appVersion: APP_VERSION,
         platform: process.platform,
-        config,
+        config: withModePolicy(config),
         providers: {},
         adzunaConfigured: !!(env.ADZUNA_APP_ID && env.ADZUNA_API_KEY),
         trackerExists: false,
@@ -1050,7 +1056,7 @@ async function handleRead(req, res, url) {
       appRoot: APP_ROOT,
       appVersion: APP_VERSION,
       platform: process.platform,
-      config,
+      config: withModePolicy(config),
       providers: providerStatuses,
       adzunaConfigured: !!(env.ADZUNA_APP_ID && env.ADZUNA_API_KEY),
       trackerExists: fs.existsSync(TRACKER),
@@ -1138,15 +1144,16 @@ async function handleRead(req, res, url) {
     const data = snapshot.data;
     const todayValue = today();
     const config = loadWorkspaceConfig(WORKSPACE_ROOT);
+    const workspaceConfig = withModePolicy(config);
     const health = readScanHealth();
     return sendJson(res, 200, {
       ...data,
-      triage: triage(data, todayValue, workspaceModePolicy(config).triage),
-      pipeline: pipeline(data, todayValue, workspaceModePolicy(config).triage),
+      triage: triage(data, todayValue, workspaceConfig.modePolicy.triage),
+      pipeline: pipeline(data, todayValue, workspaceConfig.modePolicy.triage),
       scanHealth: health,
       schedule: readScheduleSummary(config, health),
       categories: readCategories(),
-      workspaceConfig: { ...config, modePolicy: workspaceModePolicy(config) },
+      workspaceConfig,
       discoveryEngine: loadPublishedSearchProfile(WORKSPACE_ROOT)
         ? 'ranked-discovery'
         : setupReadiness(WORKSPACE_ROOT, config, {}, data).established
@@ -2595,25 +2602,31 @@ routes['POST /api/setup/config'] = (req, res, body) => {
     if (!fs.existsSync(TRACKER)) seedWorkspace(APP_ROOT, WORKSPACE_ROOT);
     const next = mutateWorkspaceConfig(WORKSPACE_ROOT, {
       kind: 'setup-config', phase: 'update-config',
-    }, (current) => ({
-      ...current,
-      ...b,
-      profile: { ...current.profile, ...(b.profile || {}) },
-      search: { ...current.search, ...(b.search || {}) },
-      triage: { ...current.triage, ...(b.triage || {}) },
-      sources: {
-        ...current.sources,
-        ...(b.sources || {}),
-        adzuna: { ...current.sources?.adzuna, ...(b.sources?.adzuna || {}) },
-        hiringCafe: { ...current.sources?.hiringCafe, ...(b.sources?.hiringCafe || {}) },
-      },
-      commute: { ...current.commute, ...(b.commute || {}) },
-      ai: { ...current.ai, ...(b.ai || {}), models: { ...current.ai?.models, ...(b.ai?.models || {}) } },
-      schedule: b.schedule?.jobs ? { jobs: b.schedule.jobs } : current.schedule,
-      setup: { ...current.setup, ...(b.setup || {}) },
-    }));
+    }, (current) => {
+      const stored = {
+        ...current,
+        ...b,
+        profile: { ...current.profile, ...(b.profile || {}) },
+        search: { ...current.search, ...(b.search || {}) },
+        triage: { ...current.triage, ...(b.triage || {}) },
+        sources: {
+          ...current.sources,
+          ...(b.sources || {}),
+          adzuna: { ...current.sources?.adzuna, ...(b.sources?.adzuna || {}) },
+          hiringCafe: { ...current.sources?.hiringCafe, ...(b.sources?.hiringCafe || {}) },
+        },
+        commute: { ...current.commute, ...(b.commute || {}) },
+        ai: { ...current.ai, ...(b.ai || {}), models: { ...current.ai?.models, ...(b.ai?.models || {}) } },
+        schedule: b.schedule?.jobs ? { jobs: b.schedule.jobs } : current.schedule,
+        setup: { ...current.setup, ...(b.setup || {}) },
+      };
+      // Derived policy is never input or persisted authority, including when a
+      // caller submits a previously projected config or an older stored copy.
+      delete stored.modePolicy;
+      return stored;
+    });
     void scheduleCheckpoint('update setup');
-    return replyJson(res, 200, { ok: true, config: next });
+    return replyJson(res, 200, { ok: true, config: withModePolicy(next) });
   } catch (error) { return replyJson(res, 400, publicSetupConfigError(error)); }
 };
 

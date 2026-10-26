@@ -22,6 +22,10 @@ workspace's normal check/action scores (55/70 by default) and assesses at most
 60. A stricter configured threshold remains stricter. These scores are a
 selection policy, not a guarantee that a role is suitable.
 
+The displayed fit labels use this same current policy. Refreshing setup or
+saving unrelated settings does not change a job's label. Saving a new mode or
+stricter custom thresholds updates the labels to match those settings.
+
 Only an assessed keeper at the action threshold creates a match notification.
 An unknown mandatory requirement or a discarded assessment cannot trigger it.
 A generic provider recommendation without a deterministic score keeps its
