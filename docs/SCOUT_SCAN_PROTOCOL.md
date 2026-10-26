@@ -12,6 +12,24 @@ Start installed scans through Scout or its `scan` CLI command. A provider or ski
 
 Interactive tracker changes use the shared workspace mutation authority and fenced lease coordination used by scans. Each browser response includes a tracker revision; a mutation made from a stale page is rejected before writing, the interface refreshes the current tracker and retries once. Successful UI mutations flush a complete temporary file and atomically replace `data/opportunities.json`. This prevents a scan finishing at the same time as a note, status, contact, category, commute or application-stage edit from silently overwriting either side.
 
+Journal appends retain their full hash chain and fencing while avoiding repeated
+whole-file replay during an unchanged writer's run. A private in-process cache
+checks file identity, size and nanosecond change/modify timestamps plus the
+exact last 64 KiB before every warm append. A changed tail or metadata, reopen,
+copied handle or failed write forces full validation; caller-supplied events
+and head hashes never authorise an append. A known committed prefix cannot be
+replaced or truncated. Recovery and inspection continue to validate every
+event, and an incomplete final append remains distinct from corrupt complete
+JSON. No cache is persisted or trusted after a process restart.
+
+To measure append cost on a disposable development host, run
+`node ui/lib/fixtures/run-journal-append.mjs 500 2500`. It uses genuine fenced
+leases, synthetic assessment records and temporary workspaces, then reports
+wall/CPU time, journal bytes read and full-validation read counts. It never
+opens the configured private workspace. Repeat this on the maintained host
+only through its operator-approved development path; local timings do not
+establish live-host performance.
+
 ## Published search-profile boundary
 
 Ranked discovery uses only a reviewed, immutable published search profile. Raw setup answers and an editable draft are evidence for review; they do not become scan rules until publication. Scout stages that draft during workspace startup, setup review or scan readiness once the legacy preferences and profile evidence exist. An established beta workspace with tracked opportunities may temporarily remain on the explicitly marked legacy discovery path, but a fresh workspace cannot scan until its staged draft is reviewed and published. Explicit or confirmed rules can exclude a vacancy; unconfirmed inferred rules remain non-blocking even if their draft strength says `mandatory`. Multiple mandatory accepted values for one field are alternatives: matching any one satisfies that field. Unknown source facts remain unknown and follow the published profile's configured policy (`include`, `penalise`, or `exclude`).
