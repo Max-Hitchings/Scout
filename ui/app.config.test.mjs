@@ -33,6 +33,81 @@ function loadScout() {
   return { scout: context.window.Scout, context };
 }
 
+test('reviewed draft transitions preserve edits until explicit discard', async () => {
+  const { scout, context } = loadScout();
+  const original = { opportunityId: 'synthetic-role-a', kind: 'cv', draftId: 'synthetic-preview', markdown: '# DRAFT\n\nA careful human edit.' };
+  scout.applicationDraft = original;
+  scout.showTab = () => {};
+  scout.waitFor = async () => {};
+  scout.renderApplicationDraft = () => {};
+  let confirmations = 0;
+  context.window.confirm = () => { confirmations++; return false; };
+  await scout.startReviewedDraft('synthetic-role-b', 'cover-letter');
+  assert.equal(scout.applicationDraft, original);
+  assert.equal(confirmations, 1);
+  context.window.confirm = () => true;
+  await scout.startReviewedDraft('synthetic-role-b', 'cover-letter');
+  assert.equal(scout.applicationDraft.opportunityId, 'synthetic-role-b');
+  assert.equal(scout.applicationDraft.kind, 'cover-letter');
+  assert.equal(scout.applicationDraft.markdown, undefined);
+});
+
+test('busy reviewed draft transitions and discard retain the current work', async () => {
+  const { scout, context } = loadScout();
+  const original = { opportunityId: 'synthetic-role-a', kind: 'cv', busy: true };
+  scout.applicationDraft = original;
+  scout.showTab = () => {};
+  scout.waitFor = async () => {};
+  scout.renderApplicationDraft = () => {};
+  context.window.confirm = () => { throw new Error('Busy work cannot be discarded.'); };
+  await scout.startReviewedDraft('synthetic-role-b', 'cover-letter');
+  assert.equal(scout.applicationDraft, original);
+  scout.runAction({ dataset: { action: 'discard-reviewed-draft' } });
+  assert.equal(scout.applicationDraft, original);
+});
+
+test('a stale reviewed draft save completion cannot clear a newer preview', async () => {
+  const { scout, context } = loadScout();
+  const original = { opportunityId: 'synthetic-role-a', kind: 'cv', draftId: 'original-preview', markdown: '# DRAFT\n\nEdited source.' };
+  const newer = { opportunityId: 'synthetic-role-b', kind: 'cover-letter', draftId: 'new-preview', markdown: '# DRAFT\n\nNewer source.' };
+  scout.applicationDraft = original;
+  context.document.getElementById = (id) => id === 'application-draft-confirm'
+    ? { checked: true } : { value: original.markdown };
+  scout.renderApplicationDraft = () => {};
+  let completeSave;
+  scout.api = () => new Promise((resolve) => { completeSave = resolve; });
+  let fileOpens = 0;
+  scout.renderCv = async () => { fileOpens++; };
+  scout.openCv = async () => {};
+  scout.setCvStatus = () => {};
+  const pending = scout.saveReviewedDraft();
+  scout.applicationDraft = newer;
+  completeSave({ path: 'applications/synthetic-role-a/draft-cv.md', slug: 'synthetic-role-a' });
+  await pending;
+  assert.equal(scout.applicationDraft, newer);
+  assert.equal(fileOpens, 0);
+});
+
+test('a stale reviewed draft generation cannot replace a newer preview', async () => {
+  const { scout } = loadScout();
+  const original = { opportunityId: 'synthetic-role-a', kind: 'cv' };
+  const newer = { opportunityId: 'synthetic-role-b', kind: 'cover-letter', markdown: '# DRAFT\n\nNewer source.' };
+  scout.applicationDraft = original;
+  scout.renderApplicationDraft = () => {};
+  let completePreview;
+  let previewRequested;
+  const previewStarted = new Promise((resolve) => { previewRequested = resolve; });
+  scout.api = async (url) => url.endsWith('/generate')
+    ? { operation: { id: 'synthetic-operation', status: 'succeeded', result: { draftId: 'original-preview' } } }
+    : new Promise((resolve) => { completePreview = resolve; previewRequested(); });
+  const pending = scout.generateReviewedDraft();
+  await previewStarted;
+  scout.applicationDraft = newer;
+  completePreview({ opportunityId: 'synthetic-role-a', kind: 'cv', markdown: '# DRAFT\n\nOlder generated source.' });
+  await pending;
+  assert.equal(scout.applicationDraft, newer);
+});
+
 test('an earlier opportunities response cannot replace the latest rendered tracker', async () => {
   const { scout, context } = loadScout();
   context.document.getElementById = () => null;
