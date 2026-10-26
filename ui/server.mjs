@@ -1,3 +1,5 @@
+import { workspaceModePolicy } from './lib/workspaceMode.mjs';
+import { markNotification, notificationView, readNotifications, refreshNotificationDigest } from './lib/notifications.mjs';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -41,6 +43,9 @@ import {
 import {
   PROVIDER_HEALTH_STATES, acknowledgeProviderAlert, providerPreflight, readProviderHealth,
 } from './lib/providerHealth.mjs';
+import { publicProviderStatus } from './lib/providerPresentation.mjs';
+import { publicProviderStatuses } from './lib/providerStatuses.mjs';
+export { publicProviderStatus };
 import { providerRecoveryView } from './lib/providerRecovery.mjs';
 import {
   acquireProviderAuthMutation, acquireProviderWork, attachProviderAuthMutationChild,
@@ -111,7 +116,7 @@ export const APP_VERSION = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'packa
 // clients keep the previous `scout-shell-<id>` cache and the previous ?v= URL.
 export const UI_BUILD_FILES = [
   'index.html', 'app.js', 'setup.js', 'reportView.js', 'service-worker.js', 'manifest.webmanifest',
-  'lib/scoutCharacter.mjs', 'lib/chatDrawerState.mjs', 'lib/codexDeepLink.mjs', 'lib/durableRunStates.mjs',
+  'lib/scoutCharacter.mjs', 'lib/chatDrawerState.mjs', 'lib/codexDeepLink.mjs', 'lib/durableRunStates.mjs', 'lib/providerPresentation.mjs',
   'assets/scout-icon.ico', 'assets/scout-icon.png', 'assets/scout-idle.png',
   'assets/scout-thinking.png', 'assets/scout-searching.png', 'assets/scout-explaining.png',
   'assets/scout-found.png', 'assets/scout-warning.png',
@@ -183,7 +188,10 @@ function createRuntimeHttpHandlerBarrier() {
 function startRuntimeSyncTimer() {
   if (runtimeSyncTimer) return;
   runtimeSyncTimer = setInterval(() => {
-    if (workspaceInitialised()) void scheduleCheckpoint('periodic sync');
+    if (workspaceInitialised()) {
+      try { refreshNotificationDigest(WORKSPACE_ROOT, loadWorkspaceConfig(WORKSPACE_ROOT)); } catch { /* retry on the next tick if a scan owns the fence */ }
+      void scheduleCheckpoint('periodic sync');
+    }
   }, 5 * 60 * 1000);
   runtimeSyncTimer.unref();
 }
@@ -668,6 +676,7 @@ export function requestAccess(req, url, settings = loadDeviceSettings()) {
     || url.pathname.startsWith('/api/remote-access/')
     || url.pathname.startsWith('/api/provider-login/')
     || url.pathname.startsWith('/api/provider-health/')
+    || url.pathname.startsWith('/api/notifications/')
     || ['POST /api/restart', 'POST /api/setup/proposal', 'POST /api/setup/activate', 'POST /api/setup/recovery'].includes(`${req.method} ${url.pathname}`);
   if (mutatingApi && requiresJson) {
     const mediaType = String(req.headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
@@ -747,43 +756,6 @@ function currentDeviceSettings() {
 
 export const providerDetection = { detect: detectProvidersAsync };
 
-const PUBLIC_PROVIDER_HEALTH_STATES = new Set(Object.values(PROVIDER_HEALTH_STATES));
-
-export function publicProviderStatus(value, health = null) {
-  const healthStateIsValid = health === null || PUBLIC_PROVIDER_HEALTH_STATES.has(health?.state);
-  const healthState = health === null ? null
-    : healthStateIsValid ? health.state : PROVIDER_HEALTH_STATES.PROVIDER_ERROR;
-  const authenticationBlocked = !healthStateIsValid
-    || health?.remoteAuthBarrier === true
-    || healthState === PROVIDER_HEALTH_STATES.SIGN_IN_REQUIRED;
-  return {
-    installed: value?.installed === true,
-    authenticated: value?.authenticated === true && !authenticationBlocked,
-    capabilities: {
-      structuredOutput: value?.capabilities?.structuredOutput === true,
-    },
-    ...(healthState === null ? {} : { healthState }),
-  };
-}
-
-function publicProviderStatuses(values, root) {
-  return Object.fromEntries(
-    ['codex', 'claude']
-      .filter((provider) => values?.[provider])
-      .map((provider) => {
-        let health;
-        try {
-          health = readProviderHealth(root, provider);
-        } catch {
-          health = {
-            state: PROVIDER_HEALTH_STATES.PROVIDER_ERROR,
-            remoteAuthBarrier: true,
-          };
-        }
-        return [provider, publicProviderStatus(values[provider], health)];
-      }),
-  );
-}
 
 const PROVIDER_LOGIN_OWNER_ID = randomUUID();
 const providerLoginCsrfTokens = new Map();
@@ -1040,6 +1012,7 @@ async function handleRead(req, res, url) {
     const providerStatuses = publicProviderStatuses(providers, WORKSPACE_ROOT);
     const env = loadEnv(WORKSPACE_ROOT);
     const readiness = setupReadiness(WORKSPACE_ROOT, config, providerStatuses, readTracker());
+    const health = readScanHealth();
     return sendJson(res, 200, {
       workspaceRoot: WORKSPACE_ROOT,
       appRoot: APP_ROOT,
@@ -1054,9 +1027,9 @@ async function handleRead(req, res, url) {
       searchProfilePublished: Boolean(loadPublishedSearchProfile(WORKSPACE_ROOT)),
       setupComplete: Boolean(config.setup?.completedAt),
       readiness: readiness.checks,
-      scanHealth: readScanHealth(),
-      schedule: readScheduleSummary(config),
-      doctor: publicDoctor(doctor(WORKSPACE_ROOT, { appRoot: APP_ROOT, providers })),
+      scanHealth: health,
+      schedule: readScheduleSummary(config, health),
+      doctor: publicDoctor(doctor(WORKSPACE_ROOT, { appRoot: APP_ROOT, providers: providerStatuses, healthGated: true })),
       git: detectGit(),
       sync: syncStatus(WORKSPACE_ROOT),
       device: currentDeviceSettings(),
@@ -1115,23 +1088,32 @@ async function handleRead(req, res, url) {
     const data = snapshot.data;
     const todayValue = today();
     const config = loadWorkspaceConfig(WORKSPACE_ROOT);
+    const health = readScanHealth();
     return sendJson(res, 200, {
       ...data,
-      triage: triage(data, todayValue, config.triage),
-      pipeline: pipeline(data, todayValue, config.triage),
-      scanHealth: readScanHealth(),
-      schedule: readScheduleSummary(config),
+      triage: triage(data, todayValue, workspaceModePolicy(config).triage),
+      pipeline: pipeline(data, todayValue, workspaceModePolicy(config).triage),
+      scanHealth: health,
+      schedule: readScheduleSummary(config, health),
       categories: readCategories(),
-      workspaceConfig: config,
+      workspaceConfig: { ...config, modePolicy: workspaceModePolicy(config) },
+      discoveryEngine: loadPublishedSearchProfile(WORKSPACE_ROOT)
+        ? 'ranked-discovery'
+        : setupReadiness(WORKSPACE_ROOT, config, {}, data).established
+          ? 'legacy-discovery' : 'publication-required',
       trackerRevision: snapshot.revision,
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/pipeline') {
     const data = readTracker();
-    return sendJson(res, 200, pipeline(data, today(), loadWorkspaceConfig(WORKSPACE_ROOT).triage));
+    return sendJson(res, 200, pipeline(data, today(), workspaceModePolicy(loadWorkspaceConfig(WORKSPACE_ROOT)).triage));
   }
   if (req.method === 'GET' && url.pathname === '/api/scan-health') {
     return sendJson(res, 200, readScanHealth());
+  }
+  if (req.method === 'GET' && url.pathname === '/api/notifications') {
+    if (!fs.existsSync(WORKSPACE_ROOT)) return sendJson(res, 200, { alerts: [], outbox: [] });
+    return sendJson(res, 200, notificationView(readNotifications(WORKSPACE_ROOT)));
   }
   if (req.method === 'GET' && url.pathname === '/api/provider-health') {
     let runs = [];
@@ -2425,6 +2407,25 @@ routes['DELETE /api/setup/proposal'] = (req, res) => {
   void scheduleCheckpoint('discard setup proposal');
   return replyJson(res, 200, result);
 };
+
+routes['POST /api/notifications/poll'] = (req, res) => {
+  if (req.scoutAccess !== 'local') return replyJson(res, 403, { error: 'Desktop delivery is available only on the Scout host.' });
+  try { return replyJson(res, 200, refreshNotificationDigest(WORKSPACE_ROOT, loadWorkspaceConfig(WORKSPACE_ROOT))); }
+  catch { return replyJson(res, 409, { error: 'Notifications are busy or need review. Open Scout and retry.' }); }
+};
+
+for (const [route, action] of [['delivered', 'delivered'], ['acknowledge', 'acknowledged']]) {
+  routes[`POST /api/notifications/${route}`] = (req, res, body) => {
+    if (action === 'delivered' && req.scoutAccess !== 'local') return replyJson(res, 403, { error: 'Desktop delivery is available only on the Scout host.' });
+    const value = parseBody(body);
+    if (!value) return replyJson(res, 400, { error: 'Notification request is invalid.' });
+    try { return replyJson(res, 200, markNotification(WORKSPACE_ROOT, value.id, action)); }
+    catch (error) {
+      if (error?.message === 'notification is unavailable') return replyJson(res, 404, { error: 'Notification is no longer pending.' });
+      return replyJson(res, 409, { error: 'Notification could not be updated. Retry when the scan finishes.' });
+    }
+  };
+}
 
 routes['POST /api/setup/config'] = (req, res, body) => {
   const b = parseBody(body); if (!b) return replyJson(res, 400, { error: 'bad json' });
