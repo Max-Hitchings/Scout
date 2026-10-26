@@ -34,6 +34,17 @@ function scanRoot() {
   return root;
 }
 
+function retainedScanInput(root) {
+  assert.equal(fs.existsSync(path.join(root, '.scout', 'scan-input')), false,
+    'new diagnostic bundles must share their run artifact retention');
+  const files = fs.readdirSync(path.join(root, '.scout', 'runs'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(root, '.scout', 'runs', entry.name, 'artifacts', 'scan-input.json'))
+    .filter((file) => fs.existsSync(file));
+  assert.ok(files.length > 0, 'each assessed run must retain its diagnostic input inside its artifacts');
+  return files.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
+}
+
 const authenticated = () => ({ installed: true, authenticated: true, executable: 'codex', capabilities: { structuredOutput: true } });
 const fixtureToken = (value) => value;
 
@@ -2110,9 +2121,7 @@ test('a queued keeper run completes against its claim-time tracker input instead
     assert.equal(projectScanQueue(root).requests[0].status, 'succeeded');
     const tracker = JSON.parse(fs.readFileSync(path.join(root, 'data', 'opportunities.json'), 'utf8'));
     assert.equal(tracker.opportunities[0].company, 'Keeper Co');
-    const scanInput = fs.readdirSync(path.join(root, '.scout', 'scan-input'))
-      .map((name) => fs.readFileSync(path.join(root, '.scout', 'scan-input', name), 'utf8'))
-      .join('\n');
+    const scanInput = retainedScanInput(root);
     assert.match(scanInput, /https:\/\/example\.test\/jobs\/keeper/);
     assert.doesNotMatch(
       scanInput,
@@ -2175,8 +2184,7 @@ test('fresh liveness keeps a transient query URL while every persisted scan proj
             path.join(root, '.scout', 'runs', entry.name, 'artifacts', name),
             'utf8',
           ))),
-      ...fs.readdirSync(path.join(root, '.scout', 'scan-input'))
-        .map((name) => fs.readFileSync(path.join(root, '.scout', 'scan-input', name), 'utf8')),
+      retainedScanInput(root),
       fs.readFileSync(path.join(root, 'data', 'scan-runs.jsonl'), 'utf8'),
       fs.readFileSync(path.join(root, 'data', 'opportunities.json'), 'utf8'),
       ...fs.readdirSync(path.join(root, 'reports'))
@@ -2326,6 +2334,39 @@ test('a scan records its assessment version and a model change assesses an earli
   assert.deepEqual(assessedUrls, [job.url, job.url], 'a different model assesses the rejection again');
   assert.equal(lastRun().assessment_version.model, 'model-b');
   assert.deepEqual(lastRun().explanations.map((item) => item.lifecycle.reason), ['assessment-change']);
+});
+
+test('persisted source country flows through collection and canonical compensation independently of workspace currency', async () => {
+  const { fetchAdzuna } = await import('../ui/lib/adzuna.mjs');
+  const { normaliseObservation } = await import('../ui/lib/vacancyObservation.mjs');
+  const root = scanRoot();
+  try {
+    const config = loadWorkspaceConfig(root);
+    config.currency = 'EUR';
+    config.locale = 'fr-FR';
+    config.search.salaryMinimum = 50000;
+    config.sources.adzuna.country = 'us';
+    writeWorkspaceConfig(root, config);
+    fs.writeFileSync(path.join(root, '.env'), ['ADZUNA_APP_ID=example', 'ADZUNA_API_KEY=example', ''].join('\n'));
+    let queried;
+    const collected = await collectScanSources(root, loadWorkspaceConfig(root), {
+      queryPlan: { queries: ['synthetic role'], lanes: [] },
+      fetchAts: async () => ({ jobs: [], available: true }),
+      fetchCafe: async () => ({ jobs: [], available: true }),
+      fetchAdzunaFn: (options) => fetchAdzuna(options, async (url) => {
+        queried = new URL(url);
+        return { ok: true, json: async () => ({ results: [{
+          id: 'synthetic-country-role', title: 'Synthetic Role', company: { display_name: 'Synthetic Company' },
+          salary_min: 60000, salary_max: 70000, redirect_url: 'https://jobs.example.test/country-role',
+        }] }) };
+      }),
+    });
+    const observation = normaliseObservation(collected.sources.adzuna.jobs[0], { sourceName: 'adzuna' });
+    assert.match(queried.pathname, /\/us\/search\//);
+    assert.equal(observation.compensation.value.currency, 'USD');
+    assert.equal(observation.compensation.value.currencyProvenance, 'queried-country');
+    assert.equal(queried.searchParams.has('salary_min'), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test('workspace modes apply different real scan capacity and assessment gates with durable alert delivery', async () => {

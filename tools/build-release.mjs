@@ -90,12 +90,13 @@ function normalise(relative) {
   return String(relative).replaceAll('\\', '/').replace(/^\.\/+/, '');
 }
 
-export function includeCopiedTreePath(relative) {
+export function includeCopiedTreePath(relative, { allowDependencyTrees = false } = {}) {
   const value = normalise(relative);
   const lower = value.toLocaleLowerCase('en-US');
   const base = path.posix.basename(lower);
   const parts = lower.split('/').filter(Boolean);
   if (parts.includes('.git')) return false;
+  if (!allowDependencyTrees && parts.includes('node_modules')) return false;
   if (
     base === 'workspace.json'
     && lower !== 'templates/workspace/workspace.json'
@@ -106,9 +107,9 @@ export function includeCopiedTreePath(relative) {
   return true;
 }
 
-export function includeReleasePath(relative) {
+export function includeReleasePath(relative, options) {
   const value = normalise(relative);
-  if (!includeCopiedTreePath(value)) return false;
+  if (!includeCopiedTreePath(value, options)) return false;
   const lower = value.toLocaleLowerCase('en-US');
   const base = path.posix.basename(lower);
   const parts = lower.split('/').filter(Boolean);
@@ -463,7 +464,8 @@ export function stageRelease({
       required(resolvedRoot, 'node_modules'),
       path.join(appDir, 'node_modules'),
       '',
-      (relative) => includeReleasePath(relative) && includeProductionDependency(relative),
+      (relative) => includeReleasePath(relative, { allowDependencyTrees: true })
+        && includeProductionDependency(relative),
       resolvedRoot,
     );
   }

@@ -23,6 +23,7 @@ import {
   readScanLease,
   synchronousFenceCallback,
 } from './scanLease.mjs';
+import { validatePhysicalWorkspacePath } from './physicalPath.mjs';
 
 const COMPATIBILITY_SCHEMA_VERSION = 1;
 const COMPATIBILITY_SCHEMA_VERSIONS = new Set([1, 2, 3]);
@@ -492,6 +493,14 @@ function appendDiagnosticRecord(file, identityKey, validateRecord, lease, makeRe
 
 function selectionFile(root) {
   return path.join(path.resolve(root), '.scout', 'recovery-selections.jsonl');
+}
+
+export function readRecoverySelections(root) {
+  const file = selectionFile(root);
+  validatePhysicalWorkspacePath(root, file, 'recovery selection journal');
+  const state = diagnosticJournalState(file, validateSelectionRecord, 'selectionId');
+  if (state.truncatedTail) throw new Error('recovery selection journal is truncated');
+  return state.events;
 }
 
 function candidateSortEnvelope(input, index) {

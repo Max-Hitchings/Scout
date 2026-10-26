@@ -60,6 +60,149 @@ A2 line 50 is now done. These stay open: A10 line 172 (#76, see A), A11 lines 18
 ## Appending your own progress
 Work done after this snapshot goes in its own section below, signed with the author or agent and dated. Leave the "What is done" table above as the record of this snapshot.
 
+## 2026-10-25 — truth-docs (Codex)
+
+| Finding | Disposition and evidence |
+| --- | --- |
+| E-1 | Fixed: the opportunities API distinguishes publication-required, legacy and ranked discovery. Established legacy users see a persistent disclosure and profile-review action; publication clears it. Fresh-workspace gating is preserved. API and user-action regressions were observed RED, then GREEN. |
+| E-3 | Fixed current protocol and scan-skill authority guidance: installed execution uses renewable fenced leases, process identity and durable queueing, not a two-hour advisory-lock recovery rule. |
+| E-4 | Reproduced clipping at 381 px, then fixed status wrapping across 381–700 px, polite live announcements and complete title text. Chromium regression observed RED, then GREEN. |
+| E-5 | Reproduced out-of-order tracker rendering, then added request-generation admission before state/render updates. Production-function and browser regressions pass. |
+| E-6 | Fixed setup, scan-result and guide wording: commute affects assessment context and dashboard filtering, not ranked-discovery filtering. Browser copy regression observed RED, then GREEN. |
+| D-2 | Fixed one-way coexistence claims: current Scout rejects a legacy lock, but cannot make an older binary honour new fencing. Stop-old-process and disable-old-schedule instructions are explicit. Existing sentinel-shaped records remain compatibility input; no sentinel writer or refresh was introduced. |
+| D-3 | Deferred native long-path acceptance to the maintainer under Epic #77. No current application path-length threshold or `core.longpaths` consumer was found to justify a production change. This Linux environment cannot verify native Windows Git/filesystem limits. |
+| D-4 | Ported two existing Windows-bypassed snapshot escape tests to junction fixtures. Reproduced the hosted macOS canonical-temp-root failure with a synthetic Linux temp-directory alias, then canonicalised fixture roots without changing production guards (12/13 RED, 13/13 GREEN under the same alias). A separate fixture-cleanup interleaving proved a successor guard could be removed; atomic retirement and early close observation repair that test fixture. The original ARM exit lacked stderr, so its exact cause still needs a hosted rerun. Existing direct physical-path and mutation-junction coverage is retained; native Windows remains unverified. |
+| PROV-2 | Fixed the production queue-to-public-status composition: historical scheduled `manual-discovery` compatibility purposes display as scheduled discovery without changing durable identity or deduplication. RED then GREEN. |
+| PROV-4 | Fixed with a real unchanged keeper outcome, reconciled at total and source level. A self-review reproduced projection drift through the receipted writer, then bound comparison to the same production tracker projection and retained closed tracker-outcome fields in run recipes. Verification/history and notification bookkeeping remain fresh without reporting changed job content. Both compositions were RED then GREEN. |
+| PROV-5 | Corrected semantic-fact documentation to describe stopword removal, duplicate elimination and bounded facts. No extra advert or profile body is retained. |
+
+PROV-3 was already done and was not repeated. F-1, D-1 and live operator
+acceptance remain outside this package. Package branches and PRs are review
+evidence, not merged-main or release acceptance. Exact-head full-suite, browser
+and privacy evidence is recorded in the draft package PR.
+
+## 2026-10-26 — independent review repairs (Codex)
+
+The realistic description-bearing, receipted scan regression now distinguishes
+unchanged adverts from genuine responsibility changes. Live evidence and durable
+token hashes use the same comparison representation; new receipts keep all 80
+bounded token hashes, while older 32-token receipts remain readable. Advert-update
+digests survive projection unchanged. Five consecutive coordinated scans cover
+initial addition, repeated verification, a real advert change and its recheck.
+Both new regressions were observed failing before the repair. No advert body is
+added to durable scan artifacts.
+## 2026-10-25 — supply-chain (Codex)
+
+- F-2: CI now uses the same immutable checkout and Node setup commits already
+  pinned in the release workflow. Their upstream `v4.4.0` tag identities were
+  checked. Policy coverage discovers every secret-bearing workflow and checks
+  every action in it, including jobs that do not receive secrets themselves.
+- F-3: allowlisted application and public-source trees exclude nested
+  `node_modules` directories, including case variants. A real staging
+  composition covers every copied tree and confirms top-level production
+  packages and their required nested dependencies remain available.
+- Observed RED before each fix: F-2 reported four mutable CI action references;
+  F-3 reported copied dependency trees. Each focused regression then passed.
+  Release staging, privacy-audit and workflow tests passed together: 71/71.
+- F-1, D-1, platform signing, package publication and live systems are outside
+  this change. Full-suite and hosted-platform evidence is recorded in the draft
+  package PR; Linux tests use a process-reaping wrapper outside the repository
+  because this disposable container's PID 1 does not reap orphaned children.
+## 2026-10-25 — discovery correctness (Codex agent)
+
+Branch: `friend/discovery-correctness`, based on `integration/epic77-progress`
+at `93048fd`. No issue acceptance boxes or earlier progress entries were changed.
+
+- **B-1:** Adzuna uses queried-country salary currencies with explicit currency
+  provenance; unsupported currencies remain unknown. Cross-currency legacy
+  source minimums are omitted. Setup and Sources settings expose the country;
+  existing saved/default countries and historical assessments are preserved.
+- **B-2:** Shared URL, provider-reference and employer/title-token indexes block
+  grouping and durable-ID comparisons before the unchanged complete predicate.
+  First compatible groups and all-member agreement remain authoritative. The
+  5,000-vacancy bounded regression failed before the fix (10-second timeout) and
+  passed after it (about 1.03 seconds including prior reconciliation).
+  Separate synthetic 2,500 and 10,000 measurements took about 0.65 and 2.05
+  seconds. These are development-container measurements, not VPS evidence.
+  Thirty deterministic 80-observation differential batches matched pre-fix
+  production grouping and durable reconciliation exactly.
+- **B-3:** Generated onboarding profile/CV instructions use the workspace locale.
+- **B-4:** Small plural pools try soft diversity before recorded relaxation;
+  above-threshold vacancies still fill spare capacity. Recommended policy:
+  keep relaxation explicit rather than letting a small pool bypass diversity.
+- **B-5:** History readers normalise hyphenated rejection aliases to persisted
+  underscore outcomes. A production-reader/lifecycle regression covers the
+  mixed 384-assessed/128-pre-assessment history boundary and 600 remembered
+  rejections with version-triggered reassessment beyond it.
+
+Every new regression was observed failing before its fix, including the
+country Settings browser action. Focused checks passed; full Node verification
+passed 1,509 total, 1,503 passed, 0 failed, 6 platform skips. Chromium Settings
+passed 29/29 and first-run onboarding passed 6/6 using the installed system browser. Firefox and native Windows
+execution were not performed. Tests used only synthetic workspaces and stubbed
+source/provider boundaries. A scoped child-subreaper wrapper outside the
+repository is needed in this container because its PID 1 does not reap orphan
+children; neither Scout nor its tests were weakened for that environment.
+
+Self-review added a failing historical-fingerprint regression before excluding
+currency-provenance metadata from semantic change detection. The provenance
+still persists with salary evidence; a real amount or currency correction
+still counts as material. An unchanged old salary therefore does not consume
+assessment capacity merely because it acquired provenance on upgrade.
+## 2026-10-25 — retention package (Codex)
+
+- A-1: real recovery selection no longer pins historical terminal skips or a
+  completed recovery forever. Current leases, queue claims, damaged journals and
+  unreceipted mutations remain protected. Reviewed encrypted cleanup retains the
+  selection audit. Bounded selection compaction preserves current dispositions
+  and full encrypted before/after evidence, including crash/successor recovery.
+- A-2: status measurement no longer reads artifact bodies; a synthetic 100 MiB
+  inventory took 2.5 ms with zero artifact body reads. Review/archive comparisons
+  still hash content. Setup/opportunity responses measure scan health once.
+- PROV-1: new diagnostic inputs are private run-owned artifacts. Legacy external
+  inputs count towards pressure and use the existing explicit reviewed archive
+  lifecycle; no silent deletion occurs.
+- Observed RED before fixes: historical terminal cleanup and completed-selection
+  release; mutation/damaged-journal composition; 100 MiB artifact-body read;
+  duplicate per-response inventory; legacy pressure/archive; two actual runtime
+  scan projections; compaction/crash receipt and stale-fence replacement.
+- Full Node and final focused verification are recorded in the package PR.
+  Linux execution only; no live workspace, provider, host or Windows/macOS check.
+
+Retention self-review also reproduced a corrupted prepared compaction count being
+accepted. The receipt now binds the removal count and archived file sizes/digests
+to the verified before/after bytes; the RED corruption composition is GREEN.
+## 2026-10-25 — provider-truth (Codex)
+
+- Preserved definitive remote authentication failures through checking, sign-in
+  mutation and local credential evidence until real remote success. Ordinary
+  checking/login progress no longer produces a failure alert; old records remain
+  readable.
+- Shared provider presentation across cards, sign-in guidance and doctor/setup
+  projections. Local credentials are visibly unverified. Chat, fit assessment and
+  onboarding use production preflight and persist health before releasing work.
+- Saved authentication-failed chat requests gain an explicit single-use resend,
+  without duplicating the original user message. Asynchronous preflight reserves
+  admission and honours Stop for sends and handoffs. Transcript-save diagnostics
+  never expose filesystem paths.
+- New regressions were observed failing before their fixes, including real
+  health/auth-mutation/HTTP compositions, message resend replay, sign-out draft
+  preservation and handoff Stop/admission. Relevant Chromium chat/reconnect tests
+  passed; final exact-head suite counts are recorded in the draft PR.
+- Tests use disposable synthetic workspaces and stub only provider/process or
+  HTTP boundaries. This Linux container requires an outside-repository child
+  subreaper because PID 1 does not reap terminated orphan test processes. Native
+  provider, Windows/macOS and live acceptance remain unverified; #76 stays open.
+
+## 2026-10-26 — resend durability review repair (Codex)
+
+Explicit chat and fit-assessment resends consume their one-use token under the
+workspace mutation authority before provider execution. Failure to save that
+reservation blocks execution. A later transcript-save failure cannot revive
+the token. Three real-file regressions were observed failing before the repair;
+they cover reservation failure and completion persistence failure for both paths.
+If Scout exits after reservation, the user reviews the conversation and composes
+a new request deliberately; automatic replay is never attempted.
 ## 2026-10-25 — Codex: workspace modes and local alerts
 
 - Added per-workspace background watch and active hunting choices to the setup

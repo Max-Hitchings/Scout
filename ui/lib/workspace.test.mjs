@@ -208,3 +208,10 @@ test('syncManagedInstructions migrates .scout/ to track cv-renders.json while ig
   const ignoreRenders = spawnSync('git', ['check-ignore', '.scout/cv-renders.json'], { cwd: workspace, encoding: 'utf8', windowsHide: true });
   assert.equal(ignoreRenders.status, 1); // 1 means NOT ignored
 });
+
+test('workspace Adzuna country rejects malformed codes without changing existing country defaults', () => {
+  const config = mergeWorkspaceDefaults();
+  assert.equal(config.sources.adzuna.country, 'gb');
+  config.sources.adzuna.country = '../us';
+  assert.throws(() => validateWorkspaceConfig(config), /Adzuna country/);
+});
