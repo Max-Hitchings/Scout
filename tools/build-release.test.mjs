@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import {
   assertAuditedStage,
   auditStageBeforePackaging,
@@ -38,6 +39,51 @@ function assertPrivateCopyFixturesAbsent(root) {
     assert.equal(fs.existsSync(path.join(root, relative)), false, relative);
   }
 }
+
+test('a Debian package built under umask 077 remains readable after root-owned installation', {
+  skip: process.platform !== 'linux' ? 'The real Debian packager runs on Linux' : false,
+}, () => {
+  const previous = process.umask(0o077);
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-deb-public-modes-'));
+  const root = path.join(base, 'source');
+  const runtime = path.join(base, 'runtime');
+  let audit;
+  try {
+    for (const entry of RELEASE_FILES) {
+      const file = path.join(root, entry.source);
+      fs.mkdirSync(entry.tree ? file : path.dirname(file), { recursive: true });
+      if (entry.tree) fs.writeFileSync(path.join(file, 'source.mjs'), 'export const synthetic = true;\n');
+      else fs.writeFileSync(file, entry.source === 'package.json' ? '{"version":"1.0.0"}'
+        : entry.source === 'package-lock.json' ? '{"lockfileVersion":3,"packages":{}}' : 'Synthetic public input.\n');
+    }
+    fs.mkdirSync(runtime);
+    for (const file of ['node', 'typst']) fs.writeFileSync(path.join(runtime, file), 'Synthetic runtime.');
+    const staged = stageRelease({
+      root, stageDir: path.join(base, 'stage'), includeDependencies: false,
+      nodeExecutable: path.join(runtime, 'node'), typstExecutable: path.join(runtime, 'typst'),
+    });
+    const control = path.join(staged.stageDir, 'DEBIAN');
+    fs.mkdirSync(control, { mode: 0o755 }); fs.chmodSync(control, 0o755);
+    fs.writeFileSync(path.join(control, 'control'), 'Package: scout-synthetic-modes\nVersion: 1.0.0\nArchitecture: all\nMaintainer: Synthetic fixture\nDescription: Synthetic public package fixture\n');
+    audit = auditStageBeforePackaging(staged.stageDir, {
+      authorizationRoot: base, env: { SCOUT_RELEASE_MARKERS: 'SyntheticUmaskFixtureMarker' },
+      sealedDirectoryModes: { DEBIAN: 0o755 },
+    });
+    const artifact = path.join(base, 'synthetic.deb');
+    assertAuditedStage(audit);
+    const built = spawnSync('dpkg-deb', ['--build', '--root-owner-group', audit.stageDir, artifact], { encoding: 'utf8' });
+    assert.equal(built.status, 0, built.stderr);
+    assertAuditedStage(audit);
+    const listing = spawnSync('dpkg-deb', ['--contents', artifact], { encoding: 'utf8' });
+    assert.equal(listing.status, 0, listing.stderr);
+    assert.match(listing.stdout, /^-r--r--r--\s+root\/root\s+.*\.\/app\/package\.json$/m);
+    assert.match(listing.stdout, /^-r-xr-xr-x\s+root\/root\s+.*\.\/runtime\/node$/m);
+  } finally {
+    process.umask(previous);
+    if (audit) removeAuditedStage(audit.stageDir, { expectedRecord: audit.stageRecord });
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
 
 test('release manifest is allowlisted and excludes private workspace roots', () => {
   const sources = RELEASE_FILES.map((entry) => entry.source);
