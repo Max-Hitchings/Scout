@@ -163,6 +163,89 @@ test('a saved failed chat can be explicitly resent once without duplicating its 
   assert.equal(calls, 2);
 });
 
+test('resend consumes its durable token before provider work even if the completion cannot be saved', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const rename = fs.renameSync;
+  t.after(() => { fs.renameSync = rename; });
+  let calls = 0;
+  const routes = routeFixture(root, { runTurnFn() {
+    calls += 1;
+    if (calls === 2) fs.renameSync = (from, to) => {
+      if (String(to).endsWith(`${path.sep}data${path.sep}chats${path.sep}${ID}.json`)) throw new Error('Synthetic transcript replacement failure');
+      return rename(from, to);
+    };
+    return { stop() {}, finished: Promise.resolve(calls === 1
+      ? { ok: false, reasonCode: 'authentication-required', filesTouched: [] }
+      : { ok: true, text: 'Completed synthetic turn', filesTouched: [] }) };
+  } });
+  await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'codex', text: 'Synthetic request' }));
+  const retryId = loadChat(root, ID).retry.id;
+  recordProviderHealth(root, 'codex', { kind: 'remote-success', source: 'post-auth' }, { purpose: 'post-auth' });
+  await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, retryId }));
+  await new Promise(setImmediate);
+  fs.renameSync = rename;
+  const replay = await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, retryId }));
+  assert.equal(replay.statusCode, 409);
+  assert.equal(calls, 2);
+  assert.equal(loadChat(root, ID).retry, undefined);
+});
+
+test('a resend fails closed before execution when its durable reservation cannot be saved', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const rename = fs.renameSync;
+  t.after(() => { fs.renameSync = rename; });
+  let calls = 0;
+  const routes = routeFixture(root, { runTurnFn() {
+    calls += 1;
+    return { stop() {}, finished: Promise.resolve(calls === 1
+      ? { ok: false, reasonCode: 'authentication-required', filesTouched: [] }
+      : { ok: true, text: 'Synthetic completion', filesTouched: [] }) };
+  } });
+  await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'codex', text: 'Synthetic request' }));
+  const retryId = loadChat(root, ID).retry.id;
+  recordProviderHealth(root, 'codex', { kind: 'remote-success', source: 'post-auth' }, { purpose: 'post-auth' });
+  fs.renameSync = (from, to) => {
+    if (String(to).endsWith(`${path.sep}data${path.sep}chats${path.sep}${ID}.json`)) throw new Error('Synthetic transcript replacement failure');
+    return rename(from, to);
+  };
+  const blocked = await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, retryId }));
+  fs.renameSync = rename;
+  assert.equal(calls, 1);
+  assert.equal(sseEvents(blocked.text()).at(-1).event, 'error');
+  assert.equal(loadChat(root, ID).retry.id, retryId);
+  await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, retryId }));
+  assert.equal(calls, 2);
+});
+
+test('fit resend cannot replay after provider success followed by transcript failure', async (t) => {
+  const root = tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const rename = fs.renameSync;
+  t.after(() => { fs.renameSync = rename; });
+  let calls = 0;
+  const routes = routeFixture(root, { runStructuredTurnFn() {
+    calls += 1;
+    if (calls === 1) return Promise.reject(Object.assign(new Error('Synthetic auth failure'), { reasonCode: 'authentication-required' }));
+    fs.renameSync = (from, to) => {
+      if (String(to).endsWith(`${path.sep}data${path.sep}chats${path.sep}${ID}.json`)) throw new Error('Synthetic transcript replacement failure');
+      return rename(from, to);
+    };
+    return Promise.resolve({ value: { summary: 'Synthetic assessment', strengths: [], evidenceGaps: [], mandatoryGaps: [], recommendation: 'check' } });
+  } });
+  await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'codex', mode: 'fit-assessment', text: 'Synthetic request' }));
+  await new Promise(setImmediate);
+  const retryId = loadChat(root, ID).retry.id;
+  recordProviderHealth(root, 'codex', { kind: 'remote-success', source: 'post-auth' }, { purpose: 'post-auth' });
+  await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, retryId }));
+  await new Promise(setImmediate);
+  fs.renameSync = rename;
+  const replay = await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, retryId }));
+  assert.equal(replay.statusCode, 409);
+  assert.equal(calls, 2);
+});
+
 test('two chat requests cannot both cross asynchronous preflight for the same opportunity', async (t) => {
   const root = tmpRoot();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -81,3 +81,13 @@ Work done after this snapshot goes in its own section below, signed with the aut
   HTTP boundaries. This Linux container requires an outside-repository child
   subreaper because PID 1 does not reap terminated orphan test processes. Native
   provider, Windows/macOS and live acceptance remain unverified; #76 stays open.
+
+## 2026-10-26 — resend durability review repair (Codex)
+
+Explicit chat and fit-assessment resends consume their one-use token under the
+workspace mutation authority before provider execution. Failure to save that
+reservation blocks execution. A later transcript-save failure cannot revive
+the token. Three real-file regressions were observed failing before the repair;
+they cover reservation failure and completion persistence failure for both paths.
+If Scout exits after reservation, the user reviews the conversation and composes
+a new request deliberately; automatic replay is never attempted.

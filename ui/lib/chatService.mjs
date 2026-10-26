@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
-  loadChat, saveChat, emptyChat, appendMessage, addFilesTouched, recordHandoff, chatPurpose,
+  loadChat, saveChat, consumeChatRetry, emptyChat, appendMessage, addFilesTouched, recordHandoff, chatPurpose,
 } from './chatStore.mjs';
 import { buildClaudeArgs, parseClaudeLine } from './chatClaude.mjs';
 import { buildCodexArgs, parseCodexLine } from './chatCodex.mjs';
@@ -690,7 +690,7 @@ export function registerChatRoutes({
 
     if (b.mode === 'fit-assessment') {
       if (purpose !== 'job') return replyJson(res, 400, { error: 'fit assessment belongs to the job conversation' });
-      return handleFitAssessment(req, res, { id, entry, engine, text, chat, retrying, pending });
+      return handleFitAssessment(req, res, { id, entry, engine, text, chat, retrying, retryId: b.retryId, pending });
     }
 
     sseStart(res);
@@ -700,6 +700,10 @@ export function registerChatRoutes({
       providerWork = superviseProviderWork(engine);
       built = await engineBuild(engine, chat.cliSessionId, model);
       if (!accepting || pending.cancelled) throw Object.assign(new Error('Turn stopped.'), { reasonCode: 'stopped' });
+      if (retrying) {
+        consumeChatRetry(repoRoot, id, b.retryId, purpose);
+        delete chat.retry;
+      }
     } catch (e) {
       if (providerWork) await providerWork.release();
       if (e?.reasonCode === 'authentication-required') {
@@ -799,7 +803,7 @@ export function registerChatRoutes({
     sseEnd(res);
   }
 
-  async function handleFitAssessment(req, res, { id, entry, engine, text, chat, retrying, pending }) {
+  async function handleFitAssessment(req, res, { id, entry, engine, text, chat, retrying, retryId, pending }) {
     sseStart(res);
     let operation = null;
     let stopRequested = false;
@@ -819,6 +823,10 @@ export function registerChatRoutes({
       providerWork = superviseProviderWork(engine);
       const { status, model } = await engineStatus(engine);
       if (!accepting || pending.cancelled) throw Object.assign(new Error('Turn stopped.'), { reasonCode: 'stopped' });
+      if (retrying) {
+        consumeChatRetry(repoRoot, id, retryId);
+        delete chat.retry;
+      }
       const context = {
         selectedOpportunity: JSON.parse(selectedEntryContext(entry).split('\n').slice(1).join('\n')),
         profile: boundedFile(path.join('profile', 'context.md')),
