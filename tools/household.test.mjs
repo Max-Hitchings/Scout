@@ -58,6 +58,12 @@ test('an unavailable sibling does not block a healthy instance and list reports 
   const env = { ...process.env, SCOUT_HOUSEHOLD_SETTINGS: file };
   assert.equal(activateHouseholdRuntime(first.workspace, { env: { ...env } }).id, first.id);
   assert.throws(() => activateHouseholdRuntime(second.workspace, { env: { ...env } }), /identity changed|unavailable/i);
+  const startup = spawnSync(process.execPath, ['--input-type=module', '-e',
+    "const server=await import('./ui/server.mjs');console.log(JSON.stringify({workspace:server.WORKSPACE_ROOT}));"], {
+    env: { ...env, SCOUT_WORKSPACE: first.workspace }, encoding: 'utf8', timeout: 10000,
+  });
+  assert.equal(startup.status, 0, startup.stderr);
+  assert.equal(JSON.parse(startup.stdout).workspace, first.workspace);
   assert.equal(readHousehold({ file }).instances.length, 2);
   const listed = spawnSync(process.execPath, ['tools/scout.mjs', 'household', 'list'], {
     env: { ...env, SCOUT_WORKSPACE: '', SCOUT_DEVICE_SETTINGS: path.join(directory, 'device.json') },

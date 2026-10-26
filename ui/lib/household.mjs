@@ -14,15 +14,19 @@ function identity(root) {
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('household workspace is linked or unavailable');
   return `${stat.dev}:${stat.ino}`;
 }
-function checkInstance(item) {
+function checkInstanceRecord(item) {
   if (!item || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.id) || item.id.length > 48
     || !path.isAbsolute(item.workspace || '') || !Number.isInteger(item.port) || item.port < 1024 || item.port > 65535
     || typeof item.identity !== 'string' || !path.isAbsolute(item.deviceSettings || '') || !path.isAbsolute(item.providerHome || '')) throw new Error('household registry is invalid');
+  if (item.providerHome !== path.join(item.workspace, '.scout', 'provider-home')) throw new Error('household provider home must be isolated');
+  if (item.deviceSettings !== path.join(item.workspace, '.scout', 'device-settings.json')) throw new Error('household device settings must be isolated');
+  return item;
+}
+function checkInstanceAvailable(item) {
+  checkInstanceRecord(item);
   if (identity(item.workspace) !== item.identity || fs.realpathSync(item.workspace) !== item.workspace) throw new Error('household workspace identity changed');
   validatePhysicalWorkspacePath(item.workspace, item.deviceSettings, 'household device settings');
   validatePhysicalWorkspacePath(item.workspace, item.providerHome, 'household provider home');
-  if (item.providerHome !== path.join(item.workspace, '.scout', 'provider-home')) throw new Error('household provider home must be isolated');
-  if (item.deviceSettings !== path.join(item.workspace, '.scout', 'device-settings.json')) throw new Error('household device settings must be isolated');
   return item;
 }
 export function readHousehold({ file = householdSettingsPath() } = {}) {
@@ -30,7 +34,9 @@ export function readHousehold({ file = householdSettingsPath() } = {}) {
   if (fs.lstatSync(file).isSymbolicLink() || fs.statSync(file).size > 128 * 1024) throw new Error('household registry is linked or oversized');
   const state = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (state.schemaVersion !== 1 || !Array.isArray(state.instances) || state.instances.length > 100) throw new Error('household registry is invalid');
-  state.instances.forEach(checkInstance);
+  // Keep registry integrity global. A missing or replaced workspace is an
+  // individual availability failure, checked only when selecting that instance.
+  state.instances.forEach(checkInstanceRecord);
   for (const [index, item] of state.instances.entries()) {
     if (state.instances.slice(index + 1).some((other) => overlaps(item.workspace, other.workspace) || overlaps(other.workspace, item.workspace))) throw new Error('household workspaces overlap');
   }
@@ -41,7 +47,15 @@ export function readHousehold({ file = householdSettingsPath() } = {}) {
 }
 export function selectedHouseholdInstance({ env = process.env, workspace = null } = {}) {
   const state = readHousehold({ file: householdSettingsPath(env) });
-  return state.instances.find((item) => workspace ? item.workspace === path.resolve(workspace) : item.id === state.active) || null;
+  const instance = state.instances.find((item) => workspace ? item.workspace === path.resolve(workspace) : item.id === state.active);
+  return instance ? checkInstanceAvailable(instance) : null;
+}
+export function listHousehold(options = {}) {
+  const state = readHousehold(options);
+  return { ...state, instances: state.instances.map((item) => {
+    try { checkInstanceAvailable(item); return { ...item, availability: 'available' }; }
+    catch { return { ...item, availability: 'unavailable', reasonCode: 'workspace-unavailable' }; }
+  }) };
 }
 function update(file, action) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -86,6 +100,7 @@ export function switchHouseholdInstance(id, { file = householdSettingsPath() } =
   return update(file, (state) => {
     const instance = state.instances.find((item) => item.id === id);
     if (!instance) throw new Error('household instance is unavailable');
+    checkInstanceAvailable(instance);
     state.active = id;
     return { ok: true, ...instance, appliesTo: 'next process; running instances keep their workspace' };
   });
