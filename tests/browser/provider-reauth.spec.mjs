@@ -210,6 +210,8 @@ test('local model URL editing explains remote data disclosure and unencrypted tr
   const warning = dialog.locator('#setup-local-transport-warning');
   await dialog.getByLabel('Server base URL').fill('https://model.example.test/v1');
   await expect(warning).toContainText('receives your CV and job text');
+  await dialog.getByLabel('Server base URL').fill('https://127.model.example.test/v1');
+  await expect(warning).toContainText('receives your CV and job text');
   await dialog.getByLabel('Server base URL').fill('http://192.168.2.1:8000/v1');
   await expect(warning).toContainText('without transport encryption');
   await dialog.getByLabel('Server base URL').fill('http://127.0.0.1:8000/v1');
