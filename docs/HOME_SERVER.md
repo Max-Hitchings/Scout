@@ -113,7 +113,7 @@ For an owner's loopback notification server:
 }
 ```
 
-Other destinations require HTTPS with normal certificate verification. Credentials, query strings, fragments and redirects are rejected; use an owner-side relay if authentication is needed. Scout sends one bounded JSON POST per alert, with `schemaVersion: 1`, `notification: {id, kind, provider, count, createdAt}` and an `Idempotency-Key` equal to the alert identifier. It sends no job title, CV, profile or provider response. Delivery is at least once: the receiver should deduplicate by identifier because a crash after acceptance can precede the receipt write.
+Other destinations require HTTPS with normal certificate verification. Credentials, query strings, fragments and redirects are rejected; use an owner-side relay if authentication is needed. Scout sends one bounded JSON POST per alert, with `schemaVersion: 1`, `notification: {id, kind, provider, count, createdAt}` and an `Idempotency-Key` equal to the alert identifier. It sends no job title, CV, profile or provider response. Delivery is at least once: the receiver should deduplicate by identifier because a crash after acceptance can precede the receipt write. After a successful send, Scout retries only the idempotent local delivery receipt while a workspace checkpoint briefly owns the fence. The sender rechecks its dispatch ownership before every attempt and never resends transport during that wait. Receipt waiting uses the configured timeout; shutdown, ownership loss or another error stops it. Unsettled receipts leave the alert pending for later delivery with the same identifier.
 
 For a local executable:
 

@@ -11,6 +11,10 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(fn, label = 'headless acceptance', state = () => ({})) {
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
+    const current = state();
+    if (Number.isInteger(current.exitCode) || typeof current.signal === 'string') {
+      throw new Error(`synthetic headless process exited: ${label} ${JSON.stringify(current)}`);
+    }
     try { const value = await fn(); if (value) return value; } catch { /* process is still starting */ }
     await pause(25);
   }
@@ -87,10 +91,17 @@ test('real headless daemon delivers without a tray and keeps its workspace when 
     const env = { ...process.env, SCOUT_WORKSPACE: '', SCOUT_DEVICE_SETTINGS: '', PORT: '', SCOUT_HOUSEHOLD_SETTINGS: registry, SCOUT_NOTIFICATION_CONFIG: '' };
     child = spawn(process.execPath, ['--import', RUNTIME_CONTROL, '--import', RECEIPT_OBSERVER, 'ui/server.mjs'], { env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], shell: false });
     closed = once(child, 'close');
-    let receiptAttempted = false;
+    let receiptAttempted = false; let healthReady = false;
     child.on('message', (message) => { if (message.event === 'receipt-attempt') receiptAttempted = true; });
     const base = `http://127.0.0.1:${port}`;
-    const context = () => ({ deliveries: deliveries.length, receiptAttempted, exitCode: child.exitCode, signal: child.signalCode });
+    const context = () => ({ healthReady, deliveries: deliveries.length, receiptAttempted, exitCode: child.exitCode, signal: child.signalCode });
+    await until(async () => {
+      const response = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(2000) });
+      if (!response.ok) return false;
+      const body = await response.json();
+      healthReady = body.schemaVersion === 1 && body.status === 'ready';
+      return healthReady;
+    }, 'real daemon health readiness', context);
     await until(() => deliveries.length === 1, 'webhook request from real daemon', context);
     // Force the exact CI interleaving: transport succeeds while the real
     // checkpoint child owns the workspace fence. The receipt must settle after
