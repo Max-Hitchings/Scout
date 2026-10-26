@@ -12,6 +12,8 @@ import { chromium } from '@playwright/test';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const output = path.join(root, 'installer/output');
+const portable = process.argv.slice(2).join(' ') === '--portable';
+assert.ok(process.argv.length === 2 || (portable && process.platform === 'linux'), 'Only --portable on Linux is supported');
 const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'scout-installed-')));
 const workspace = path.join(temporary, 'workspace');
 const home = path.join(temporary, 'home');
@@ -29,6 +31,17 @@ async function until(check, label, ms = 60000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) { const result = await check(); if (result) return result; await wait(); }
   throw new Error(`Timed out waiting for ${label}`);
+}
+function removeOwnedInstall(directory) {
+  assert.ok(path.relative(temporary, directory) && !path.relative(temporary, directory).startsWith('..'));
+  const writable = (entry) => {
+    const stat = fs.lstatSync(entry);
+    assert.equal(stat.isSymbolicLink(), false);
+    fs.chmodSync(entry, stat.isDirectory() ? 0o700 : 0o600);
+    if (stat.isDirectory()) for (const name of fs.readdirSync(entry)) writable(path.join(entry, name));
+  };
+  writable(directory);
+  fs.rmSync(directory, { recursive: true, force: true });
 }
 function syntheticProposal() {
   const sourced = (text) => ({ text, evidenceIds: ['config-roles'] });
@@ -67,7 +80,17 @@ try {
     const resources = path.join(installedRoot, 'Contents/Resources');
     appRoot = path.join(resources, 'app'); runtime = path.join(resources, 'runtime/node');
     launcher = path.join(installedRoot, 'Contents/MacOS/Scout'); launcherArgs = ['--workspace', workspace];
-    uninstall = () => fs.rmSync(installedRoot, { recursive: true, force: true });
+    uninstall = () => removeOwnedInstall(installedRoot);
+  } else if (process.platform === 'linux' && portable) {
+    const archive = path.join(output, `Scout-${version}-linux-x64.tar.gz`);
+    const listing = spawnSync('tar', ['-tzf', archive], { encoding: 'utf8', timeout: 30000 });
+    assert.equal(listing.status, 0, listing.stderr);
+    const prefix = `Scout-${version}-linux-x64/`;
+    assert.ok(listing.stdout.trim().split('\n').every((name) => name.startsWith(prefix) && !name.split('/').includes('..')));
+    run('tar', ['-xzf', archive, '-C', temporary, '--no-same-owner']);
+    installedRoot = path.join(temporary, `Scout-${version}-linux-x64`);
+    appRoot = path.join(installedRoot, 'app'); runtime = path.join(installedRoot, 'runtime/node'); launcher = path.join(installedRoot, 'scout-dashboard');
+    uninstall = () => removeOwnedInstall(installedRoot);
   } else if (process.platform === 'linux') {
     assert.equal(fs.existsSync('/opt/scout'), false, 'Use a fresh runner: an existing Scout installation must not be changed');
     run('sudo', ['dpkg', '-i', path.join(output, `Scout-${version}-linux-x64.deb`)]);
@@ -149,7 +172,11 @@ try {
     try { await fetch(`${base}/api/shutdown`, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: '{}', signal: AbortSignal.timeout(10000) }); } catch {}
   }
   host?.kill(); worker?.kill();
-  await wait(1000);
+  if (ownsServer) await until(async () => {
+    try { return !(await fetch(`${base}/api/app-info`, { signal: AbortSignal.timeout(1000) })).ok; }
+    catch { return true; }
+  }, 'installed runtime shutdown', 30000);
+  await wait(250);
   if (uninstall) {
     const careerData = path.join(workspace, 'workspace.json');
     const before = fs.existsSync(careerData) ? fs.readFileSync(careerData) : null;

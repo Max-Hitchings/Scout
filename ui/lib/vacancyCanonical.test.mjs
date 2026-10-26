@@ -400,7 +400,9 @@ test('5,000 distinct vacancies and their durable identities canonicalise within 
   t.diagnostic(`5,000 vacancies including durable reconciliation: ${measured.elapsedMs.toFixed(1)} ms wall; ${measured.cpuMs.toFixed(1)} ms CPU`);
   assert.equal(measured.count, 5000);
   assert.equal(measured.stable, true);
-  assert.ok(measured.cpuMs < 5000, `canonicalisation used ${measured.cpuMs.toFixed(1)} ms CPU; budget is 5000 ms`);
+  const cpuBudget = Math.max(2000, measured.baselineCpuMs * (measured.count / measured.baselineCount) * 3);
+  t.diagnostic(`same-runner ${measured.baselineCount}-vacancy calibration: ${measured.baselineCpuMs.toFixed(1)} ms CPU; scaled CPU budget: ${cpuBudget.toFixed(1)} ms`);
+  assert.ok(measured.cpuMs < cpuBudget, `canonicalisation used ${measured.cpuMs.toFixed(1)} ms CPU; calibrated budget is ${cpuBudget.toFixed(1)} ms`);
 });
 
 test('adding country-currency provenance preserves unchanged historical compensation fingerprints', () => {

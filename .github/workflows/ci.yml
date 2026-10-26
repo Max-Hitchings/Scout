@@ -98,3 +98,6 @@ jobs:
         env: { SCOUT_RELEASE_MARKERS: SyntheticNativeAcceptanceMarker }
       - name: Install artifact, first launch, onboard, choose mode, scan, show results, uninstall
         run: node tools/native-install-smoke.mjs
+      - name: Install and exercise Linux portable artifact independently
+        if: runner.os == 'Linux'
+        run: node tools/native-install-smoke.mjs --portable

@@ -253,3 +253,19 @@ Safari modal return focus and a real unhandled backup-queue rejection. The
 queue rejection reproduced RED in a disposable child process and passed after
 its internal tail was observed. Hosted GREEN and installed-artifact acceptance
 remain pending until actually executed; F-1 packaging remains separately owned.
+
+Hosted evidence at e2a2e7c, run40291322968: Windows native compilation and
+receipt assertions passed; 1,604 staged files measured 77 relative/131 default
+installed characters, and the >260-character round trip passed. Windows and
+Ubuntu WebKit passed after routing isolation and Safari focus repair. Local
+Chromium passed 110/110 and full Node passed 1,584 total/1,577 passed/zero failed,
+with seven appropriate platform skips. Native package installation remains
+blocked before launch by the separately owned F-1 snapshot authorization check.
+
+Intel macOS exposed a hardware-dependent absolute CPU assertion in the scale
+fixture (10,546 ms measured against a 5,000 ms cap). The fixture now calibrates
+1,000 and 5,000 vacancies on the same runner, retaining its 30-second total wall
+limit and an explicit growth ceiling. The original quadratic implementation
+at 93048fd still failed the revised regression with ETIMEDOUT at 30 seconds;
+the indexed implementation passed at 1,418 ms CPU with a 4,935 ms calibrated
+budget. No production canonicalisation predicate or grouping rule changed.
