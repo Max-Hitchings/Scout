@@ -17,9 +17,9 @@ scout doctor
 {
   "schemaVersion": 2,
   "mode": "background",
-  "locale": "en-GB",
-  "currency": "GBP",
-  "timezone": "Europe/London",
+  "locale": "en",
+  "currency": "USD",
+  "timezone": "UTC",
   "profile": { "displayName": "", "tone": "natural, direct and evidence-led" },
   "search": {
     "roleFamilies": [], "sectors": [], "locations": [], "exclusions": [],
@@ -29,6 +29,7 @@ scout doctor
     "origin": "", "mode": "either", "maxMinutes": 180,
     "includeUnknown": true
   },
+  "sources": { "adzuna": { "country": null } },
   "ai": { "provider": null, "model": null, "models": { "codex": null, "claude": null } },
   "schedule": {
     "jobs": [
@@ -41,12 +42,12 @@ scout doctor
 ```
 
 - `mode` is `background` (the default, including existing workspaces) or `active`. It sets the existing assessment bars, scan result cap and local alert/digest policy; see [Search modes and alerts](SEARCH_MODES_AND_ALERTS.md). It is independent of a schedule job’s `primary`/`second-pass` mode.
-- `locale`, `currency` and `timezone` are required strings. Use recognised BCP 47, ISO 4217 and IANA values.
+- `locale`, `currency` and `timezone` are required strings. Fresh workspaces start with the neutral fallback values shown above; first-run setup proposes the browser's language/region, currency and time zone for explicit review. An unknown regional currency stays unanswered in the wizard until you choose it. Existing explicit workspace values are preserved. Use recognised BCP 47, ISO 4217 and IANA values.
 - `profile.tone` guides drafts; it never authorises sending.
 - Search arrays contain user-defined plain-text preferences. `salaryMinimum` is numeric or `null`; adverts with missing salary remain uncertain rather than passing automatically.
 - `commute.mode` records the user's dashboard travel filter; `maxMinutes` is its journey-time limit and `includeUnknown` controls whether unverified journeys remain visible. These values also guide assessment context. They do not exclude vacancies from ranked discovery; review published location rules separately.
-- `ai.provider` is `codex`, `claude` or `null`. `ai.models` provides optional per-provider choices for job-specific questions, CV tailoring and interview preparation; leave a value null to use the provider's current supported default. `ai.model` is retained as a compatibility fallback for older workspaces. Explicit model identifiers may contain letters, digits, `.`, `_`, `:`, or `-` only.
-- Schedule job IDs use lower-case letters, numbers and hyphens. Time uses 24-hour `HH:MM`; `days` lists the weekdays the job runs on with Sunday as `0` (omit it or use an empty array for every day); provider is `codex` or `claude`; mode is `primary` or `second-pass`; and `model` is an optional per-scan override. Every enabled provider must be installed and authenticated on the host.
+- `ai.provider` is `codex`, `claude`, `local` or `null`. `ai.models` provides optional per-provider choices for job-specific questions and interview preparation; leave a value null to use the provider's current supported default. `ai.model` remains a compatibility fallback. The local provider uses `ai.local` with `baseUrl`, `apiKeyFile`, `model`, `timeoutMs` and `retries`; see [Providers](PROVIDERS.md) for the exact transport, file and model namespace rules. Local models have no filesystem tools; use the reviewed draft flow for saved application material.
+- Schedule job IDs use lower-case letters, numbers and hyphens. Time uses 24-hour `HH:MM`; `days` lists weekdays with Sunday as `0` (omit it or use an empty array for every day); provider is `codex`, `claude` or `local`; mode is `primary` or `second-pass`; and `model` is an optional per-scan override. Each enabled provider must be ready on the host; a configured local endpoint does not require an installed Codex or Claude CLI.
 - `setup.completedAt` is written by Scout when onboarding finishes. It prevents the first-run wizard reopening; use Settings to retune an existing workspace.
 
 ## Adzuna search country and salary currency
@@ -54,10 +55,11 @@ scout doctor
 Open **Settings → Sources**, choose **Adzuna search country**, then choose
 **Save search country**. Setup asks the same question beside the optional
 credentials. The country belongs to this workspace and does not change other
-people's searches. Existing workspaces retain their saved country; a missing
-country retains the existing `gb` compatibility default until you change it.
+people's searches. Existing workspaces retain their saved country. A missing
+country is `null` until explicitly chosen; Scout does not send an Adzuna request
+with an unchosen country. Adzuna remains optional.
 
-`sources.adzuna.country` is a two-letter lower-case country code. Adzuna salary
+`sources.adzuna.country` is a two-letter lower-case country code, or `null` before selection. Adzuna salary
 amounts use the queried country's currency, independently of the workspace's
 preferred `currency`. Scout records that currency's provenance as
 `queried-country`; an unrecognised country's currency remains unknown.

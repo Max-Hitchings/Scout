@@ -70,7 +70,7 @@ test('phone cover-letter edits keep PDF download disabled until the saved draft 
   await page.setViewportSize({ width: 390, height: 844 });
   let saved;
   const source = '# DRAFT\n\nA truthful synthetic cover letter.';
-  await page.route('**/api/cv', (route) => route.fulfill({ json: { applications: [], outreach: ['synthetic-letter'], entries: [], letters: [{ slug: 'synthetic-letter', pdf: true, current: true, pdfCurrent: true }] } }));
+  await page.route('**/api/cv', (route) => route.fulfill({ json: { applications: [], outreach: ['synthetic-letter'], entries: [], letters: [{ slug: 'synthetic-letter', pdf: true, current: !saved, pdfCurrent: !saved, stale: Boolean(saved) }] } }));
   await page.route('**/api/cv/file**', (route) => route.fulfill({ contentType: 'text/plain', body: source }));
   await page.route('**/api/cv/pdf**', (route) => route.fulfill({ contentType: 'application/pdf', body: '%PDF-1.7\nSynthetic draft PDF body.' }));
   await page.route('**/api/cv/save', async (route) => { saved = route.request().postDataJSON(); await route.fulfill({ json: { ok: true } }); });
