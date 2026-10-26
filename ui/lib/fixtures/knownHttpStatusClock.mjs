@@ -10,6 +10,7 @@ globalThis.setTimeout = (callback, delay, ...args) => {
   const handle = schedule(callback, delay, ...args);
   if (delay === 300 && new Error().stack.includes('localProvider.mjs')) {
     deadline = { handle, expire: () => callback(...args) };
+    process.stdout.write('Synthetic known-status operation deadline armed\n');
   }
   return handle;
 };

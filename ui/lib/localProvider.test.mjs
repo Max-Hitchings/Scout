@@ -91,9 +91,27 @@ for (const [status, reason] of [[401, 'authentication-required'], [403, 'authent
         if (body === 'oversized') res.end('synthetic private error '.repeat(100_000));
         else { res.flushHeaders(); res.write('synthetic private error'); }
       });
+      // This assertion concerns a status already received. Prepare the real
+      // HTTP headers before starting the adapter's 300 ms operation deadline;
+      // its actual oversized/stalled body still has to be cancelled correctly.
+      const response = await fetch(`${f.local.baseUrl}/chat/completions`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+        signal: AbortSignal.timeout(f.local.timeoutMs),
+      });
+      t.after(async () => { try { await response.body?.cancel(); } catch {} });
+      assert.equal(response.status, status);
+      let adapterRequests = 0;
+      t.mock.method(globalThis, 'fetch', async (url, options) => {
+        adapterRequests++;
+        assert.equal(url, `${f.local.baseUrl}/chat/completions`);
+        assert.equal(options.method, 'POST');
+        assert.equal(options.redirect, 'error');
+        return response;
+      });
       const selected = providerStatus('local', { local: { ...f.local, retries: 2, timeoutMs: 300 } });
       const result = await runLocalTurn({ status: selected, prompt: 'Synthetic request.' }).finished;
       assert.equal(result.reasonCode, reason, 'known HTTP status must survive the unneeded error-body boundary');
+      assert.equal(adapterRequests, 1, 'known authentication and rate-limit failures cannot retry the adapter request');
       assert.equal(f.requests.length, 1, 'authentication and rate limits must never retry');
       assert.doesNotMatch(JSON.stringify(result), /synthetic private error/);
       let timer;
@@ -155,6 +173,7 @@ test('known-status body fixtures preserve their received-header boundary under c
   assert.equal(child.status, 0, `Controlled HTTP header/deadline ordering failed: ${child.error?.code || child.stdout + child.stderr}`);
   assert.match(child.stdout, /# tests 6\b/);
   assert.match(child.stdout, /# pass 6\b/);
+  assert.equal(child.stdout.match(/Synthetic known-status operation deadline armed/g)?.length, 6);
 });
 
 test('an oversized local authentication response establishes a durable barrier until real success', async (t) => {
