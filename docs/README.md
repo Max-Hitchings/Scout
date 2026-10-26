@@ -25,11 +25,13 @@ The [canonical VPS state and automatic backup guide](VPS_BACKUP_AND_STATE.md) co
 
 ## I already use Scout
 
+- [Search modes and local alerts](SEARCH_MODES_AND_ALERTS.md)
 - [Configuration reference](CONFIGURATION.md)
 - [AI providers](PROVIDERS.md)
 - [Reconnect an expired Codex or Claude session](RECONNECT_PROVIDER.md)
 - [Job sources and Adzuna](ADZUNA_AND_SOURCES.md)
 - [Scheduled scans](AUTOMATION.md)
+- [Scan storage and reviewed cleanup](OPERATIONS.md#scan-storage-and-reviewed-cleanup)
 - [Upgrades and rollback](UPGRADES.md)
 - [Known issues](KNOWN_ISSUES.md)
 - [CV quality guidance](CV_QUALITY.md)

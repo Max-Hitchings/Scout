@@ -156,11 +156,20 @@ The project has no long-lived project signing key for these attestations. For a 
 
 The repository owner controls who can approve and change the tagged-release workflow. The `publish` job alone receives `id-token: write` and `attestations: write`; build jobs and workflow-dispatch rehearsals cannot publish releases or attestations. Every subject digest is generated from `checksums.txt`, verified locally, verified again with `gh attestation verify`, and only then published.
 
-Every reusable action in the release workflow is pinned to a reviewed immutable
-full commit SHA, with its major release line retained only as a comment for
-maintenance. Privileged jobs reject mutable tag references in tests. Updating
+Every reusable action in a workflow that receives secrets is pinned to a reviewed
+immutable full commit SHA, with its major release line retained only as a comment
+for maintenance. This includes both jobs in CI, tagged-release builds and
+publication, and workspace repair. Tests discover every workflow containing a
+secret reference and reject mutable action references throughout it. Updating
 one of those SHAs requires a reviewed dependency change and another
 release-candidate rehearsal.
+
+Allowlisted application and public-source trees omit nested `node_modules`
+directories, including differently cased names. Production dependencies enter a
+release only through the separate top-level dependency staging pass, selected
+from the lockfile. That pass retains required nested production dependencies and
+the existing private-file filters; the staged-tree privacy audit still inspects
+their contents.
 
 Release staging refuses symbolic links for both copied trees and individually
 allowlisted inputs, including a link in any ancestor component, except for the

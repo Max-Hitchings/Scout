@@ -40,6 +40,7 @@ export const RELEASE_FILES = Object.freeze([
   { source: 'docs/VPS_BACKUP_AND_STATE.md', target: 'docs/VPS_BACKUP_AND_STATE.md' },
   { source: 'docs/AI_SETUP.md', target: 'docs/AI_SETUP.md' },
   { source: 'docs/CONFIGURATION.md', target: 'docs/CONFIGURATION.md' },
+  { source: 'docs/SEARCH_MODES_AND_ALERTS.md', target: 'docs/SEARCH_MODES_AND_ALERTS.md' },
   { source: 'docs/PRIVACY.md', target: 'docs/PRIVACY.md' },
   { source: 'docs/PRIVATE_REMOTE_ACCESS.md', target: 'docs/PRIVATE_REMOTE_ACCESS.md' },
   { source: 'docs/CV_QUALITY.md', target: 'docs/CV_QUALITY.md' },
@@ -91,12 +92,13 @@ function normalise(relative) {
   return String(relative).replaceAll('\\', '/').replace(/^\.\/+/, '');
 }
 
-export function includeCopiedTreePath(relative) {
+export function includeCopiedTreePath(relative, { allowDependencyTrees = false } = {}) {
   const value = normalise(relative);
   const lower = value.toLocaleLowerCase('en-US');
   const base = path.posix.basename(lower);
   const parts = lower.split('/').filter(Boolean);
   if (parts.includes('.git')) return false;
+  if (!allowDependencyTrees && parts.includes('node_modules')) return false;
   if (
     base === 'workspace.json'
     && lower !== 'templates/workspace/workspace.json'
@@ -107,9 +109,9 @@ export function includeCopiedTreePath(relative) {
   return true;
 }
 
-export function includeReleasePath(relative) {
+export function includeReleasePath(relative, options) {
   const value = normalise(relative);
-  if (!includeCopiedTreePath(value)) return false;
+  if (!includeCopiedTreePath(value, options)) return false;
   const lower = value.toLocaleLowerCase('en-US');
   const base = path.posix.basename(lower);
   const parts = lower.split('/').filter(Boolean);
@@ -464,7 +466,8 @@ export function stageRelease({
       required(resolvedRoot, 'node_modules'),
       path.join(appDir, 'node_modules'),
       '',
-      (relative) => includeReleasePath(relative) && includeProductionDependency(relative),
+      (relative) => includeReleasePath(relative, { allowDependencyTrees: true })
+        && includeProductionDependency(relative),
       resolvedRoot,
     );
   }

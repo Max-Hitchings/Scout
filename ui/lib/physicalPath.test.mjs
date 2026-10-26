@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 function temp() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-physical-path-'));
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'scout-physical-path-')));
   roots.push(root);
   return root;
 }
