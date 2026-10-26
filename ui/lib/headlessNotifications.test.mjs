@@ -5,6 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { after, test } from 'node:test';
+import { randomUUID } from 'node:crypto';
 // Hosted Node tool caches may be group-writable. Exercise the production
 // protected-executable boundary with an owner-only disposable copy instead.
 const runtimeDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-protected-runtime-'));
@@ -168,6 +169,61 @@ test('runtime quiescence stops further outbound alerts after the current child c
     assert.equal(sent, 1); assert.equal(result.delivered, 1);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+for (const condition of ['temporarily-busy', 'always-busy', 'shutdown', 'shutdown-during-wait', 'budget-during-wait', 'disk-error', 'lost-ownership']) {
+  test(`successful outbound transport settles its receipt safely under ${condition}`, async (t) => {
+    const { dispatchHeadlessNotifications } = await import('./headlessNotifications.mjs');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-outbound-receipt-'));
+    const file = path.join(root, 'outbound.json');
+    fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, enabled: true, type: 'webhook',
+      url: 'http://127.0.0.1:8000/notify',
+      timeoutMs: ['always-busy', 'budget-during-wait'].includes(condition) ? 100 : 10000 }), { mode: 0o600 });
+    let sent = 0; let attempts = 0; let admission = true;
+    let receiptClock = 0;
+    if (condition === 'budget-during-wait') {
+      const now = performance.now.bind(performance);
+      t.mock.method(performance, 'now', () => new Error().stack.includes('persistDeliveryReceipt') ? receiptClock : now());
+    }
+    let replacement;
+    const ownerFile = path.join(root, '.scout', 'outbound-dispatch.lock', 'owner.json');
+    const api = { refreshNotificationDigest: () => ({ outbox: [alert] }), markNotification() {
+      attempts++;
+      if (condition === 'temporarily-busy' && attempts > 1) return;
+      if (condition === 'shutdown-during-wait' || condition === 'budget-during-wait') {
+        if (attempts > 1) return;
+        // Change admission/monotonic time after the busy catch has scheduled
+        // its wait, so the next attempt must independently recheck both.
+        queueMicrotask(() => {
+          if (condition === 'shutdown-during-wait') admission = false;
+          else receiptClock = 1000;
+        });
+      }
+      if (condition === 'shutdown') admission = false;
+      if (condition === 'lost-ownership') {
+        replacement = { ...JSON.parse(fs.readFileSync(ownerFile)), token: randomUUID() };
+        fs.writeFileSync(ownerFile, JSON.stringify(replacement));
+      }
+      const error = new Error('Synthetic receipt failure');
+      if (condition !== 'disk-error') error.reasonCode = 'mutation-busy';
+      throw error;
+    } };
+    try {
+      const result = dispatchHeadlessNotifications(root, { file, config: {}, api,
+        shouldContinue: () => admission, send: async () => { sent++; return { ok: true }; } });
+      if (condition === 'lost-ownership') {
+        await assert.rejects(result, /process lock ownership is unavailable/);
+        assert.deepEqual(JSON.parse(fs.readFileSync(ownerFile)), replacement);
+      } else {
+        const outcome = await result;
+        assert.equal(outcome.delivered, condition === 'temporarily-busy' ? 1 : 0);
+        assert.equal(outcome.failed, condition === 'temporarily-busy' ? 0 : 1);
+      }
+      assert.equal(sent, 1, 'receipt contention must never resend successful transport');
+      if (condition === 'temporarily-busy') assert.equal(attempts, 2);
+      else if (condition !== 'always-busy') assert.equal(attempts, 1, 'shutdown, ownership loss and non-busy failures cannot retry persistence');
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}
 
 test('real notification digest reaches a headless hook once and preserves its delivery receipt', async () => {
   const { dispatchHeadlessNotifications } = await import('./headlessNotifications.mjs');

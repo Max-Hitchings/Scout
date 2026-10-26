@@ -82,6 +82,27 @@ export async function sendHeadlessAlert(config, alert, { root, runCommand = runP
   });
 }
 
+async function persistDeliveryReceipt(api, root, id, { ownership, timeoutMs, shouldContinue }) {
+  const deadline = performance.now() + timeoutMs;
+  let retryError = null;
+  while (true) {
+    if (retryError && (!shouldContinue() || performance.now() >= deadline)) throw retryError;
+    ownership.assertOwned();
+    try {
+      api.markNotification(root, id, 'delivered');
+      return;
+    } catch (error) {
+      // The transport has already succeeded. Retry only this idempotent local
+      // receipt, never the webhook/command, while the workspace fence is busy.
+      // Quiescence stops waiting and leaves the original alert pending.
+      const remaining = deadline - performance.now();
+      if (error?.reasonCode !== 'mutation-busy' || !shouldContinue() || remaining <= 0) throw error;
+      retryError = error;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(50, remaining)));
+    }
+  }
+}
+
 // One sender per workspace, shared by the daemon and CLI. Durable process-start
 // identity permits recovery after a crash while preserving a live sender.
 export async function dispatchHeadlessNotifications(root, { file, api, config, send = sendHeadlessAlert, shouldContinue = () => true } = {}) {
@@ -103,8 +124,7 @@ export async function dispatchHeadlessNotifications(root, { file, api, config, s
       try {
         ownership.assertOwned();
         if (!(await send(outbound, alert, { root })).ok) { failed += 1; break; }
-        ownership.assertOwned();
-        api.markNotification(root, alert.id, 'delivered');
+        await persistDeliveryReceipt(api, root, alert.id, { ownership, timeoutMs: outbound.timeoutMs, shouldContinue });
         delivered += 1;
       } catch { failed += 1; break; }
     }
