@@ -444,7 +444,10 @@ test('index.html orders the Speculative tab before Jobs in both nav and sections
   assert.match(html, /data-tab="jobs" class="active"/);
 });
 
-function withJobsDom() {
+function withJobsDom(scout) {
+  // These string-rendering tests use a minimal DOM. Real reconciliation,
+  // pointer continuity and live-editor preservation are browser regressions.
+  if (scout) scout.replaceOpportunityCards = (target, html) => { target.innerHTML = html; };
   const sections = {};
   const make = () => ({ innerHTML: '', classList: { toggle() {}, add() {}, remove() {} }, addEventListener() {}, querySelector: () => null });
   const doc = {
@@ -632,7 +635,7 @@ test('the Jobs audit remains visible for queue-only and waiting workspaces', () 
 
 test('renderJobs lists only new jobs, highest score first, with tags and actions', () => {
   const { scout, context } = loadScout();
-  const { doc } = withJobsDom();
+  const { doc } = withJobsDom(scout);
   context.document = doc;
   scout.filterBar = () => '';
   scout.latestScanCard = () => '';
@@ -666,7 +669,7 @@ test('speculative classification uses the exact tag case-insensitively', () => {
 
 test('renderSpeculative groups tagged opportunities and honours commute filtering', () => {
   const { scout, context } = loadScout();
-  const { doc } = withJobsDom();
+  const { doc } = withJobsDom(scout);
   context.document = doc;
   scout.filterBar = () => '';
   scout.state.commute = { mode: 'car', maxMinutes: '60', includeUnknown: false };
@@ -689,7 +692,7 @@ test('renderSpeculative groups tagged opportunities and honours commute filterin
 
 test('renderSpeculative shows an empty state when nothing matches', () => {
   const { scout, context } = loadScout();
-  const { doc } = withJobsDom();
+  const { doc } = withJobsDom(scout);
   context.document = doc;
   scout.filterBar = () => '';
   scout.state.data = { opportunities: [] };
@@ -777,7 +780,7 @@ test('No removes a job immediately and restores it when persistence fails', asyn
 
 test('renderShortlist lists only shortlisted jobs with a remove action', () => {
   const { scout, context } = loadScout();
-  const { doc } = withJobsDom();
+  const { doc } = withJobsDom(scout);
   context.document = doc;
   scout.filterBar = () => '';
   scout.state.data = {

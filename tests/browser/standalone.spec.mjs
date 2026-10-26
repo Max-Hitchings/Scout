@@ -120,6 +120,38 @@ test('phone job refresh preserves open controls and unsaved feedback while updat
   await expect(text).toHaveValue('Keep this unsaved explanation while checking for new jobs.');
 });
 
+test('a late initial configuration response preserves an expanded feedback-button click', async ({ page }) => {
+  let releaseProposal;
+  const proposalReady = new Promise((resolve) => { releaseProposal = resolve; });
+  let proposalRequested;
+  const proposalStarted = new Promise((resolve) => { proposalRequested = resolve; });
+  await page.route('**/api/setup/status', (route) => route.fulfill({ json: {
+    ...establishedStatus,
+    config: { ...establishedStatus.config, profile: { displayName: 'Synthetic late configuration' } },
+  } }));
+  await page.route('**/api/setup/proposal', async (route) => {
+    proposalRequested();
+    await proposalReady;
+    await route.fulfill({ json: { proposal: null } });
+  });
+  await page.goto('/');
+  await proposalStarted;
+  const card = page.locator('#tab-jobs .card[data-id="new-systems-product-2026-07"]');
+  await card.click();
+  const feedback = card.getByRole('button', { name: 'Poor fit' });
+  await feedback.scrollIntoViewIfNeeded();
+  const bounds = await feedback.boundingBox();
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  releaseProposal();
+  await expect.poll(() => page.evaluate(() => window.Scout?.workspaceConfig?.profile?.displayName)).toBe('Synthetic late configuration');
+  await page.mouse.up();
+  const explanation = card.getByLabel('What should Scout know?');
+  await expect(explanation).toBeVisible();
+  await explanation.fill('A synthetic reason entered after the completed click.');
+  await expect(explanation).toHaveValue('A synthetic reason entered after the completed click.');
+});
+
 test('open job actions refresh when its CV and cover-letter catalogue changes', async ({ page }) => {
   const id = 'new-systems-product-2026-07';
   let created = false;
