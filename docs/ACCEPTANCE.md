@@ -47,6 +47,13 @@ first acceptance failure remains visible if cleanup also fails; cleanup-only
 failures still fail the job. Temporary-directory removal has a bounded retry
 for operating-system handles that close just after the owned processes exit.
 
+Before each tested mutation, the native fixture explicitly drains pending
+checkpoints in its installed server through a private fixture control channel.
+This keeps a slow real Git child from replacing the intended domain check with
+a legitimate workspace-busy result. The checkpoint guard, actual HTTP actions
+and operation deadlines remain intact; no request is retried and no production
+control endpoint is added.
+
 ## Once with real accounts
 
 Use a separate test workspace and the same operating-system account that runs

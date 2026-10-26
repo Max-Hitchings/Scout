@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { createNativeScanBoundary, finishNativeInstallCleanup, nativeInstallEnvironment, nativeWorkspaceSnapshot, runIsolatedNativeCommand, uninstallWindowsNative } from './nativeInstallBoundary.mjs';
+import { createNativeRuntimeControl } from './nativeRuntimeControl.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const output = path.join(root, 'installer/output');
@@ -22,6 +23,7 @@ fs.mkdirSync(home, { recursive: true });
 // Install and uninstall helpers can execute Scout code too. Isolate them
 // before the first native command, not only when launching the installed app.
 const env = nativeInstallEnvironment(process.env, { home, temporary, workspace });
+const runtimeControl = createNativeRuntimeControl({ temporary, workspace, env });
 let installedRoot, appRoot, runtime, launcher, launcherArgs = [], uninstall;
 let host, worker, browser;
 let ownsServer = false;
@@ -125,6 +127,7 @@ try {
   await page.getByRole('button', { name: 'Create my local workspace' }).click();
   await until(() => fs.existsSync(path.join(workspace, 'workspace.json')), 'first workspace creation');
   const post = async (route, data) => {
+    await runtimeControl.drain();
     const response = await context.request.post(`${base}${route}`, { data, headers: { origin: base } });
     assert.ok(response.ok(), `Installed API action failed: ${route} ${response.status()} ${await response.text()}`);
     return response.json();
@@ -138,12 +141,15 @@ try {
   worker.on('message', (message) => { if (message.ready) ready = true; const callback = pending.get(message.id); if (callback) { pending.delete(message.id); callback(message); } });
   worker.stdout.resume(); worker.stderr.resume();
   await until(() => ready, 'installed worker import');
-  const invoke = (command) => new Promise((resolve, reject) => {
-    const id = ++next;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error('Installed synthetic operation timed out')); }, 60000);
-    pending.set(id, (message) => { clearTimeout(timer); message.error ? reject(new Error(message.error)) : resolve(message.result); });
-    worker.send({ id, command });
-  });
+  const invoke = async (command) => {
+    await runtimeControl.drain();
+    return new Promise((resolve, reject) => {
+      const id = ++next;
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error('Installed synthetic operation timed out')); }, 60000);
+      pending.set(id, (message) => { clearTimeout(timer); message.error ? reject(new Error(message.error)) : resolve(message.result); });
+      worker.send({ id, command });
+    });
+  };
   const proposal = await invoke('onboarding');
   await post('/api/setup/activate', { proposalId: proposal.proposalId, confirmed: true });
   await page.reload();
@@ -190,6 +196,7 @@ try {
       catch { return true; }
     }, 'installed runtime shutdown', 30000);
     await wait(250);
+    await runtimeControl.close();
     if (uninstall) {
       const before = nativeWorkspaceSnapshot(workspace);
       uninstall();
