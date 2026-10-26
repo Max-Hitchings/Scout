@@ -209,6 +209,12 @@ Access details differ by operator and must be discovered from the private operat
    Platform packagers consume only the audit-created content snapshot, recheck
    its privacy-authorized digest immediately before and after packaging, and
    remove the sealed snapshot in a `finally` path.
+   Update downloads require an exact-version Ed25519 release manifest and
+   detached signature trusted by the locally bundled public-key registry.
+   Installer preflight uses the same verifier. CI uses generated temporary test
+   keys; production signing requires owner public-key enrollment and the
+   protected `release-signing` environment. Candidate `-rc` tags do not deploy
+   or publish. Signed metadata does not supersede the F-1 packaging gate.
 5. Commit intentionally, push the branch, and open a pull request against `main`.
 6. For release rehearsal, update the protected `codex/release-candidate` branch to the reviewed commit.
 7. Tag the reviewed package version. The protected release workflow builds every platform, deploys the exact tag to the VPS, verifies health and rollback, and only then publishes.

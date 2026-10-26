@@ -59,3 +59,19 @@ A2 line 50 is now done. These stay open: A10 line 172 (#76, see A), A11 lines 18
 
 ## Appending your own progress
 Work done after this snapshot goes in its own section below, signed with the author or agent and dated. Leave the "What is done" table above as the record of this snapshot.
+
+## 2026-10-26 — signed release manifests (Codex)
+
+Implemented an Ed25519 detached release manifest with exact repository/version,
+package filename, byte length and SHA-256. The updater authenticates bounded
+metadata before requesting installer bytes and preserves streamed hashing,
+size limits and atomic writes. Offline installer preflight uses the same
+verifier. Tests generate keys at runtime only; no private key is committed.
+
+Observed RED: unsigned and forged metadata were accepted by the old updater;
+a successful download had no verified signing identity. The new offline
+signing/verification command was absent. All four regression tests then passed
+after implementation. Owner key enrollment, protected environment approval,
+native publisher certificates and the separate F-1 packaging gate remain open.
+Candidate `-rc` tags cannot deploy or publish. Full-suite and hosted native
+evidence will be recorded on the PR, without claiming an unexecuted release.
