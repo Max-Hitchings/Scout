@@ -230,6 +230,9 @@ for (const activated of [false, true]) {
   const run = dialog.getByRole('button', { name: 'Run first scan now' });
   await expect(run).toBeDisabled();
   expect(scanStarts).toBe(0);
+  await page.evaluate(() => window.ScoutSetup.runSupervisedScan());
+  expect(scanStarts).toBe(0);
+  await expect(page.locator('#setup-status')).toContainText('Review and publish the complete search profile');
 
   await dialog.getByLabel('I reviewed this complete profile and want to publish it').check();
   await dialog.getByRole('button', { name: 'Publish this reviewed profile' }).click();
