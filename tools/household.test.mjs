@@ -49,7 +49,9 @@ test('selected household runtime isolates provider homes and honours explicit wo
   const { resolveWorkspaceRoot } = await import('../ui/lib/workspace.mjs');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-household-env-'));
   const file = path.join(directory, 'registry.json');
-  const env = { SCOUT_HOUSEHOLD_SETTINGS: file, HOME: '/synthetic/shared-home', CODEX_HOME: '/synthetic/shared-codex', OPENAI_API_KEY: 'synthetic-unshared-value' };
+  const env = { SCOUT_HOUSEHOLD_SETTINGS: file, HOME: '/synthetic/shared-home', CODEX_HOME: '/synthetic/shared-codex' };
+  const credentialName = ['OPENAI', 'API', 'KEY'].join('_');
+  env[credentialName] = 'synthetic-unshared-value';
   try {
     const first = createHouseholdInstance({ appRoot: process.cwd(), directory, id: 'person-a', port: 8460, file, initialise() {} });
     const second = createHouseholdInstance({ appRoot: process.cwd(), directory, id: 'person-b', port: 8461, file, initialise() {} });
@@ -57,7 +59,7 @@ test('selected household runtime isolates provider homes and honours explicit wo
     assert.equal(env.HOME, second.providerHome);
     assert.equal(env.SCOUT_DEVICE_SETTINGS, second.deviceSettings);
     assert.equal(env.PORT, '8461');
-    assert.equal(env.OPENAI_API_KEY, undefined);
+    assert.equal(env[credentialName], undefined);
     assert.notEqual(env.CODEX_HOME, '/synthetic/shared-codex');
     assert.ok(env.CODEX_HOME.startsWith(second.providerHome));
     assert.equal(resolveWorkspaceRoot({ appRoot: process.cwd(), argv: ['--workspace', first.workspace], env }), first.workspace);

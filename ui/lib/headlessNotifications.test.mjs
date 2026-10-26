@@ -114,3 +114,38 @@ test('runtime quiescence stops further outbound alerts after the current child c
     assert.equal(sent, 1); assert.equal(result.delivered, 1);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('real notification digest reaches a headless hook once and preserves its delivery receipt', async () => {
+  const { dispatchHeadlessNotifications } = await import('./headlessNotifications.mjs');
+  const n = await import('./notifications.mjs');
+  const { seedWorkspace } = await import('./workspace.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-real-outbound-'));
+  try {
+    seedWorkspace(path.resolve('.'), root);
+    const state = n.notificationsForAssessment(n.emptyNotifications(), { mode: 'active' }, [{ id: 'synthetic-job', score: 80, outcome: 'kept' }], '2026-01-01T08:00:00.000Z');
+    fs.writeFileSync(n.notificationFile(root), JSON.stringify(state));
+    const file = path.join(root, '.scout', 'outbound-notifications.json');
+    fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, enabled: true, type: 'command', command: process.execPath, args: [] }), { mode: 0o600 });
+    const sent = [];
+    const options = { config: { mode: 'active' }, send: async (_config, value) => { sent.push(value); return { ok: true }; } };
+    assert.equal((await dispatchHeadlessNotifications(root, options)).delivered, 1);
+    assert.equal(sent[0].kind, 'digest');
+    assert.equal((await dispatchHeadlessNotifications(root, options)).delivered, 0);
+    const view = n.notificationView(n.readNotifications(root));
+    assert.equal(view.outbox.length, 0); assert.equal(view.alerts.length, 1);
+    assert.ok(view.alerts[0].deliveredAt); assert.equal(view.alerts[0].acknowledgedAt, null);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('local provider failures use the real notification outbox and retain a provider-specific label', async () => {
+  const n = await import('./notifications.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-local-outbound-'));
+  try {
+    n.enqueueProviderNotificationUnderFence(root, { provider: 'local', state: 'network-unavailable', alert: { createdAt: '2026-10-26T08:00:00.000Z' } });
+    const view = n.notificationView(n.readNotifications(root));
+    assert.equal(view.outbox.length, 1); assert.equal(view.outbox[0].provider, 'local');
+    assert.equal(view.outbox[0].title, 'Local model provider warning');
+    n.markNotification(root, view.outbox[0].id, 'delivered');
+    assert.equal(n.notificationView(n.readNotifications(root)).outbox.length, 0);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

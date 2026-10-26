@@ -1,3 +1,5 @@
+import { workspaceModePolicy } from './workspaceMode.mjs';
+
 // Versioned, deliberately small projection for the owner's local dashboard.
 // Never spread tracker, profile, scan errors or provider records into this API.
 export const HOME_SUMMARY_SCHEMA_VERSION = 1;
@@ -14,8 +16,9 @@ function link(value) {
 }
 
 export function buildHomeSummary({ config = {}, tracker = {}, scanHealth = {}, providers = [], notifications = { alerts: [] }, now = new Date() } = {}) {
-  const mode = config.mode === 'active' ? 'active' : 'background';
-  const threshold = Math.max(mode === 'background' ? 95 : 0, Number(config.triage?.actionScore ?? 70));
+  const policy = workspaceModePolicy(config);
+  const mode = policy.mode;
+  const threshold = policy.triage.actionScore;
   const matches = (tracker.opportunities || []).filter((item) => ['new', 'shortlist'].includes(item.status)
     && Number.isFinite(item.score) && item.score >= threshold).map((item) => ({
     id: bounded(item.id, 160), title: bounded(item.role || item.title), employer: bounded(item.company || item.employer),

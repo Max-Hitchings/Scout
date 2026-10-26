@@ -1684,6 +1684,7 @@ const Setup = {
       <label class="setup-field"><span><input id="setup-auto-download-updates" type="checkbox" ${device.updates?.policy === 'download' ? 'checked' : ''}> Download verified update packages automatically</span></label>
       ${device.startupStatus?.supported ? `<label class="setup-field"><span><input id="setup-start-with-windows" type="checkbox" ${device.startWithWindows ? 'checked' : ''}> Start Scout when I sign into Windows</span></label>` : ''}
       <p><button id="setup-save-device" class="act primary" type="button">Save device settings</button></p></div>
+      ${this.status?.platform === 'linux' ? '<div class="setup-callout"><strong>Always-on server</strong><p>Scout can run scheduled scans and deliver owner-configured alerts without a desktop. External alerts stay off until the server owner configures them. Each person needs a separate workspace and private address.</p><p><a href="https://github.com/oliver-hitchings/Scout/blob/main/docs/HOME_SERVER.md" target="_blank" rel="noreferrer">Home server guide</a></p></div>' : ''}
       <p><button id="setup-restart" class="act" type="button">Restart Scout</button></p>` :
       '<p>Device settings are unavailable on this host.</p>';
     this.el('setup-save-device')?.addEventListener('click', () => this.saveDeviceSetting());

@@ -1062,11 +1062,7 @@ async function handleRead(req, res, url) {
         schemaVersion: 1, status: initialised ? 'ready' : 'setup-required', version: APP_VERSION,
       });
       const names = [...new Set([config.ai?.provider, ...(config.schedule?.jobs || []).filter((job) => job.enabled).map((job) => job.provider)])].filter(Boolean);
-      let notifications = { alerts: [] };
-      try {
-        const api = await import('./lib/notifications.mjs');
-        notifications = api.notificationView(api.readNotifications(WORKSPACE_ROOT));
-      } catch (error) { if (error.code !== 'ERR_MODULE_NOT_FOUND') throw error; }
+      const notifications = initialised ? notificationView(readNotifications(WORKSPACE_ROOT)) : { alerts: [] };
       return sendJson(res, 200, buildHomeSummary({
         notifications,
         config, tracker: readTracker(), scanHealth: readScanHealth(),
