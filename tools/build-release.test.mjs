@@ -12,7 +12,7 @@ import {
   finishAuditedStageCleanup,
   includePublicSourcePath, includeReleasePath, productionDependencyFilter, productionLockfile,
   productionPackageManifest, PUBLIC_SOURCE_FILES, RELEASE_FILES,
-  removeAuditedStage, sha256, stagePublicSource, stageRelease, verifiedReleaseTreeDigest, writeChecksums,
+  normalisePublicStagePermissions, removeAuditedStage, sha256, stagePublicSource, stageRelease, verifiedReleaseTreeDigest, writeChecksums,
 } from './build-release.mjs';
 import { sealedAuditDirectoryMode, verifiedAuditTreeDigest } from './release-audit.mjs';
 
@@ -40,32 +40,38 @@ function assertPrivateCopyFixturesAbsent(root) {
   }
 }
 
+function publicPermissionFixture(base) {
+  const root = path.join(base, 'source');
+  const runtime = path.join(base, 'runtime');
+  for (const entry of RELEASE_FILES) {
+    const file = path.join(root, entry.source);
+    fs.mkdirSync(entry.tree ? file : path.dirname(file), { recursive: true });
+    if (entry.tree) fs.writeFileSync(path.join(file, 'source.mjs'), 'export const synthetic = true;\n');
+    else fs.writeFileSync(file, entry.source === 'package.json' ? '{"version":"1.0.0"}'
+      : entry.source === 'package-lock.json' ? '{"lockfileVersion":3,"packages":{}}' : 'Synthetic public input.\n');
+  }
+  fs.mkdirSync(runtime);
+  for (const file of ['node', 'typst']) fs.writeFileSync(path.join(runtime, file), 'Synthetic runtime.');
+  return stageRelease({
+    root, stageDir: path.join(base, 'stage'), includeDependencies: false,
+    nodeExecutable: path.join(runtime, 'node'), typstExecutable: path.join(runtime, 'typst'),
+  });
+}
+
 test('a Debian package built under umask 077 remains readable after root-owned installation', {
   skip: process.platform !== 'linux' ? 'The real Debian packager runs on Linux' : false,
 }, () => {
   const previous = process.umask(0o077);
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-deb-public-modes-'));
-  const root = path.join(base, 'source');
-  const runtime = path.join(base, 'runtime');
   let audit;
   try {
-    for (const entry of RELEASE_FILES) {
-      const file = path.join(root, entry.source);
-      fs.mkdirSync(entry.tree ? file : path.dirname(file), { recursive: true });
-      if (entry.tree) fs.writeFileSync(path.join(file, 'source.mjs'), 'export const synthetic = true;\n');
-      else fs.writeFileSync(file, entry.source === 'package.json' ? '{"version":"1.0.0"}'
-        : entry.source === 'package-lock.json' ? '{"lockfileVersion":3,"packages":{}}' : 'Synthetic public input.\n');
-    }
-    fs.mkdirSync(runtime);
-    for (const file of ['node', 'typst']) fs.writeFileSync(path.join(runtime, file), 'Synthetic runtime.');
-    const staged = stageRelease({
-      root, stageDir: path.join(base, 'stage'), includeDependencies: false,
-      nodeExecutable: path.join(runtime, 'node'), typstExecutable: path.join(runtime, 'typst'),
-    });
+    const staged = publicPermissionFixture(base);
     const control = path.join(staged.stageDir, 'DEBIAN');
     fs.mkdirSync(control, { mode: 0o755 }); fs.chmodSync(control, 0o755);
     fs.writeFileSync(path.join(control, 'control'), 'Package: scout-synthetic-modes\nVersion: 1.0.0\nArchitecture: all\nMaintainer: Synthetic fixture\nDescription: Synthetic public package fixture\n');
     const output = path.join(base, 'artifacts'); fs.mkdirSync(output);
+    fs.writeFileSync(path.join(staged.appDir, 'generated-metadata.txt'), 'Synthetic platform metadata.');
+    normalisePublicStagePermissions(staged.stageDir, { expectedRecord: staged.stageRecord });
     audit = auditStageBeforePackaging(staged.stageDir, {
       authorizationRoot: base, env: { SCOUT_RELEASE_MARKERS: 'SyntheticUmaskFixtureMarker' },
       sealedDirectoryModes: { DEBIAN: 0o755 },
@@ -77,13 +83,57 @@ test('a Debian package built under umask 077 remains readable after root-owned i
     assertAuditedStage(audit);
     const listing = spawnSync('dpkg-deb', ['--contents', artifact], { encoding: 'utf8' });
     assert.equal(listing.status, 0, listing.stderr);
-    assert.match(listing.stdout, /^-r--r--r--\s+root\/root\s+.*\.\/app\/package\.json$/m);
-    assert.match(listing.stdout, /^-r-xr-xr-x\s+root\/root\s+.*\.\/runtime\/node$/m);
+    const entry = (file) => listing.stdout.split('\n').find((line) => line.endsWith(`./${file}`)) || '';
+    assert.match(entry('app/package.json'), /^-r--r--r--\s+root\/root\s/);
+    assert.match(entry('app/generated-metadata.txt'), /^-r--r--r--\s+root\/root\s/);
+    assert.match(entry('runtime/node'), /^-r-xr-xr-x\s+root\/root\s/);
   } finally {
     process.umask(previous);
     if (audit) removeAuditedStage(audit.stageDir, { expectedRecord: audit.stageRecord });
     fs.rmSync(base, { recursive: true, force: true });
   }
+});
+
+test('public staging remains private while installable permissions are prepared before the audit', () => {
+  const previous = process.umask(0o022);
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-private-stage-modes-'));
+  let audit;
+  try {
+    const staged = publicPermissionFixture(base);
+    if (process.platform !== 'win32') assert.equal(fs.statSync(staged.stageDir).mode & 0o777, 0o700);
+    const generated = path.join(staged.appDir, 'generated.txt');
+    fs.writeFileSync(generated, 'Synthetic generated metadata.', { mode: 0o600 });
+    normalisePublicStagePermissions(staged.stageDir, { expectedRecord: staged.stageRecord });
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(staged.stageDir).mode & 0o777, 0o700);
+      assert.equal(fs.statSync(generated).mode & 0o777, 0o644);
+      assert.equal(fs.statSync(path.dirname(generated)).mode & 0o777, 0o755);
+    }
+    audit = auditStageBeforePackaging(staged.stageDir, {
+      authorizationRoot: base, env: { SCOUT_RELEASE_MARKERS: 'SyntheticPrivateStageMarker' },
+    });
+    assert.throws(() => normalisePublicStagePermissions(audit.stageDir, { expectedRecord: audit.stageRecord }), /unsealed creation identity/);
+    assertAuditedStage(audit);
+    if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(audit.stageDir, 'app/generated.txt')).mode & 0o777, 0o444);
+  } finally {
+    process.umask(previous);
+    if (audit) removeAuditedStage(audit.stageDir, { expectedRecord: audit.stageRecord });
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('permission preparation cannot change a shared inode outside the public stage', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-stage-hardlink-modes-'));
+  try {
+    const staged = publicPermissionFixture(base);
+    const outside = path.join(base, 'outside.txt');
+    fs.writeFileSync(outside, 'Synthetic outside data.', { mode: 0o600 });
+    const before = fs.statSync(outside).mode;
+    fs.linkSync(outside, path.join(staged.appDir, 'shared.txt'));
+    assert.throws(() => normalisePublicStagePermissions(staged.stageDir, { expectedRecord: staged.stageRecord }), /one link/);
+    assert.equal(fs.statSync(outside).mode, before);
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'Synthetic outside data.');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });
 
 test('release manifest is allowlisted and excludes private workspace roots', () => {

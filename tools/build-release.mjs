@@ -349,6 +349,7 @@ export function auditStageBeforePackaging(stageDir, {
   try {
     fs.mkdirSync(snapshot, { recursive: false, mode: 0o700 });
     snapshotRecord = publicationDirectoryRecord(snapshot);
+    privatePublicationSecurityRecord(snapshot, { create: true });
     const result = auditStagedRelease({
       root: source,
       markers,
@@ -1376,13 +1377,17 @@ export function stagePublicSource({
   const resolvedRoot = path.resolve(root);
   const resolvedStage = path.resolve(stageDir);
   fs.rmSync(resolvedStage, { recursive: true, force: true });
+  fs.mkdirSync(resolvedStage, { recursive: true, mode: 0o700 });
+  privatePublicationSecurityRecord(resolvedStage, { create: true });
+  const stageRecord = publicationDirectoryRecord(resolvedStage);
   for (const entry of PUBLIC_SOURCE_FILES) {
     const source = required(resolvedRoot, entry.source);
     const target = path.join(resolvedStage, entry.target);
     if (entry.tree) copyTree(source, target, normalise(entry.target), includePublicSourcePath, resolvedRoot);
     else copyRegularFile(source, target, resolvedRoot);
   }
-  return { root: resolvedRoot, stageDir: resolvedStage };
+  normalisePublicStagePermissions(resolvedStage, { expectedRecord: stageRecord });
+  return { root: resolvedRoot, stageDir: resolvedStage, stageRecord };
 }
 
 export function auditPublicSourceStage({
@@ -1441,6 +1446,67 @@ function required(root, relative) {
   return value;
 }
 
+export function normalisePublicStagePermissions(stageDir, { expectedRecord } = {}) {
+  const root = path.resolve(stageDir);
+  if (!expectedRecord || path.basename(root).includes('.audited-')) {
+    throw new Error('public stage permission preparation requires its unsealed creation identity');
+  }
+  const assertRoot = () => {
+    if (!samePublicationDirectoryIdentity(publicationDirectoryRecord(root), expectedRecord)) {
+      throw new Error('public release stage identity changed before permission preparation');
+    }
+  };
+  assertRoot();
+  const security = privatePublicationSecurityRecord(root);
+  const visit = (entry, relative = '') => {
+    assertRoot();
+    const ancestors = releasePathIdentity(root, entry);
+    const before = fs.lstatSync(entry, { bigint: true });
+    if (before.isSymbolicLink()) {
+      if (relative !== 'dmg-root/Applications' || fs.readlinkSync(entry) !== '/Applications') {
+        throw new Error('public release stage contains an unexpected symbolic link');
+      }
+      const after = fs.lstatSync(entry, { bigint: true });
+      if (!samePathRecord(before, after) || releasePathIdentity(root, entry) !== ancestors) {
+        throw new Error('public release stage link changed during permission preparation');
+      }
+      return;
+    }
+    if ((!before.isDirectory() && !before.isFile()) || (before.isFile() && before.nlink !== 1n)) {
+      throw new Error('public release stage must contain directories and regular files with one link');
+    }
+    const descriptor = fs.openSync(entry, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+    try {
+      const opened = fs.fstatSync(descriptor, { bigint: true });
+      if (!samePathRecord(opened, before) || releasePathIdentity(root, entry) !== ancestors) {
+        throw new Error('public release stage changed before permission preparation');
+      }
+      if (before.isDirectory()) {
+        for (const name of fs.readdirSync(entry).sort()) visit(path.join(entry, name), relative ? `${relative}/${name}` : name);
+      }
+      const named = fs.lstatSync(entry, { bigint: true });
+      if (!samePathRecord(named, before) || releasePathIdentity(root, entry) !== ancestors) {
+        throw new Error('public release stage changed during permission preparation');
+      }
+      // The outer stage stays private until its snapshot has passed the audit.
+      // Only public descendants get installable modes, before authorization.
+      // Windows directory access comes from the verified inherited DACL;
+      // POSIX execute bits have no equivalent in its directory stat modes.
+      if (relative && (!before.isDirectory() || process.platform !== 'win32')) {
+        fs.fchmodSync(descriptor, before.isDirectory() ? 0o755 : (before.mode & 0o111n) ? 0o755 : 0o644);
+      }
+      const after = fs.lstatSync(entry, { bigint: true });
+      if (after.dev !== opened.dev || after.ino !== opened.ino || after.isSymbolicLink()
+        || releasePathIdentity(root, entry) !== ancestors) {
+        throw new Error('public release stage changed after permission preparation');
+      }
+    } finally { fs.closeSync(descriptor); }
+  };
+  visit(root);
+  assertRoot();
+  if (privatePublicationSecurityRecord(root) !== security) throw new Error('public release stage privacy changed during permission preparation');
+}
+
 export function stageRelease({
   root = DEFAULT_ROOT,
   stageDir = path.join(root, 'dist', 'release', 'stage'),
@@ -1452,6 +1518,9 @@ export function stageRelease({
   const resolvedRoot = path.resolve(root);
   const resolvedStage = path.resolve(stageDir);
   fs.rmSync(resolvedStage, { recursive: true, force: true });
+  fs.mkdirSync(resolvedStage, { recursive: true, mode: 0o700 });
+  privatePublicationSecurityRecord(resolvedStage, { create: true });
+  const stageRecord = publicationDirectoryRecord(resolvedStage);
   const appDir = path.join(resolvedStage, 'app');
 
   for (const entry of RELEASE_FILES) {
@@ -1493,7 +1562,8 @@ export function stageRelease({
   );
   if (platform !== 'win32') fs.chmodSync(path.join(runtimeDir, typstName), 0o755);
 
-  return { root: resolvedRoot, stageDir: resolvedStage, appDir };
+  normalisePublicStagePermissions(resolvedStage, { expectedRecord: stageRecord });
+  return { root: resolvedRoot, stageDir: resolvedStage, appDir, stageRecord };
 }
 
 export function sha256(file) {
@@ -1599,6 +1669,7 @@ export function buildInstaller({ root = DEFAULT_ROOT, stageDir, version, isccPat
   ) {
     throw new Error('verified Windows package input changed during compilation');
   }
+  normalisePublicStagePermissions(staged.stageDir, { expectedRecord: staged.stageRecord });
   const audit = auditStageBeforePackaging(staged.stageDir, { authorizationRoot: root });
   const auditedStage = audit.stageDir;
   let primaryError = null;
