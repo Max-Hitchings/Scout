@@ -60,7 +60,7 @@ export function writeNativeControlRecord(directory, identity, name, value) {
 }
 
 export function createNativeRuntimeControl({ temporary, workspace, env, timeoutMs = 60000 }) {
-  if (typeof temporary !== 'string' || typeof workspace !== 'string' || !env || typeof env !== 'object') throw failure();
+  if (typeof temporary !== 'string' || typeof workspace !== 'string' || !env || typeof env !== 'object' || env === process.env) throw failure();
   temporary = path.resolve(temporary);
   workspace = path.resolve(workspace);
   const inside = (file) => {

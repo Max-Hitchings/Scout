@@ -15,6 +15,13 @@ async function attach() {
     || session.workspace !== path.resolve(process.env.SCOUT_WORKSPACE || '') || !Number.isSafeInteger(session.controllerPid) || session.controllerPid < 1) {
     throw new Error('Native acceptance runtime control is unavailable.');
   }
+  // Match resolveWorkspaceRoot's first explicit --workspace argument before
+  // loading any server code that might otherwise open a different workspace.
+  const workspaceIndex = process.argv.indexOf('--workspace', 2);
+  const requestedWorkspace = workspaceIndex < 0 ? process.env.SCOUT_WORKSPACE : process.argv[workspaceIndex + 1];
+  if (!requestedWorkspace || path.resolve(requestedWorkspace) !== session.workspace) {
+    throw new Error('Native acceptance runtime control is unavailable.');
+  }
   const spawnChild = childProcess.spawn;
   let hold = null;
   let heldChild = null;
@@ -37,6 +44,8 @@ async function attach() {
   };
   syncBuiltinESMExports();
   const server = await import(pathToFileURL(path.resolve(process.argv[1])));
+  if (server.WORKSPACE_ROOT !== session.workspace || typeof server.drainScheduledCheckpoints !== 'function'
+    || typeof server.scheduleCheckpoint !== 'function') throw new Error('Native acceptance runtime control is unavailable.');
   writeNativeControlRecord(directory, identity, 'ready.json', { schemaVersion: 1, sessionId: session.sessionId, pid: process.pid });
   const releaseHeld = () => {
     if (heldChild?.connected) heldChild.send('continue');
