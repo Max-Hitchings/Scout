@@ -11,7 +11,7 @@ import {
 import { claimNextScanRequest, enqueueScanRequest, projectScanQueue } from './scanQueue.mjs';
 import { acquireScanLease, currentLeaseOwner, readScanLease, releaseScanLease } from './scanLease.mjs';
 import {
-  appendRunEvent, openRunJournal, replayRunJournal, validateRunJournal,
+  JournalCorruptionError, appendRunEvent, openRunJournal, replayRunJournal, validateRunJournal,
 } from './runJournal.mjs';
 import { ProviderLifecycleUnclosedError } from './structuredTurn.mjs';
 import { applyPreparedMutation, prepareMutation } from './mutationCoordinator.mjs';
@@ -3738,6 +3738,8 @@ test('an unclosed provider lifecycle remains auditable without stopping heartbea
 test('terminal evidence validation failure retains the lease for fenced recovery', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-terminal-evidence-retained-'));
   let runId;
+  let journalFile;
+  let journalBytes;
   try {
     await assert.rejects(
       runScanPipeline({
@@ -3746,12 +3748,18 @@ test('terminal evidence validation failure retains the lease for fenced recovery
         stages: durableStageHarness(new Map()),
         onStageCommitted({ stageId, run }) {
           runId = run.runId;
-          if (stageId === 'select') fs.renameSync(run.directory, `${run.directory}.unavailable`);
+          if (stageId === 'select') {
+            journalFile = run.file;
+            journalBytes = fs.readFileSync(run.file);
+            fs.renameSync(run.directory, `${run.directory}.unavailable`);
+          }
         },
       }),
-      /ENOENT|no such file|cannot find/i,
+      (error) => error instanceof JournalCorruptionError && /committed history changed/.test(error.message),
     );
     assert.equal(readScanLease(root)?.runId, runId);
+    assert.equal(fs.existsSync(journalFile), false, 'a missing committed journal must not be recreated');
+    assert.deepEqual(fs.readFileSync(path.join(`${path.dirname(journalFile)}.unavailable`, 'journal.jsonl')), journalBytes);
   } finally {
     const retained = readScanLease(root);
     if (retained) {
