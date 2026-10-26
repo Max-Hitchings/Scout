@@ -109,6 +109,21 @@ during unchanged appends; final full validation independently confirmed every
 event. Timings are local Linux evidence. Native Windows/macOS and maintained
 VPS remeasurement remain operator acceptance, and this package does not alter
 the independent F-1 or D-1 work.
+## 2026-10-26 — signed release manifests (Codex)
+
+Implemented an Ed25519 detached release manifest with exact repository/version,
+package filename, byte length and SHA-256. The updater authenticates bounded
+metadata before requesting installer bytes and preserves streamed hashing,
+size limits and atomic writes. Offline installer preflight uses the same
+verifier. Tests generate keys at runtime only; no private key is committed.
+
+Observed RED: unsigned and forged metadata were accepted by the old updater;
+a successful download had no verified signing identity. The new offline
+signing/verification command was absent. All four regression tests then passed
+after implementation. Owner key enrollment, protected environment approval,
+native publisher certificates and the separate F-1 packaging gate remain open.
+Candidate `-rc` tags cannot deploy or publish. Full-suite and hosted native
+evidence will be recorded on the PR, without claiming an unexecuted release.
 
 ## 2026-10-25 — truth-docs (Codex)
 
@@ -287,3 +302,10 @@ a new request deliberately; automatic replay is never attempted.
   pending intent preserves failure/recovery episodes until publication. The
   independent 64-record operational reserve retires superseded/resolved history
   while retaining current warnings and monotonic episode identities.
+
+Independent review found candidate-version ordering still used a lexical fallback.
+Observed RED at the public update-check action for an installed candidate moving
+to the final beta; numeric `rc10` versus `rc2` was also wrong. Semantic candidate
+ordering and all supported version projections now agree. Candidate-tag artifact
+uploads are disabled as well as deployment/publication. Post-fix full Node
+verification passed 1,587 total, 1,581 passed, zero failed, six platform skips.

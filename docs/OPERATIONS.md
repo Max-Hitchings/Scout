@@ -281,6 +281,12 @@ Run it alongside the normal suite. The owner-only current-provider check is in
    Platform packagers consume only the audit-created content snapshot, recheck
    its privacy-authorized digest immediately before and after packaging, and
    remove the sealed snapshot in a `finally` path.
+   Update downloads require an exact-version Ed25519 release manifest and
+   detached signature trusted by the locally bundled public-key registry.
+   Installer preflight uses the same verifier. CI uses generated temporary test
+   keys; production signing requires owner public-key enrollment and the
+   protected `release-signing` environment. Candidate `-rc` tags do not deploy, upload artifacts
+   or publish. Signed metadata does not supersede the F-1 packaging gate.
    Workflow-policy tests check immutable action pins throughout every workflow
    receiving secrets. Allowlisted application and public-source trees exclude
    nested dependency directories; production dependencies use the separate
