@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { artifactNames } from './build-platform.mjs';
@@ -279,6 +280,23 @@ test('candidate refs retain every artifact-upload, deployment and publication gu
   assert.equal(guardedUploads.length, uploads.length, 'Every platform upload must exclude release-candidate refs');
   assert.match(workflow, /deploy-vps:[\s\S]*?if: \(startsWith\(github\.ref, 'refs\/tags\/'\) && !contains\(github\.ref_name, '-rc'\)(?: && [^\n]+)?\) \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.deploy_vps\)/);
   assert.match(workflow, /publish:[\s\S]*?if: startsWith\(github\.ref, 'refs\/tags\/'\) && !contains\(github\.ref_name, '-rc'\)/);
+  const permits = (job, { refName = `v${CANDIDATE_VERSION}`, event = 'push', enrolled = 'true', deploy = false } = {}) => {
+    const body = workflow.slice(workflow.indexOf(`  ${job}:\n`));
+    const expression = body.match(/^    if: (.+)$/m)?.[1];
+    assert.ok(expression, `${job} must have an explicit release guard`);
+    return vm.runInNewContext(expression.replaceAll('needs.signing-readiness', "needs['signing-readiness']"), {
+      github: { ref: event === 'workflow_dispatch' ? 'refs/heads/codex/release-candidate' : `refs/tags/${refName}`, ref_name: refName, event_name: event },
+      needs: { 'signing-readiness': { outputs: { enrolled } } }, inputs: { deploy_vps: deploy },
+      startsWith: (value, prefix) => value.startsWith(prefix), contains: (value, part) => value.includes(part),
+    }, { timeout: 100 });
+  };
+  for (const job of ['deploy-vps', 'publish']) {
+    for (const enrolled of ['true', 'false']) assert.equal(permits(job, { enrolled }), false, `${job} cannot run for the candidate tag`);
+    assert.equal(permits(job, { refName: 'v0.1.0-beta.24' }), true, `${job} retains the approved non-candidate path`);
+  }
+  assert.equal(permits('deploy-vps', { event: 'workflow_dispatch', deploy: true }), true, 'Explicit protected manual rehearsal remains available');
+  assert.equal(permits('deploy-vps', { event: 'workflow_dispatch' }), false);
+  assert.equal(permits('publish', { event: 'workflow_dispatch', deploy: true }), false);
 });
 
 test('Windows setup uses the tracked Scout icon', () => {
