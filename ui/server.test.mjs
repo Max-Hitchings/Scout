@@ -39,6 +39,31 @@ const {
 } = await import('./lib/providerAuthMutation.mjs');
 const { readProviderHealth, recordProviderHealth } = await import('./lib/providerHealth.mjs');
 
+test('real setup status and doctor agree on a persisted remote authentication failure', async () => {
+  const original = providerDetection.detect;
+  const file = path.join(testWorkspace, '.scout', 'provider-health', 'v1', 'codex.json');
+  const prior = fs.existsSync(file) ? fs.readFileSync(file) : null;
+  providerDetection.detect = async () => ({
+    codex: { installed: true, authenticated: true, capabilities: { structuredOutput: true } },
+  });
+  try {
+    seedWorkspace(APP_ROOT, testWorkspace);
+    recordProviderHealth(testWorkspace, 'codex', {
+      kind: 'remote-auth-failure', source: 'provider-operation',
+    }, { purpose: 'manual-run' });
+    const response = await request({ path: '/api/setup/status' });
+    assert.equal(response.status, 200);
+    const status = JSON.parse(response.text);
+    assert.equal(status.providers.codex.authenticated, false);
+    assert.equal(status.doctor.checks.providers.codex.authenticated, false);
+    assert.equal(status.doctor.providerSetupRequired, true);
+  } finally {
+    providerDetection.detect = original;
+    if (prior) fs.writeFileSync(file, prior);
+    else fs.rmSync(file, { force: true });
+  }
+});
+
 test('server startup and periodic provider health use the configured runtime entry points', async () => {
   const config = {
     ai: { provider: 'codex' },
@@ -83,6 +108,33 @@ test('server startup and periodic provider health use the configured runtime ent
   ]);
   monitor.stop();
   assert.equal(cleared, true);
+});
+
+test('local runtime health verifies a completion and clears auth barriers only after real success', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-local-runtime-health-'));
+  let content = '{"ready":false}';
+  let requests = 0;
+  const fake = http.createServer(async (req, res) => {
+    for await (const _chunk of req) { /* consume the synthetic request */ }
+    requests += 1;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }));
+  });
+  await new Promise((resolve) => fake.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { fake.closeAllConnections(); await new Promise((resolve) => fake.close(resolve)); fs.rmSync(root, { recursive: true, force: true }); });
+  const { mergeWorkspaceDefaults } = await import('./lib/workspace.mjs');
+  const { providerStatus } = await import('./lib/providers.mjs');
+  writeWorkspaceConfig(root, mergeWorkspaceDefaults({ ai: { provider: 'local', local: { baseUrl: `http://127.0.0.1:${fake.address().port}/v1`, model: 'synthetic/model-27b', retries: 0 } } }));
+  recordProviderHealth(root, 'local', { kind: 'remote-auth-failure', source: 'provider-operation' }, { purpose: 'manual-run' });
+  const options = { source: 'manual-preflight', detectProvidersFn: async (config) => ({ local: providerStatus('local', config) }) };
+  assert.equal((await runtimeProviderPreflight(root, 'local', 'retry', options)).ok, false);
+  assert.equal(readProviderHealth(root, 'local').remoteAuthBarrier, true);
+  content = '{"ready":true}';
+  const verified = await runtimeProviderPreflight(root, 'local', 'retry', options);
+  assert.equal(verified.state, 'ready');
+  assert.equal(verified.verified, true);
+  assert.equal(readProviderHealth(root, 'local').remoteAuthBarrier, false);
+  assert.equal(requests, 2);
 });
 
 test('shutdown drainage starts a queued checkpoint immediately and settles its promise', async () => {
@@ -312,10 +364,114 @@ function request({ method = 'GET', path = '/', headers = {}, body = '' }) {
   });
 }
 
+test('opportunities and setup status reuse one fresh scan-health measurement per response', async () => {
+  seedWorkspace(APP_ROOT, WORKSPACE_ROOT);
+  const runsRoot = path.join(WORKSPACE_ROOT, '.scout', 'runs');
+  fs.mkdirSync(runsRoot, { recursive: true });
+  const originalRead = fs.readdirSync;
+  const originalDetect = providerDetection.detect;
+  providerDetection.detect = async () => ({});
+  let reads = 0;
+  fs.readdirSync = function read(file, ...args) {
+    if (String(file) === runsRoot) reads += 1;
+    return originalRead.call(this, file, ...args);
+  };
+  try {
+    for (const endpoint of ['/api/opportunities', '/api/setup/status']) {
+      reads = 0;
+      const response = await request({ path: endpoint });
+      assert.equal(response.status, 200);
+      assert.equal(reads, 1, `${endpoint} must share the scan-health result with the schedule summary`);
+    }
+  } finally {
+    fs.readdirSync = originalRead;
+    providerDetection.detect = originalDetect;
+  }
+});
+
+test('browser config responses retain current effective mode policy without persisting a supplied projection', async () => {
+  seedWorkspace(APP_ROOT, WORKSPACE_ROOT);
+  const configFile = path.join(WORKSPACE_ROOT, 'workspace.json');
+  const trackerFile = path.join(WORKSPACE_ROOT, 'data', 'opportunities.json');
+  const originalConfig = fs.readFileSync(configFile);
+  const originalTracker = fs.readFileSync(trackerFile);
+  const originalDetect = providerDetection.detect;
+  providerDetection.detect = async () => ({});
+  try {
+    fs.writeFileSync(trackerFile, JSON.stringify({ updated: '2026-10-26', opportunities: [
+      { id: 'synthetic-policy-role-2026-10', company: 'Synthetic Company', role: 'Synthetic Role', score: 82, status: 'new', sources: [] },
+    ] }));
+    for (const [mode, triage, effective] of [
+      ['background', { actionScore: 70, checkScore: 55 }, { actionScore: 95, checkScore: 85 }],
+      ['background', { actionScore: 98, checkScore: 93 }, { actionScore: 98, checkScore: 93 }],
+      ['active', { actionScore: 82, checkScore: 64 }, { actionScore: 82, checkScore: 64 }],
+      ['background', { actionScore: 82, checkScore: 64 }, { actionScore: 95, checkScore: 85 }],
+    ]) {
+      const saved = await request({ method: 'POST', path: '/api/setup/config', headers: JSON_HEADERS(), body: JSON.stringify({
+        mode, triage, modePolicy: { mode: 'active', triage: { actionScore: 1, checkScore: 0 } },
+      }) });
+      assert.equal(saved.status, 200, saved.text);
+      const opportunities = JSON.parse((await request({ path: '/api/opportunities' })).text);
+      const setup = JSON.parse((await request({ path: '/api/setup/status' })).text);
+      assert.deepEqual(setup.config.modePolicy, opportunities.workspaceConfig.modePolicy,
+        'a real setup refresh must retain the same policy as opportunities');
+      for (const config of [setup.config, opportunities.workspaceConfig, JSON.parse(saved.text).config]) {
+        assert.equal(config.modePolicy.mode, mode);
+        assert.equal(config.modePolicy.triage.actionScore, effective.actionScore);
+        assert.equal(config.modePolicy.triage.checkScore, effective.checkScore);
+        assert.equal(config.triage.actionScore, triage.actionScore, 'stored settings remain distinct from derived thresholds');
+      }
+      assert.equal(opportunities.triage.action.length, mode === 'active' ? 1 : 0);
+      assert.equal(Object.hasOwn(JSON.parse(fs.readFileSync(configFile, 'utf8')), 'modePolicy'), false,
+        'client-supplied derived policy must never become stored authority');
+    }
+  } finally {
+    await drainScheduledCheckpoints();
+    providerDetection.detect = originalDetect;
+    fs.writeFileSync(configFile, originalConfig);
+    fs.writeFileSync(trackerFile, originalTracker);
+  }
+});
+
 const JSON_HEADERS = () => {
   const host = `127.0.0.1:${port}`;
   return { host, origin: `http://${host}`, 'content-type': 'application/json' };
 };
+
+test('notification HTTP flow preserves unacknowledged alerts after desktop delivery and rejects cross-origin acknowledgement', async () => {
+  seedWorkspace(APP_ROOT, testWorkspace);
+  const { notificationFile } = await import('./lib/notifications.mjs');
+  const file = notificationFile(testWorkspace);
+  const notificationFiles = [file, ...['notifications-runtime.json', 'notification-receipts.json', 'provider-notifications.json', 'notification-pending-codex.json', 'notification-pending-claude.json'].map((name) => path.join(testWorkspace, '.scout', name))];
+  const previousNotifications = notificationFiles.map((target) => fs.existsSync(target) ? fs.readFileSync(target) : null);
+  const healthFile = path.join(testWorkspace, '.scout', 'provider-health', 'v1', 'codex.json');
+  const previousHealth = fs.existsSync(healthFile) ? fs.readFileSync(healthFile) : null;
+  try {
+    for (const target of notificationFiles) fs.rmSync(target, { force: true });
+    recordProviderHealth(testWorkspace, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' });
+    const first = await request({ path: '/api/notifications', headers: JSON_HEADERS() });
+    assert.equal(first.status, 200);
+    const body = JSON.parse(first.text);
+    const id = body.alerts.find((item) => item.kind === 'provider' && item.provider === 'codex').id;
+    const crossOrigin = await request({ method: 'POST', path: '/api/notifications/acknowledge', headers: { ...JSON_HEADERS(), origin: 'https://example.invalid' }, body: JSON.stringify({ id }) });
+    assert.equal(crossOrigin.status, 403);
+    const delivered = await request({ method: 'POST', path: '/api/notifications/delivered', headers: JSON_HEADERS(), body: JSON.stringify({ id }) });
+    assert.equal(delivered.status, 200);
+    assert.ok(JSON.parse(delivered.text).alerts.some((item) => item.id === id));
+    assert.equal(JSON.parse(delivered.text).outbox.some((item) => item.id === id), false);
+    const acknowledged = await request({ method: 'POST', path: '/api/notifications/acknowledge', headers: JSON_HEADERS(), body: JSON.stringify({ id }) });
+    assert.equal(acknowledged.status, 200);
+    assert.equal(JSON.parse(acknowledged.text).alerts.some((item) => item.id === id), false);
+    assert.doesNotMatch(first.text, /provider-health:|\.scout|credential|token|\/tmp\//);
+  } finally {
+    if (previousHealth) fs.writeFileSync(healthFile, previousHealth);
+    else fs.rmSync(healthFile, { force: true });
+    notificationFiles.forEach((target, index) => {
+      if (previousNotifications[index]) fs.writeFileSync(target, previousNotifications[index]);
+      else fs.rmSync(target, { force: true });
+    });
+  }
+});
 
 test('provider health banner lists an expired session and "Remind me later" acknowledges it durably', async () => {
   const originalConfig = loadWorkspaceConfig(WORKSPACE_ROOT);
@@ -856,6 +1012,7 @@ test('search-profile routes review a complete draft and publish only the current
   const setupStatus = await request({ method: 'GET', path: '/api/setup/status' });
   assert.equal(setupStatus.status, 200);
   assert.equal(JSON.parse(setupStatus.text).searchProfilePublished, false);
+  assert.equal(JSON.parse((await request({ path: '/api/opportunities' })).text).discoveryEngine, 'publication-required');
   const migrated = await request({ method: 'GET', path: '/api/search-profile' });
   assert.equal(migrated.status, 200);
   const migratedState = JSON.parse(migrated.text);
@@ -865,6 +1022,14 @@ test('search-profile routes review a complete draft and publish only the current
     'deterministic-derivation',
   );
   assert.equal(fs.existsSync(paths.searchProfilePublished), false);
+
+  const originalTracker = fs.readFileSync(paths.tracker);
+  try {
+    fs.writeFileSync(paths.tracker, JSON.stringify({ opportunities: [{ id: 'synthetic-existing-role' }] }));
+    assert.equal(JSON.parse((await request({ path: '/api/opportunities' })).text).discoveryEngine, 'legacy-discovery');
+  } finally {
+    fs.writeFileSync(paths.tracker, originalTracker);
+  }
 
   const migratedPublication = await request({
     method: 'POST', path: '/api/search-profile/publish', headers: JSON_HEADERS(),
@@ -962,6 +1127,7 @@ test('search-profile routes review a complete draft and publish only the current
   const publishedStatus = await request({ method: 'GET', path: '/api/setup/status' });
   assert.equal(publishedStatus.status, 200);
   assert.equal(JSON.parse(publishedStatus.text).searchProfilePublished, true);
+  assert.equal(JSON.parse((await request({ path: '/api/opportunities' })).text).discoveryEngine, 'ranked-discovery');
   const lanePlan = JSON.parse(fs.readFileSync(paths.searchLanes, 'utf8'));
   assert.equal(lanePlan.profileId, result.published.id);
   assert.ok(lanePlan.lanes.some(({ profileFields }) => (
@@ -1957,6 +2123,116 @@ test('POST /api/status accepts the shortlist status and persists it', async () =
 
   const saved = JSON.parse(fs.readFileSync(trackerFile, 'utf8')).opportunities[0];
   assert.equal(saved.status, 'shortlist');
+});
+
+test('the local-only reviewed draft API uses fake HTTP generation and saves only after explicit review', { concurrency: false }, async (t) => {
+  seedWorkspace(APP_ROOT, testWorkspace);
+  await drainScheduledCheckpoints();
+  const configFile = path.join(testWorkspace, 'workspace.json');
+  const cvFile = path.join(testWorkspace, 'cv/master-cv.md');
+  const trackerFile = path.join(testWorkspace, 'data/opportunities.json');
+  const previous = [configFile, cvFile, trackerFile].map((file) => [file, fs.readFileSync(file)]);
+  const model = http.createServer(async (req, res) => {
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw); const prompt = body.messages.find(({ role }) => role === 'user')?.content || '';
+    const selected = prompt.includes('INPUT_JSON\n') ? { evidenceIds: [JSON.parse(prompt.split('INPUT_JSON\n')[1]).evidence[0].id] } : { ready: true };
+    res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(selected) }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 2 } }));
+  });
+  await new Promise((resolve) => model.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { await drainScheduledCheckpoints(); model.closeAllConnections(); await new Promise((resolve) => model.close(resolve)); for (const [file, bytes] of previous) fs.writeFileSync(file, bytes); fs.rmSync(path.join(testWorkspace, 'applications/isolated-draft-api'), { recursive: true, force: true }); });
+  const config = loadWorkspaceConfig(testWorkspace);
+  writeWorkspaceConfig(testWorkspace, { ...config, ai: { ...config.ai, provider: 'local', local: { baseUrl: `http://127.0.0.1:${model.address().port}/v1`, model: 'synthetic/draft', timeoutMs: 2000, retries: 0 } } });
+  fs.writeFileSync(cvFile, '# Confirmed CV\n\n' + '- Supported a team with confirmed evidence.\n'.repeat(25));
+  fs.writeFileSync(trackerFile, JSON.stringify({ opportunities: [{ id: 'isolated-draft-api', role: 'Coordinator', company: 'Example Cooperative' }] }));
+  const generated = await request({ method: 'POST', path: '/api/cv/drafts/generate', headers: JSON_HEADERS(), body: JSON.stringify({ opportunityId: 'isolated-draft-api', kind: 'cv' }) });
+  assert.equal(generated.status, 202, generated.text);
+  const id = JSON.parse(generated.text).operation.id;
+  let operation;
+  for (let attempts = 0; attempts < 200; attempts++) {
+    operation = JSON.parse((await request({ path: `/api/operations/${id}` })).text).operation;
+    if (!['queued', 'running'].includes(operation.status)) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(operation.status, 'succeeded', JSON.stringify(operation));
+  assert.deepEqual(Object.keys(operation.result), ['draftId']);
+  assert.doesNotMatch(JSON.stringify(operation), /Supported a team/);
+  const preview = JSON.parse((await request({ path: `/api/cv/drafts/preview?id=${id}` })).text);
+  assert.match(preview.markdown, /Supported a team/);
+  assert.equal(fs.existsSync(path.join(testWorkspace, 'applications/isolated-draft-api/draft-cv.md')), false);
+  const unconfirmed = await request({ method: 'POST', path: '/api/cv/drafts/save', headers: JSON_HEADERS(), body: JSON.stringify({ draftId: id, markdown: preview.markdown }) });
+  assert.equal(unconfirmed.status, 409);
+  const saved = await request({ method: 'POST', path: '/api/cv/drafts/save', headers: JSON_HEADERS(), body: JSON.stringify({ draftId: id, markdown: preview.markdown + '\nHuman reviewed.\n', confirmed: true }) });
+  assert.equal(saved.status, 200, saved.text);
+  assert.match(fs.readFileSync(path.join(testWorkspace, JSON.parse(saved.text).path), 'utf8'), /Human reviewed/);
+});
+
+test('CV file reads and edits cannot cross into a linked sibling workspace', { concurrency: false, skip: process.platform === 'win32' }, async (t) => {
+  seedWorkspace(APP_ROOT, testWorkspace);
+  await drainScheduledCheckpoints();
+  const sibling = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-sibling-draft-'));
+  const link = path.join(testWorkspace, 'applications', 'linked-draft');
+  fs.mkdirSync(path.dirname(link), { recursive: true });
+  fs.writeFileSync(path.join(sibling, 'draft-cv.md'), 'A private sibling draft.');
+  fs.symlinkSync(sibling, link, 'dir');
+  t.after(() => { fs.rmSync(link, { force: true }); fs.rmSync(sibling, { recursive: true, force: true }); });
+  const read = await request({ path: '/api/cv/file?path=applications%2Flinked-draft%2Fdraft-cv.md' });
+  assert.notEqual(read.status, 200);
+  assert.doesNotMatch(read.text, /private sibling/);
+  const edited = await request({ method: 'POST', path: '/api/cv/save', headers: JSON_HEADERS(), body: JSON.stringify({ path: 'applications/linked-draft/draft-cv.md', content: 'An attempted replacement.' }) });
+  assert.notEqual(edited.status, 200);
+  assert.equal(fs.readFileSync(path.join(sibling, 'draft-cv.md'), 'utf8'), 'A private sibling draft.');
+});
+
+test('cover-letter drafts serve their own PDF and edits block stale downloads', { concurrency: false }, async () => {
+  seedWorkspace(APP_ROOT, testWorkspace);
+  const directory = path.join(testWorkspace, 'applications', 'synthetic-letter');
+  fs.mkdirSync(directory, { recursive: true });
+  const content = '# DRAFT\nSynthetic confirmed cover-letter text.';
+  fs.writeFileSync(path.join(directory, 'outreach.md'), content);
+  fs.writeFileSync(path.join(directory, 'outreach.pdf'), '%PDF-1.7\nSynthetic cover-letter PDF');
+  const manifestFile = path.join(testWorkspace, '.scout/cv-renders.json');
+  fs.mkdirSync(path.dirname(manifestFile), { recursive: true });
+  const manifest = fs.existsSync(manifestFile) ? JSON.parse(fs.readFileSync(manifestFile)) : { schemaVersion: 1, renders: {} };
+  manifest.renders['cover-letter:synthetic-letter'] = { sourceSha256: crypto.createHash('sha256').update(content).digest('hex'), renderedAt: '2026-10-26T10:00:00.000Z' };
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
+  const pdf = await request({ path: '/api/cv/pdf?target=cover-letter&slug=synthetic-letter&download=1' });
+  assert.equal(pdf.status, 200, pdf.text);
+  assert.match(pdf.text, /Synthetic cover-letter PDF/);
+  assert.match(pdf.headers['content-disposition'], /cover-letter-DRAFT\.pdf/);
+  const saved = await request({ method: 'POST', path: '/api/cv/save', headers: JSON_HEADERS(), body: JSON.stringify({ path: 'applications/synthetic-letter/outreach.md', content: content + '\nReviewed edit.' }) });
+  assert.equal(saved.status, 200, saved.text);
+  const stale = await request({ path: '/api/cv/pdf?target=cover-letter&slug=synthetic-letter&download=1' });
+  assert.equal(stale.status, 409);
+  assert.equal(fs.readFileSync(path.join(directory, 'outreach.pdf'), 'utf8'), '%PDF-1.7\nSynthetic cover-letter PDF');
+});
+
+test('thumbs feedback proposes an interpretable ranking change and reset keeps all evidence', { concurrency: false }, async (t) => {
+  seedWorkspace(APP_ROOT, testWorkspace);
+  const learningFile = workspacePaths(testWorkspace).feedbackLearning;
+  const previousLedger = fs.existsSync(learningFile) ? fs.readFileSync(learningFile) : null;
+  t.after(() => { if (previousLedger) fs.writeFileSync(learningFile, previousLedger); else fs.rmSync(learningFile, { force: true }); });
+  const trackerFile = path.join(testWorkspace, 'data/opportunities.json');
+  const id = 'synthetic-fit-feedback';
+  fs.writeFileSync(trackerFile, JSON.stringify({ updated: '2026-10-26', opportunities: [{ id, role: 'Example Coordinator', company: 'Example Cooperative', status: 'new', score: 70 }] }));
+  const initial = JSON.parse((await request({ path: '/api/feedback-learning' })).text);
+  const submit = async (apiPath, value) => {
+    const response = await request({ method: 'POST', path: apiPath, headers: JSON_HEADERS(), body: JSON.stringify(value) });
+    assert.equal(response.status, 200, response.text);
+    return JSON.parse(response.text);
+  };
+  const recorded = await submit('/api/feedback', { revision: initial.revision, opportunityId: id, decision: 'not-interested', reason: 'responsibilities', explanation: 'These responsibilities are outside the intended work.', learning: { field: 'title' } });
+  assert.equal(recorded.proposed, true);
+  const proposal = recorded.ledger.proposals.at(-1);
+  assert.equal(proposal.status, 'pending');
+  assert.deepEqual(proposal.change, { kind: 'rank-adjustment', field: 'title', value: 'Example Coordinator', weight: -3, scope: 'profile-wide', scopeValue: null });
+  assert.deepEqual(recorded.ledger.active.changes, initial.active.changes);
+  assert.equal(JSON.parse(fs.readFileSync(trackerFile)).opportunities[0].status, 'new');
+  const published = await submit('/api/learning/publish', { revision: recorded.ledger.revision, proposalId: proposal.id, confirmed: true });
+  const reset = await submit('/api/learning/reset', { revision: published.ledger.revision, versionId: published.ledger.active.id, confirmed: true, explanation: 'Return to the approved search preferences.' });
+  assert.deepEqual(reset.ledger.active.changes, []);
+  assert.equal(reset.ledger.feedbackEvents.at(-1).reason, 'responsibilities');
+  assert.equal(reset.ledger.proposals.at(-1).status, 'published');
+  assert.equal(reset.ledger.versions.at(-1).resetOf, published.ledger.active.id);
 });
 
 test('feedback, proposal, publication and undo remain separate revisioned mutations', { concurrency: false }, async () => {

@@ -1,6 +1,8 @@
+import { notificationsForAssessment, readNotifications } from './notifications.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { atomicWriteFile } from './atomicWrite.mjs';
 import { serializeTracker } from './tracker.mjs';
 import { workspacePaths } from './workspace.mjs';
@@ -17,7 +19,7 @@ import {
 } from './vacancyObservation.mjs';
 import { rankVacancies, vacancyNoveltyComparison } from './vacancyRank.mjs';
 import { selectVacancies } from './vacancySelect.mjs';
-import { lifecycleRecords, partitionVacanciesForAssessment, rejected } from './vacancyLifecycle.mjs';
+import { lifecycleRecords, normaliseVacancyOutcome, partitionVacanciesForAssessment, rejected } from './vacancyLifecycle.mjs';
 import {
   buildCoverageRollups, buildVacancyExplanations, reconcileCoverageFunnel,
 } from './scanCoverage.mjs';
@@ -47,7 +49,7 @@ import {
   applyPreparedMutation, loadPreparedMutation, markerFreeMutationContent, prepareMutation,
 } from './mutationCoordinator.mjs';
 import {
-  jsonReplaceRecipe, renderMutationRecipe, runLogAppendRecipe, scanReportRecipe, trackerMergeRecipe,
+  jsonReplaceRecipe, renderMutationRecipe, runLogAppendRecipe, scanReportRecipe, trackerFirstSeenDate, trackerMergeRecipe,
 } from './scanMutationProjection.mjs';
 import {
   deriveSearchLaneResults, loadSearchLanePlan, recordSearchLaneRun,
@@ -1226,7 +1228,7 @@ function decisionRecord(item, run, assessed = true) {
     sourceReferences: sourceReferencesOf({
       sourceReferences: Array.isArray(item.sourceReferences) ? item.sourceReferences : [],
     }).slice(0, 8),
-    outcome: boundedText(item.outcome, 80),
+    outcome: normaliseVacancyOutcome(boundedText(item.outcome, 80)),
     contentFingerprint: /^[a-f0-9]{64}$/.test(String(item.contentFingerprint || ''))
       ? item.contentFingerprint
       : null,
@@ -2224,8 +2226,8 @@ export function gateAssessment(assessment, policy, candidate = {}) {
   const rankedScore = Number(candidate?.preRankScore);
   const total = Number.isFinite(rankedScore)
     ? Math.round(rankedScore * 100) / 100
-    : assessment.recommendation === 'keep' ? actionScore
-      : assessment.recommendation === 'check' ? checkScore : 0;
+    : assessment.recommendation === 'keep' ? 70
+      : assessment.recommendation === 'check' ? 55 : 0;
   const unmet = (assessment.mandatoryRequirements || []).filter((item) => item.status === 'unmet');
   const unknown = (assessment.mandatoryRequirements || []).filter((item) => item.status === 'unknown');
   if (assessment.recommendation === 'discard' || unmet.length) {
@@ -2249,6 +2251,14 @@ function sourceHealth(sources) {
   }]));
 }
 
+function keeperContent(entry, identityLimit = 80) {
+  const encoded = JSON.stringify({ opportunities: [entry] });
+  const content = trackerMergeRecipe(encoded, encoded).upserts[0];
+  for (const key of ['lastChecked', 'rankingHistory', 'notificationState', 'firstSeen']) delete content[key];
+  content.jobIdentity.evidenceTokenDigests = content.jobIdentity.evidenceTokenDigests.slice(0, identityLimit);
+  return content;
+}
+
 function mergeTracker(
   existing,
   candidates,
@@ -2263,6 +2273,7 @@ function mergeTracker(
   const reviewed = [];
   let keepersAdded = 0;
   let keepersUpdated = 0;
+  let keepersUnchanged = 0;
   for (const assessment of assessments) {
     const candidate = candidates.find((item) => item.candidateId === assessment.candidateId);
     if (!candidate) continue;
@@ -2292,16 +2303,16 @@ function mergeTracker(
       outcome, score: gate.score,
       reasons: reasons.map((reason) => boundedText(reason)).filter(Boolean).slice(0, REVIEW_REASON_LIMIT),
     };
+    const previous = existing.opportunities.find((entry) => sameUnderlyingJob(entry, candidate));
     if (!gate.keep) {
-      reviewed.push(review);
+      reviewed.push({ ...review, ...(previous ? { trackerId: previous.id } : {}) });
       continue;
     }
     const baseId = `${slug(candidate.company)}-${slug(candidate.role)}-${date.slice(0, 7)}`;
-    const previous = existing.opportunities.find((entry) => sameUnderlyingJob(entry, candidate));
     let id = previous?.id || baseId;
     for (let suffix = 2; !previous && byId.has(id); suffix += 1) id = `${baseId}-${suffix}`;
     const changedAdvert = Boolean(previous && advertMateriallyChanged(previous, candidate));
-    reviewed.push({ ...review, trackerOutcome: previous ? 'updated' : 'added' });
+
     const references = mergeSourceReferences(previous || {}, candidate);
     const urls = references.map((reference) => reference.url).filter(Boolean);
     const deterministicDimensions = Array.isArray(candidate.dimensions) ? candidate.dimensions : [];
@@ -2335,14 +2346,26 @@ function mergeTracker(
         ))
       )).slice(-32),
       notes: previous && Object.hasOwn(previous, 'notes') ? previous.notes : assessment.summary,
+      firstSeen: previous ? trackerFirstSeenDate(previous.firstSeen) : trackerFirstSeenDate(date),
       lastChecked: date, foundVia: candidate.source, contacts: previous?.contacts || [], log: previous?.log || [],
       ...(changedAdvert ? { advertUpdate: { detectedAt: date, previousFingerprint: previous.jobIdentity?.advertFingerprint || '', currentFingerprint: jobIdentity(candidate).advertFingerprint } } : {}),
     };
-    if (previous) { Object.assign(previous, generated); keepersUpdated += 1; }
+    // Verification dates and ranking history advance even when the keeper's
+    // job content is unchanged; they are not a newly updated opportunity.
+    const identityLimit = previous?.jobIdentity?.evidenceTokenDigests?.length === 32 ? 32 : 80;
+    const changed = previous && !isDeepStrictEqual(
+      keeperContent(previous, identityLimit), keeperContent({ ...previous, ...generated }, identityLimit),
+    );
+    reviewed.push({ ...review, trackerId: id, trackerOutcome: previous ? changed ? 'updated' : 'unchanged' : 'added' });
+    if (previous) {
+      Object.assign(previous, generated);
+      if (changed) keepersUpdated += 1;
+      else keepersUnchanged += 1;
+    }
     else { existing.opportunities.push(generated); byId.set(generated.id, generated); keepersAdded += 1; }
   }
   existing.updated = date;
-  return { tracker: existing, keepersAdded, keepersUpdated, discarded, reviewed };
+  return { tracker: existing, keepersAdded, keepersUpdated, keepersUnchanged, discarded, reviewed };
 }
 
 function reportText({ date, degraded, source_health, kept, discarded, reviewed, errors }) {
@@ -2422,7 +2445,7 @@ function buildScanArtifacts(root, {
     ...funnel,
     added: merged.keepersAdded,
     updated: merged.keepersUpdated,
-    unchanged: 0,
+    unchanged: merged.keepersUnchanged || 0,
     ...(error ? {
       assessed: Number(assessmentResult?.assessments?.length || 0),
       assessmentFailed: Math.max(
@@ -2621,6 +2644,12 @@ export function coordinateScanArtifacts(root, input, { run, lease, hooks = {} })
       || input.startedAt;
     const artifacts = buildScanArtifacts(root, { ...input, timestamp });
     const date = artifacts.run.timestamp.slice(0, 10);
+    const notifications = input.notificationConfig ? notificationsForAssessment(
+      readNotifications(root), input.notificationConfig, artifacts.run.reviewed, timestamp, { tracker: artifacts.tracker },
+    ) : null;
+    if (notifications && artifacts.contents.tracker !== undefined) {
+      artifacts.contents.tracker = serializeTracker(artifacts.tracker);
+    }
     const hasTracker = artifacts.contents.tracker !== undefined;
     const selectedLanes = Array.isArray(input.lanes) ? input.lanes : [];
     const currentLanePlan = selectedLanes.length ? loadSearchLanePlan(root) : null;
@@ -2700,6 +2729,7 @@ export function coordinateScanArtifacts(root, input, { run, lease, hooks = {} })
         { kind: 'run-log', key: 'scan-log' },
         ...(updatedLanePlan ? [{ kind: 'json', key: 'search-lanes' }] : []),
         ...(updatedEmployerRegistry ? [{ kind: 'json', key: 'employers' }] : []),
+        ...(notifications ? [{ kind: 'json', key: 'notifications' }] : []),
       ],
     };
     plan = prepareMutation({ handle: run, lease }, target, {
@@ -2709,6 +2739,7 @@ export function coordinateScanArtifacts(root, input, { run, lease, hooks = {} })
           artifacts.contents.tracker,
         ),
       } : {}),
+      ...(notifications ? { notifications: jsonReplaceRecipe(notifications) } : {}),
       [`report:${date}`]: artifacts.recipes.report,
       'scan-log': artifacts.recipes.runLog,
       ...(updatedLanePlan ? { 'search-lanes': jsonReplaceRecipe(updatedLanePlan) } : {}),

@@ -137,3 +137,41 @@ test('no warning appears while every provider is healthy', async ({ page }) => {
   await expect(page.locator('#scan-now')).toBeVisible();
   await expect(page.locator('#provider-health-banner')).toBeHidden();
 });
+
+test('local provider settings preserve edits and save a model without a CLI sign-in', async ({ page }) => {
+  let config = { locale: 'en-GB', ai: { provider: null, models: {}, local: {} }, search: {}, commute: {} };
+  const local = { installed: true, authenticated: true, healthState: 'ready', capabilities: { structuredOutput: true } };
+  await page.route('**/api/setup/status', (route) => route.fulfill(json({
+    bootstrap: false, established: true, ready: true, setupComplete: true, trackerExists: true,
+    config, providers: { codex: {}, claude: {}, local }, scanHealth: { healthy: true },
+    schedule: { enabled: false, runs: [] }, sync: { state: 'disabled' },
+    device: { updates: { policy: 'notify' }, startupStatus: {} }, remoteAccess: {}, pendingSetupSections: [],
+  })));
+  await page.route('**/api/provider-login/status**', (route) => route.fulfill(json({ session: null, csrfToken: ['synthetic', 'browser', 'csrf'].join('-') })));
+  await page.route('**/api/setup/config', (route) => {
+    const body = route.request().postDataJSON();
+    posts.push(['config', body]);
+    config = { ...config, ai: { ...config.ai, ...body.ai } };
+    return route.fulfill(json({ ok: true, config }));
+  });
+  await page.route('**/api/provider-health/check', (route) => {
+    posts.push(['check', route.request().postDataJSON()]);
+    return route.fulfill(json({ ok: true, state: 'ready', verified: true }));
+  });
+  await page.goto('/');
+  await page.evaluate(() => window.ScoutSetup.openSettings('providers'));
+  const dialog = page.getByRole('dialog');
+  await dialog.locator('input[name="setup-provider"][value="local"]').check();
+  await dialog.getByLabel('Server base URL').fill('http://localhost:8000/v1');
+  await dialog.getByLabel('Model name', { exact: true }).fill('synthetic/model-27b');
+  await page.evaluate(() => window.ScoutSetup.renderProviderSettings());
+  await expect(dialog.getByLabel('Model name', { exact: true })).toHaveValue('synthetic/model-27b');
+  await expect(dialog.locator('input[name="setup-provider"][value="local"]')).toBeChecked();
+  await dialog.getByRole('button', { name: 'Save and check local model' }).click();
+  await expect.poll(() => posts.some(([kind]) => kind === 'check')).toBe(true);
+  await dialog.getByRole('button', { name: 'Save AI settings' }).click();
+  await expect.poll(() => config.ai.provider).toBe('local');
+  expect(config.ai.local.model).toBe('synthetic/model-27b');
+  expect(config.ai.local.apiKeyFile).toBeNull();
+  await expect(dialog.locator('[data-provider-login="local"]')).toHaveCount(0);
+});

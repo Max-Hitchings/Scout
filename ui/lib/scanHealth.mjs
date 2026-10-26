@@ -215,7 +215,7 @@ export function publicRunSummary(manifest = {}, { events = [], lease = null, now
     updatedAt,
     profileVersion: safeToken(manifest.compatibility?.profileVersion),
     pipelineVersion: safeToken(manifest.compatibility?.pipelineVersion),
-    provider: ['codex', 'claude'].includes(manifest.compatibility?.provider) ? manifest.compatibility.provider : null,
+    provider: ['codex', 'claude', 'local'].includes(manifest.compatibility?.provider) ? manifest.compatibility.provider : null,
     scheduleJobId: manifest.compatibility?.scheduleJobId === 'none' ? null : safeToken(manifest.compatibility?.scheduleJobId),
     completedStages,
     assessment: assessmentProgress(manifest, assessmentEvents),
@@ -232,7 +232,8 @@ export function publicQueueSummary(projection = {}) {
       id: shortId(request.id),
       status: safeToken(request.status) || 'queued',
       requester: ['manual', 'scheduled'].includes(request.requester) ? request.requester : 'manual',
-      purpose: safeToken(request.purpose),
+      purpose: request.requester === 'scheduled' && request.purpose === 'manual-discovery'
+        ? 'scheduled-discovery' : safeToken(request.purpose),
       requestedAt: typeof request.requestedAt === 'string' ? request.requestedAt : null,
       expiresAt: typeof request.expiresAt === 'string' ? request.expiresAt : null,
     };
