@@ -45,11 +45,14 @@ selected `BindPaths` workspace writable while `TemporaryFileSystem` hides its
 siblings. Repeat this after changing systemd, unit overrides or storage mounts.
 
 The following requires the dedicated `scout` account and administrator access.
-It creates only synthetic directories in the OS temporary area, starts a
+It creates only synthetic directories in the OS volatile runtime area (`/run`), starts a
 short-lived transient unit with the same restrictions as both Scout service
 templates, checks the actual namespace with `findmnt`, then removes the synthetic
 state. It never starts Scout, contacts a provider or opens a real workspace.
-Run the complete block in Bash on the real host:
+The fixture uses `/run` so `PrivateTmp=true` cannot hide its host source before
+the bind-mount rehearsal. Both shipped templates bind `/srv/appdata/scout`,
+which is also outside the private `/tmp` and `/var/tmp` mounts. Run the complete
+block in Bash on the real host:
 
 <!-- scout-sandbox-rehearsal:start -->
 ```bash
@@ -61,16 +64,17 @@ if [ ! -d /run/systemd/system ]; then
 fi
 command -v systemd-run >/dev/null
 command -v findmnt >/dev/null
-probe_root=$(sudo -u scout mktemp -d /var/tmp/scout-sandbox.XXXXXX)
-case "$probe_root" in /var/tmp/scout-sandbox.*) ;; *) exit 1 ;; esac
+probe_root=$(sudo mktemp -d /run/scout-sandbox.XXXXXX)
+case "$probe_root" in /run/scout-sandbox.*) ;; *) exit 1 ;; esac
 probe_unit="scout-sandbox-check-$$.service"
 cleanup_probe() {
   sudo systemctl stop "$probe_unit" >/dev/null 2>&1 || true
-  sudo -u scout rm -rf -- "$probe_root"
+  sudo rm -rf -- "$probe_root"
 }
 trap cleanup_probe EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+sudo chown scout:scout -- "$probe_root"
 sudo -u scout mkdir "$probe_root/workspace-selected" "$probe_root/workspace-sibling"
 sudo -u scout sh -c 'printf "%s\n" "Synthetic sandbox fixture" > "$1/sentinel"' \
   sh "$probe_root/workspace-sibling"
