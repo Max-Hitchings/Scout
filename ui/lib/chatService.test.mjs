@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -357,6 +358,30 @@ function fakeBuild(calls, engine) {
     return { command: 'node', args: [FAKE] };
   };
 }
+
+test('local chat answers over HTTP, retains conversation context and never starts a CLI', async (t) => {
+  const root = tmpRoot();
+  const requests = [];
+  const server = http.createServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    requests.push(JSON.parse(raw));
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ message: { content: 'Synthetic local answer.' }, finish_reason: 'stop' }] }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); fs.rmSync(root, { recursive: true, force: true }); });
+  writeWorkspaceConfig(root, mergeWorkspaceDefaults({ ai: { provider: 'local', local: { baseUrl: `http://127.0.0.1:${server.address().port}/v1`, model: 'synthetic/model-27b' } } }));
+  const routes = routeFixture(root, { providerStatusFn: undefined, runTurnFn: () => assert.fail('local chat must not run a CLI') });
+  for (const text of ['First synthetic question.', 'Follow-up synthetic question.']) {
+    const response = await callRoute(routes['POST /api/chat/send'], JSON.stringify({ id: ID, engine: 'local', text }));
+    assert.ok(sseEvents(response.text()).some((event) => event.event === 'done' && event.data.text === 'Synthetic local answer.'), response.text());
+  }
+  assert.equal(requests.length, 2);
+  assert.ok(requests[1].messages.some((message) => message.role === 'assistant' && message.content === 'Synthetic local answer.'));
+  assert.equal(loadChat(root, ID).cliSessionId, null);
+  assert.equal(readProviderHealth(root, 'local').state, 'ready');
+});
 
 test('chat prefills honour per-CV option query parameters', async () => {
   const root = tmpRoot();
@@ -1384,7 +1409,7 @@ test('the engine picker uses bounded injected catalogues and returns effective d
   );
   await response.finished;
   const body = JSON.parse(response.text());
-  assert.deepEqual(Object.keys(body.engines).sort(), ['claude', 'codex']);
+  assert.deepEqual(Object.keys(body.engines).sort(), ['claude', 'codex', 'local']);
   for (const engine of ['claude', 'codex']) {
     assert.ok(Array.isArray(body.engines[engine].models));
     assert.ok('usage' in body.engines[engine]);

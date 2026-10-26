@@ -1,3 +1,5 @@
+import { isSafeModelId } from './modelIdentifier.mjs';
+import { validateLocalProviderConfig } from './localProvider.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,7 +61,8 @@ export const DEFAULT_WORKSPACE_CONFIG = Object.freeze({
   ai: {
     provider: null,
     model: null,
-    models: { codex: null, claude: null },
+    models: { codex: null, claude: null, local: null },
+    local: {},
   },
   schedule: {
     jobs: [],
@@ -161,11 +164,12 @@ export function validateWorkspaceConfig(value) {
   if (!value.sources || typeof value.sources !== 'object') throw new Error('workspace sources must be an object');
   if (value.sources.adzuna?.country !== null && !/^[a-z]{2}$/.test(String(value.sources.adzuna?.country || ''))) throw new Error('workspace Adzuna country must be a two-letter lower-case code or null until chosen');
   if (value.commute && typeof value.commute !== 'object') throw new Error('workspace commute must be an object');
-  if (value.ai && ![null, 'codex', 'claude'].includes(value.ai.provider ?? null)) throw new Error('workspace ai.provider must be codex, claude, or null');
+  if (value.ai && ![null, 'codex', 'claude', 'local'].includes(value.ai.provider ?? null)) throw new Error('workspace ai.provider must be codex, claude, local, or null');
   for (const [provider, model] of Object.entries(value.ai?.models || {})) {
-    if (!['codex', 'claude'].includes(provider)) throw new Error('workspace ai.models keys must be codex or claude');
-    if (model !== null && !/^[A-Za-z0-9._:-]+$/.test(String(model))) throw new Error(`workspace ai.models.${provider} is invalid`);
+    if (!['codex', 'claude', 'local'].includes(provider)) throw new Error('workspace ai.models keys must be codex, claude or local');
+    if (model !== null && !isSafeModelId(model)) throw new Error(`workspace ai.models.${provider} is invalid`);
   }
+  if (value.ai?.local !== undefined) validateLocalProviderConfig(value.ai.local);
   if (!value.schedule || !Array.isArray(value.schedule.jobs)) throw new Error('workspace schedule.jobs must be an array');
   const ids = new Set();
   for (const job of value.schedule.jobs) {
@@ -180,9 +184,9 @@ export function validateWorkspaceConfig(value) {
         throw new Error(`workspace schedule job ${job.id} days must be whole numbers from 0 (Sunday) to 6 (Saturday)`);
       }
     }
-    if (!['codex', 'claude'].includes(job.provider)) throw new Error(`workspace schedule job ${job.id} provider must be codex or claude`);
+    if (!['codex', 'claude', 'local'].includes(job.provider)) throw new Error(`workspace schedule job ${job.id} provider must be codex, claude or local`);
     if (!['primary', 'second-pass'].includes(job.mode)) throw new Error(`workspace schedule job ${job.id} mode must be primary or second-pass`);
-    if (job.model !== null && job.model !== undefined && !/^[A-Za-z0-9._:-]+$/.test(String(job.model))) throw new Error(`workspace schedule job ${job.id} model is invalid`);
+    if (job.model !== null && job.model !== undefined && !isSafeModelId(job.model)) throw new Error(`workspace schedule job ${job.id} model is invalid`);
   }
   return value;
 }
@@ -190,6 +194,7 @@ export function validateWorkspaceConfig(value) {
 // `ai.model` remains the compatibility fallback for workspaces created before
 // per-provider choices were introduced.
 export function modelForProvider(config, provider) {
+  if (provider === 'local' && config?.ai?.local?.model) return config.ai.local.model;
   const chosen = config?.ai?.models?.[provider];
   if (chosen) return chosen;
   return config?.ai?.provider === provider ? config.ai?.model || null : null;

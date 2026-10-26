@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import test from 'node:test';
 import {
   assertScanReady, broadenSearchQueries, collectScanSources, migrateLegacyWorkspace, runScan, runScanWith, shouldAutoBroaden,
@@ -25,6 +26,51 @@ import {
 import {
   acquireProviderAuthMutation, releaseProviderAuthMutation,
 } from '../ui/lib/providerAuthMutation.mjs';
+
+test('a selected local provider runs a ranked synthetic scan over HTTP with no provider CLI', async (t) => {
+  const root = readyScanRoot();
+  enableRankedDiscovery(root);
+  const requests = [];
+  const server = http.createServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw);
+    requests.push(body);
+    const prompt = body.messages.at(-1).content;
+    const value = prompt.includes('Assess only the supplied Scout candidates')
+      ? assessmentFor(JSON.parse(prompt.split('\n\n').at(-1)).candidates)
+      : { ready: true };
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(value) } }] }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); fs.rmSync(root, { recursive: true, force: true }); });
+  const config = loadWorkspaceConfig(root);
+  config.ai = { provider: 'local', local: { baseUrl: `http://127.0.0.1:${server.address().port}/v1`, model: 'synthetic/model-27b', retries: 0 } };
+  writeWorkspaceConfig(root, config);
+  // The setup activation marker binds all configured bytes, including the
+  // explicit local provider selection the person has approved.
+  const markerFile = path.join(root, '.scout', 'onboarding', 'activated.json');
+  const marker = JSON.parse(fs.readFileSync(markerFile));
+  marker.activatedHashes['workspace.json'] = crypto.createHash('sha256').update(fs.readFileSync(path.join(root, 'workspace.json'))).digest('hex');
+  fs.writeFileSync(markerFile, JSON.stringify(marker));
+  const result = await runScan(root, 'local', 'primary', {
+    autoBroaden: false,
+    runScanWithFn: (workspace, provider, mode, options) => runScanWith(workspace, provider, mode, { ...options,
+    collectSourcesFn: async () => ({ generatedAt: new Date().toISOString(), queries: ['Ideal Role'], sources: {
+      synthetic: { configured: true, status: 'healthy', count: 1, jobs: [{ title: 'Ideal Role', company: 'Synthetic Example', location: 'Remote', url: 'https://example.test/jobs/local', providerId: 'local-fixture', description: 'Deliver reliable systems.' }] },
+    } }),
+    checkLivenessFn: async (candidates) => ({ live: candidates, removed: [], summary: { checked: candidates.length, gone: 0, unverified: 0 } }),
+    queueWorkspaceSyncFn: async () => ({ state: 'disabled', enabled: false }),
+    }),
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.ok(requests.some((request) => request.messages.at(-1).content.includes('Assess only the supplied Scout candidates')));
+  assert.ok(requests.every((request) => request.model === 'synthetic/model-27b'));
+  const tracker = JSON.parse(fs.readFileSync(path.join(root, 'data', 'opportunities.json')));
+  assert.equal(tracker.opportunities.length, 1);
+  assert.equal(tracker.opportunities[0].role, 'Ideal Role');
+});
 
 function scanRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-runtime-scan-'));

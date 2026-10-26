@@ -28,6 +28,14 @@ const PRIVATE_RUNTIME_ROOTS = new Set([
 ]);
 const STATE_SHAPED_TEXT_EXTENSIONS = /\.(?:json|jsonl|ndjson|log|out|toml|txt|yaml|yml)$/i;
 const CROSS_FORMAT_CONFIG_EXTENSIONS = /\.(?:toml|yaml|yml)$/i;
+// Ajv 8.17.1's public schema-security meta-schema describes untrusted data
+// beside a generic title. That exact reviewed description triggers the advert
+// heuristic. Exempt only that finding at these two staged vendor paths with
+// identical reviewed bytes; all markers, concrete secrets and other rules run.
+const REVIEWED_VENDOR_METADATA = new Map([
+  ['app/node_modules/ajv/dist/refs/json-schema-secure.json', 'b7840b4f1526eee47ac19780906a436d0c39df2aa3d505388caf18864085a421'],
+  ['app/node_modules/ajv/lib/refs/json-schema-secure.json', 'b7840b4f1526eee47ac19780906a436d0c39df2aa3d505388caf18864085a421'],
+]);
 const EXACT_PROFILE_PLACEHOLDERS = new Set([
   'your', '<user>', '<username>', '<your-user>', '<your-username>',
 ]);
@@ -740,6 +748,8 @@ export function auditRelease({
     for (const finding of scanText(text, markers, relative, {
       dependency: dependencyArtifact(relative),
     })) {
+      if (finding.rule === 'advert-body' && finding.line === 5
+        && REVIEWED_VENDOR_METADATA.get(relative) === scanned.sha256) continue;
       findings.push({ file: publicFile, ...finding });
     }
   }

@@ -1480,18 +1480,87 @@ const Setup = {
     }
   },
 
+  localProviderFieldsHtml() {
+    const local = this.localProviderDraft || this.status?.config?.ai?.local || {};
+    return `<fieldset class="setup-callout"><legend>Local OpenAI-compatible model</legend>
+      <p>Use a model server you control. Scout connects directly; no Codex or Claude installation is needed.</p>
+      <div class="setup-grid">
+        <label class="setup-field">Server base URL<input id="setup-local-url" type="url" value="${this.escape(local.baseUrl || '')}" placeholder="http://localhost:8000/v1"></label>
+        <label class="setup-field">Model name<input id="setup-local-model" type="text" maxlength="128" value="${this.escape(local.model || '')}" placeholder="Exact name served by your model server"></label>
+        <label class="setup-field">API-key file (optional)<input id="setup-local-key-file" type="text" value="${this.escape(local.apiKeyFile || '')}" placeholder="File on the Scout host"></label>
+      </div><p class="meta">Enter a file path, never the key itself. Leave blank if your local server does not require a key. Use HTTPS for a model on another computer unless your private network protects the connection. Local chat answers questions; it cannot edit files or run tools.</p>
+      <button id="setup-local-check" class="act" type="button">Save and check local model</button>
+      </fieldset>`;
+  },
+
+  bindLocalProviderControls() {
+    for (const id of ['setup-local-url', 'setup-local-model', 'setup-local-key-file']) {
+      this.el(id)?.addEventListener('input', () => {
+        this.localProviderDraft = {
+          ...(this.status?.config?.ai?.local || {}),
+          baseUrl: this.el('setup-local-url').value,
+          model: this.el('setup-local-model').value,
+          apiKeyFile: this.el('setup-local-key-file').value || null,
+        };
+      });
+    }
+    for (const radio of document.querySelectorAll('input[name="setup-provider"]')) {
+      radio.addEventListener('change', () => { this.providerChoiceDraft = radio.value; });
+    }
+    this.el('setup-local-check')?.addEventListener('click', () => this.checkLocalProvider());
+  },
+
+  async checkLocalProvider() {
+    try {
+      this.setBusy(true);
+      const local = this.readLocalProviderSettings() || {};
+      if (!local.baseUrl || !local.model) throw new Error('Enter the local server URL and model name.');
+      const saved = await requestJson('/api/setup/config', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ai: { local } }),
+      });
+      this.status.config = saved.config;
+      const health = await requestJson('/api/provider-health/check', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider: 'local' }),
+      });
+      await this.refreshStatus({ keepOpen: true });
+      if (this.view === 'section') this.renderProviderSettings();
+      else this.renderProviders();
+      this.setMessage(health.ok ? 'Local model connection verified.' : `Local model check: ${health.state}. Check the server and settings.`, health.ok ? 'good' : 'error');
+    } catch (error) { this.setMessage(error.message, 'error'); }
+    finally { this.setBusy(false); }
+  },
+
+  readLocalProviderSettings() {
+    const current = this.status?.config?.ai?.local || {};
+    if (!this.el('setup-local-url')) return current;
+    const local = {
+      ...current,
+      baseUrl: this.el('setup-local-url').value.trim(),
+      model: this.el('setup-local-model').value.trim(),
+      apiKeyFile: this.el('setup-local-key-file').value.trim() || null,
+    };
+    if (this.selectedProvider() === 'local' && (!local.baseUrl || !local.model)) throw new Error('Enter the local server URL and model name.');
+    // Saving Codex/Claude preferences must not create empty local settings.
+    // A previously configured local provider can still be cleared explicitly.
+    if (!local.baseUrl && !local.model && !local.apiKeyFile && !Object.keys(current).length) return undefined;
+    return local;
+  },
+
   renderProviderSettings() {
     const models = this.status?.config?.ai?.models || {};
     this.el('setup-body').innerHTML = `
-      <div class="setup-provider-list">${this.providerCard('codex')}${this.providerCard('claude')}</div>
+      <div class="setup-provider-list">${this.providerCard('codex')}${this.providerCard('claude')}${this.providerCard('local')}</div>
+      ${this.localProviderFieldsHtml()}
       <div class="setup-callout"><strong>Models for individual job work</strong>
       <p>Choose an optional model for each provider when asking about a specific job, tailoring a CV or preparing for an interview. Leave blank to use that provider's default.</p>
       <div class="setup-grid">
-        <label class="setup-field">Codex model<input id="setup-chat-model-codex" type="text" value="${this.escape(models.codex || '')}" placeholder="Provider default" pattern="[A-Za-z0-9._:\\-]+"></label>
-        <label class="setup-field">Claude model<input id="setup-chat-model-claude" type="text" value="${this.escape(models.claude || '')}" placeholder="Provider default" pattern="[A-Za-z0-9._:\\-]+"></label>
+        <label class="setup-field">Codex model<input id="setup-chat-model-codex" type="text" value="${this.escape(models.codex || '')}" placeholder="Provider default" pattern="[A-Za-z0-9._:/\\-]+"></label>
+        <label class="setup-field">Claude model<input id="setup-chat-model-claude" type="text" value="${this.escape(models.claude || '')}" placeholder="Provider default" pattern="[A-Za-z0-9._:/\\-]+"></label>
       </div></div>
       <p><button id="settings-save-provider" class="act primary" type="button">Save AI settings</button>
       <button id="settings-refresh-providers" class="act" type="button">Refresh status</button></p>`;
+    this.bindLocalProviderControls();
     this.el('settings-save-provider').addEventListener('click', () => this.saveProviderSetting());
     this.el('settings-refresh-providers').addEventListener('click', () => this.refreshStatus({ keepOpen: true }));
     this.bindProviderLoginControls();
@@ -1660,7 +1729,7 @@ const Setup = {
       };
       const result = await requestJson('/api/setup/config', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ai: { provider, model: null, models } }),
+        body: JSON.stringify({ ai: { provider, model: null, models, local: this.readLocalProviderSettings() } }),
       });
       this.status.config = result.config;
       window.Scout?.applyWorkspaceConfig?.(result.config);
@@ -1858,8 +1927,14 @@ const Setup = {
   },
 
   providerCard(name) {
+    if (name === 'local') {
+      const provider = this.status?.providers?.local || {};
+      const selected = (this.providerChoiceDraft || this.status?.config?.ai?.provider) === 'local';
+      const labels = { ready: 'Connection verified', 'credentials-present-unverified': 'Configured; connection not verified', checking: 'Connection not yet verified', 'sign-in-required': 'Check the API-key file', 'network-unavailable': 'Model server unreachable', 'rate-limited': 'Model server is busy', 'provider-error': 'Check the model server and settings' };
+      return `<section class="setup-provider available"><label><input type="radio" name="setup-provider" value="local" ${selected ? 'checked' : ''}><strong>Local OpenAI-compatible</strong><span class="meta">${provider.installed ? labels[provider.healthState] || 'Configured; connection not verified' : 'Enter your local model settings below'}</span></label></section>`;
+    }
     const provider = this.status?.providers?.[name] || {};
-    const selected = (this.status?.config?.ai?.provider || '') === name;
+    const selected = (this.providerChoiceDraft || this.status?.config?.ai?.provider || '') === name;
     const presentation = providerCardPresentation(provider);
     return `<section class="setup-provider ${presentation.available ? 'available' : ''}">
       <label>
@@ -1881,10 +1956,12 @@ const Setup = {
     this.el('setup-body').innerHTML = `
       <div class="setup-conversation"><div class="setup-scout"><span class="setup-scout-frame" role="img" aria-label="Scout is ready"></span></div><div class="scout-bubble tail-left">
       <h2>Choose an AI provider</h2>
-      <p>Scout uses the provider's official CLI and account login. Scout does not ask for or store an AI password or API key.</p>
-      <div class="setup-provider-list">${this.providerCard('codex')}${this.providerCard('claude')}</div>
+      <p>Choose Codex or Claude with its account sign-in, or connect a local model server you control. Local models use the settings below.</p>
+      <div class="setup-provider-list">${this.providerCard('codex')}${this.providerCard('claude')}${this.providerCard('local')}</div>
+      ${this.localProviderFieldsHtml()}
       <button id="setup-provider-refresh" class="act" type="button">Refresh provider status</button>
-      <p class="meta">One signed-in provider is required. A second provider is optional and can later perform a verification pass.</p></div></div>`;
+      <p class="meta">One configured provider is required. A second provider is optional and can later perform a verification pass.</p></div></div>`;
+    this.bindLocalProviderControls();
     this.el('setup-provider-refresh').addEventListener('click', async () => {
       this.setBusy(true);
       this.setMessage('Checking providers…');
@@ -1995,7 +2072,7 @@ const Setup = {
     const operation = this.operations.scan;
     const scanning = operation && ['queued', 'running'].includes(operation.status);
     const outcome = health.lastRunAt ? scanOutcomeSummary(health) : null;
-    const other = ['codex', 'claude'].find((name) => name !== provider
+    const other = ['codex', 'claude', 'local'].find((name) => name !== provider
       && this.status?.providers?.[name]?.authenticated
       && this.status?.providers?.[name]?.capabilities?.structuredOutput !== false);
     const secondRun = (schedule.runs || []).find((run) => run.mode === 'second-pass');
@@ -2007,7 +2084,7 @@ const Setup = {
       <label class="setup-field">${this.escape(name[0].toUpperCase() + name.slice(1))} ${mode === 'primary' ? 'scan' : 'verification pass'} time<input data-schedule-time type="time" value="${this.escape(run?.time || defaultTime)}"></label>
       <label class="setup-field">Days<select data-schedule-preset>${DAY_PRESETS.map(([value, label]) => `<option value="${value}" ${preset === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
       <fieldset class="setup-schedule-days" data-schedule-days ${preset === 'custom' ? '' : 'hidden'}><legend>Days this job runs</legend>${DAY_LABELS.map((label, day) => `<label><input type="checkbox" data-schedule-day="${day}" ${days.includes(day) ? 'checked' : ''}> ${label}</label>`).join('')}</fieldset>
-      <label class="setup-field">Scan model <span>Optional; used for this scan job. Blank uses the provider default</span><input data-schedule-model type="text" value="${this.escape(run?.model || '')}" placeholder="Provider default" pattern="[A-Za-z0-9._:\\-]+"></label>
+      <label class="setup-field">Scan model <span>Optional; used for this scan job. Blank uses the provider default</span><input data-schedule-model type="text" value="${this.escape(run?.model || '')}" placeholder="Provider default" pattern="[A-Za-z0-9._:/\\-]+"></label>
       <p><button class="act" data-schedule-enable="${this.escape(id)}" data-provider="${this.escape(name)}" data-mode="${this.escape(mode)}" type="button" ${(healthy || run?.configured) ? '' : 'disabled'}>${run?.configured ? 'Save scan settings' : `Enable ${name} ${mode === 'primary' ? 'scan' : 'verification pass'}`}</button>${run?.configured ? ` <button class="act" data-schedule-disable="${this.escape(id)}" type="button">Disable</button>` : ''}</p>
       ${run?.configured ? `<p class="meta">Currently runs: ${this.escape(run.daysLabel || 'Every day')} at ${this.escape(run.time || defaultTime)}.</p>` : ''}
     </div>`;
@@ -2502,7 +2579,7 @@ const Setup = {
           : 'Sign in to Codex or Claude, refresh the status, then choose it.');
         const result = await requestJson('/api/setup/config', {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ai: { provider, model: null } }),
+          body: JSON.stringify({ ai: { provider, model: null, local: this.readLocalProviderSettings() } }),
         });
         this.status.config = result.config;
       }

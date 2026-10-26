@@ -54,6 +54,7 @@ import {
   releaseProviderWork, renewProviderAuthMutation,
 } from './lib/providerAuthMutation.mjs';
 import { createProviderLoginManager } from './lib/providerLogin.mjs';
+import { localProviderHealthSignal } from './lib/localProvider.mjs';
 import { runStructuredTurn } from './lib/structuredTurn.mjs';
 import { doctor, publicDoctor } from './lib/doctor.mjs';
 import { extractCvText } from './lib/cvImport.mjs';
@@ -117,7 +118,7 @@ export const APP_VERSION = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'packa
 // clients keep the previous `scout-shell-<id>` cache and the previous ?v= URL.
 export const UI_BUILD_FILES = [
   'index.html', 'app.js', 'setup.js', 'reportView.js', 'service-worker.js', 'manifest.webmanifest',
-  'lib/scoutCharacter.mjs', 'lib/chatDrawerState.mjs', 'lib/codexDeepLink.mjs', 'lib/durableRunStates.mjs', 'lib/providerPresentation.mjs',
+  'lib/scoutCharacter.mjs', 'lib/chatDrawerState.mjs', 'lib/codexDeepLink.mjs', 'lib/durableRunStates.mjs', 'lib/modelIdentifier.mjs', 'lib/providerPresentation.mjs',
   'lib/standaloneUi.mjs',
   'assets/scout-icon.ico', 'assets/scout-icon.png', 'assets/scout-idle.png',
   'assets/scout-thinking.png', 'assets/scout-searching.png', 'assets/scout-explaining.png',
@@ -626,6 +627,7 @@ const REMOTE_MUTATION_WITHOUT_BACKUP = new Set([
   'POST /api/provider-login/retry',
   'POST /api/provider-login/clear-claude-credentials',
   'POST /api/provider-health/acknowledge',
+  'POST /api/provider-health/check',
 ]);
 
 function applySecurityHeaders(res, url) {
@@ -768,7 +770,7 @@ function currentDeviceSettings() {
   return publicDeviceSettings(settings, startupStatus);
 }
 
-export const providerDetection = { detect: detectProvidersAsync };
+export const providerDetection = { detect: () => detectProvidersAsync({ local: loadWorkspaceConfig(WORKSPACE_ROOT).ai?.local, root: WORKSPACE_ROOT }) };
 
 
 const PROVIDER_LOGIN_OWNER_ID = randomUUID();
@@ -1405,9 +1407,20 @@ function requireProviderLoginCsrf(req, res) {
   return false;
 }
 
+routes['POST /api/provider-health/check'] = async (req, res, body) => {
+  const value = exactJsonBody(body, ['provider']);
+  if (value?.provider !== 'local') return replyJson(res, 400, { error: 'choose the local model provider' });
+  try {
+    const health = await runtimeProviderPreflight(WORKSPACE_ROOT, 'local', 'retry', { source: 'manual-preflight' });
+    return replyJson(res, 200, health);
+  } catch {
+    return replyJson(res, 503, { error: 'Local provider health could not be checked. Try again shortly.' });
+  }
+};
+
 routes['POST /api/provider-health/acknowledge'] = (req, res, body) => {
   const value = exactJsonBody(body, ['alertId', 'provider']);
-  if (!value || !['codex', 'claude'].includes(value.provider) || typeof value.alertId !== 'string') {
+  if (!value || !['codex', 'claude', 'local'].includes(value.provider) || typeof value.alertId !== 'string') {
     return replyJson(res, 400, { error: 'supported provider and alert are required' });
   }
   try {
@@ -2444,7 +2457,7 @@ import { registerCompanyRoutes } from './lib/companyService.mjs';
 routes['POST /api/setup/proposal'] = (req, res, body) => {
   const b = parseBody(body); if (!b) return replyJson(res, 400, { error: 'bad json' });
   const provider = b.provider || loadWorkspaceConfig(WORKSPACE_ROOT).ai?.provider;
-  if (!['codex', 'claude'].includes(provider)) return replyJson(res, 400, { error: 'choose an authenticated AI provider first' });
+  if (!['codex', 'claude', 'local'].includes(provider)) return replyJson(res, 400, { error: 'choose an authenticated AI provider first' });
   try {
     const operation = operations.start('proposal', async (update, { signal }) => {
       const result = await createOnboardingProposal(WORKSPACE_ROOT, provider, {
@@ -2764,7 +2777,7 @@ routes['POST /api/scan'] = (req, res, body) => {
   const provider = b.provider || config.ai?.provider;
   let model;
   try { model = assertSafeModel(b.model); } catch { return replyJson(res, 400, { error: 'model is invalid' }); }
-  if (!['codex', 'claude'].includes(provider)) return replyJson(res, 400, { error: 'choose an authenticated AI provider first' });
+  if (!['codex', 'claude', 'local'].includes(provider)) return replyJson(res, 400, { error: 'choose an authenticated AI provider first' });
   try {
     const estimate = scanEstimate(readScanRecords(), provider, 'primary');
     const operation = operations.start('scan', async (update, { signal }) => {
@@ -2952,10 +2965,12 @@ export async function runtimeProviderPreflight(root, provider, purpose, {
   let providerWork = null;
   try {
     providerWork = acquireProviderWork(root, provider);
-    const status = (await detectProvidersFn())[provider];
+    const status = (await detectProvidersFn({ local: loadWorkspaceConfig(root).ai?.local, root }))[provider];
     return await preflightFn(root, provider, purpose, {
       source,
-      probe: async () => providerLocalHealthSignal(status, { source }),
+      probe: async () => provider === 'local'
+        ? localProviderHealthSignal(status, { source })
+        : providerLocalHealthSignal(status, { source }),
     });
   } catch (error) {
     if (error?.reasonCode !== 'provider-auth-in-progress') throw error;
@@ -3031,7 +3046,7 @@ function configuredHealthProviders(config) {
     ...(config?.schedule?.jobs || [])
       .filter((job) => job?.enabled === true)
       .map((job) => job.provider),
-  ].filter((provider) => ['codex', 'claude'].includes(provider)))];
+  ].filter((provider) => ['codex', 'claude', 'local'].includes(provider)))];
 }
 
 export function checkStartupProviderHealth(root, {
