@@ -32,6 +32,35 @@ test('a nontechnical user can change background watch to active hunting in Setti
   await expect(page.getByText('Search mode saved.')).toBeVisible();
 });
 
+test('a late search-profile response preserves the mode chosen before Save', async ({ page }) => {
+  let releaseProfile;
+  const profileReady = new Promise((resolve) => { releaseProfile = resolve; });
+  let profileRequested;
+  const profileStarted = new Promise((resolve) => { profileRequested = resolve; });
+  await page.route('**/api/search-profile', async (route) => {
+    profileRequested();
+    await profileReady;
+    await route.fulfill({ json: { draft: null, published: { id: 'delayed-profile' } } });
+  });
+  await page.route('**/api/search-profile/adaptive', (route) => route.fulfill({ json: {} }));
+  let saved;
+  await page.route('**/api/setup/config', async (route) => {
+    saved = route.request().postDataJSON();
+    await route.fulfill({ json: { ok: true, config: { ...config, ...saved } } });
+  });
+  await page.goto('/');
+  await page.locator('#scout-settings').click();
+  await page.getByRole('button', { name: 'Search & profile', exact: false }).click();
+  await profileStarted;
+  await page.getByLabel('How should Scout help you?').selectOption('active');
+  releaseProfile();
+  await expect(page.getByText('Published version: delayed-profile')).toBeVisible();
+  await expect(page.getByLabel('How should Scout help you?')).toHaveValue('active');
+  await page.getByRole('button', { name: 'Save search mode', exact: true }).click();
+  await expect.poll(() => saved?.mode).toBe('active');
+  await expect(page.getByText('Search mode saved.')).toBeVisible();
+});
+
 test('unacknowledged alerts remain visible until the user explicitly acknowledges them', async ({ page }) => {
   let acknowledged = false;
   await page.route('**/api/notifications/acknowledge', async (route) => {

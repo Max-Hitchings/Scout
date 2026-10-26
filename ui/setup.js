@@ -1081,7 +1081,7 @@ const Setup = {
       <p>Hard exclusions: ${this.escape((search.exclusions || []).join(', ') || 'None')}</p></div>
       ${searchModeQuestionHtml(config.mode || 'background')}
       <p><button id="settings-mode-save" class="act" type="button">Save search mode</button></p>
-      ${searchProfileReviewHtml(this.searchProfile)}
+      <div id="settings-search-profile"></div>
       <p><button id="settings-retune-search" class="act primary" type="button">Retune my search</button></p>
       <p class="meta">Retuning stages evidence-led changes for review. It does not reset tracker, application, report or chat history.</p>`;
     this.el('settings-mode-save').addEventListener('click', async () => {
@@ -1099,6 +1099,16 @@ const Setup = {
       this.enterRetune('search');
       this.focusDialogTitle();
     });
+    this.renderSearchProfileSettings();
+    if (!this.searchProfile) void this.loadSearchProfileReview();
+  },
+
+  renderSearchProfileSettings() {
+    const panel = this.el('settings-search-profile');
+    if (!panel) return;
+    // Profile requests and reviewed profile actions finish independently of the
+    // mode form. Refresh their panel without replacing an unsaved mode choice.
+    panel.innerHTML = searchProfileReviewHtml(this.searchProfile);
     this.el('search-profile-adaptive-save')?.addEventListener('click', () => this.saveAdaptiveSearchAnswers());
     this.el('search-profile-save')?.addEventListener('click', () => this.saveSearchProfileDraft());
     this.el('search-profile-publish')?.addEventListener('click', () => this.publishSearchProfile());
@@ -1106,7 +1116,6 @@ const Setup = {
     this.el('setup-body').querySelectorAll('[data-search-lane-restore]').forEach((button) => {
       button.addEventListener('click', () => this.restoreSearchLane(button.dataset.searchLaneRestore));
     });
-    if (!this.searchProfile) void this.loadSearchProfileReview();
   },
 
   renderSearchProfileContext() {
@@ -1114,7 +1123,7 @@ const Setup = {
       this.renderFirstScan();
       return;
     }
-    this.renderSearchSettings();
+    this.renderSearchProfileSettings();
   },
 
   async loadSearchProfileReview() {
@@ -1124,7 +1133,7 @@ const Setup = {
         requestJson('/api/search-profile/adaptive'),
       ]);
       this.searchProfile = { ...profile, adaptive };
-      if (this.view === 'section' && this.settingsSection === 'search') this.renderSearchSettings();
+      if (this.view === 'section' && this.settingsSection === 'search') this.renderSearchProfileSettings();
       else if (this.view === 'onboarding' && this.step === STEPS.length - 1) this.renderFirstScan();
     } catch (error) {
       this.setMessage(error.message, 'error');
@@ -1548,7 +1557,12 @@ const Setup = {
   },
 
   renderProviderSettings() {
-    const models = this.status?.config?.ai?.models || {};
+    const configuredModels = this.status?.config?.ai?.models || {};
+    // Sign-in status can arrive after this form is usable. Keep the values
+    // being edited in this dialog when its provider cards need a fresh render.
+    const models = Object.fromEntries(['codex', 'claude'].map((provider) => [
+      provider, this.el(`setup-chat-model-${provider}`)?.value ?? configuredModels[provider],
+    ]));
     this.el('setup-body').innerHTML = `
       <div class="setup-provider-list">${this.providerCard('codex')}${this.providerCard('claude')}${this.providerCard('local')}</div>
       ${this.localProviderFieldsHtml()}

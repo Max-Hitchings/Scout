@@ -969,6 +969,39 @@ test('guided login preserves failed logout state and reports no false success', 
   await expect(page.locator('#setup-status')).not.toContainText('sign-in cleared');
 });
 
+test('a late initial sign-in status preserves model settings typed before Save', async ({ page }) => {
+  let releaseStatus;
+  const statusReady = new Promise((resolve) => { releaseStatus = resolve; });
+  let statusRequested;
+  const statusStarted = new Promise((resolve) => { statusRequested = resolve; });
+  await page.route('**/api/provider-login/status?*', async (route) => {
+    const provider = new URL(route.request().url()).searchParams.get('provider');
+    if (provider === 'claude') {
+      statusRequested();
+      await statusReady;
+    }
+    await route.fulfill({ json: { provider, csrfToken: `csrf-${provider}-synthetic-000000000000`, session: provider === 'claude' ? {
+      provider, state: 'failed', reasonCode: 'credentials-expired', codeRequired: false,
+      sessionId: '00000000-0000-4000-8000-000000000005',
+    } : null } });
+  });
+  let saved;
+  await page.route('**/api/setup/config', async (route) => {
+    saved = route.request().postDataJSON();
+    await route.fulfill({ json: { ok: true, config: { ...establishedStatus.config, ...saved } } });
+  });
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'AI providers' }).click();
+  await statusStarted;
+  await dialog.locator('#setup-chat-model-codex').fill('example-codex-model');
+  await dialog.locator('#setup-chat-model-claude').fill('example-claude-model');
+  releaseStatus();
+  await expect(dialog.getByRole('button', { name: 'Retry Claude sign-in' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Save AI settings' }).click();
+  await expect.poll(() => saved?.ai?.models).toEqual({ codex: 'example-codex-model', claude: 'example-claude-model' });
+});
+
 test('guided login ignores stale polls and suppresses duplicate mutations', async ({ page }) => {
   await page.unroute('**/api/setup/status');
   await page.route('**/api/setup/status', (route) => route.fulfill({
