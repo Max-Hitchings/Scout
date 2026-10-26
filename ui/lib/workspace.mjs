@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { selectedHouseholdInstance } from './household.mjs';
 import { atomicWriteFile } from './atomicWrite.mjs';
 import { normaliseScheduleDays } from './scheduler.mjs';
 import {
@@ -85,6 +86,8 @@ export function resolveWorkspaceRoot({ appRoot, argv = process.argv.slice(2), en
   if (!appRoot) throw new Error('appRoot is required');
   const explicit = workspaceArg(argv) || env.SCOUT_WORKSPACE;
   if (explicit) return path.resolve(explicit);
+  const household = selectedHouseholdInstance({ env });
+  if (household) return household.workspace;
   // Backwards compatibility for existing private checkouts. Fresh installations
   // omit data/opportunities.json and therefore use the separate Documents path.
   if (fs.existsSync(path.join(appRoot, 'data', 'opportunities.json'))) return path.resolve(appRoot);

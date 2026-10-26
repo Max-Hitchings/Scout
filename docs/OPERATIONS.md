@@ -215,6 +215,16 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
 
 Do not assume a developer computer's local application checkout or workspace is live. Diagnose the VPS for production-like bugs unless the user explicitly reports a local-only installation.
 
+## Optional household home-server deployment
+
+The [home server guide](HOME_SERVER.md) describes an owner-managed Linux alternative: an unprivileged `scout` account, immutable application under `/srv/apps/scout/app`, one private workspace/provider home/device settings file and loopback port per person, and system-level service/timer templates. Each instance keeps an explicit workspace for its lifetime. Household create/list/switch changes only host-local selection for the next process and never copies career data. Registered instances pin their device-settings file and provider home, overriding inherited sibling device paths. New keepers persist a bounded first-seen date through receipted tracker recipes and subsequent rechecks; unknown legacy dates remain null. The systemd filesystem sandbox exposes only the current instance's state; mutually untrusted household members require separate Unix accounts and separately authorised private routes.
+
+`GET /api/health` is a local-only versioned liveness/configuration check. `GET /api/summary` is a read-only schema-v1 dashboard projection of mode, bounded scan/provider status, above-threshold new/shortlisted matches and every pending alert within the durable storage boundary. It omits CV/profile/notes, private paths, raw errors/provider output and URL queries/fragments. It never marks results read or triggers work.
+
+Outbound command/webhook notification hooks are owner-configured and disabled by default. The headless process polls the existing alert/digest outbox at startup and every five minutes; CLI scans also dispatch after outcomes. Delivery uses fixed executable argv with `shell: false` or bounded HTTP(S) POST without redirects, and normal delivery receipts are recorded only after success. Shared workspace delivery locks prevent overlap; recovery preserves pending alerts and receipts. Back up complete quiesced workspaces, host selection/unit configuration and separately encrypted provider credentials. No home-server installation or private-network access is performed by application development.
+
+Registered household instances and explicit `SCOUT_HEADLESS=1` services cannot install/remove/run desktop-native schedules or query another person’s user-global task state. CLI/API status labels schedules owner-managed and the UI points to per-instance system timers. Direct scheduled scan execution remains supported.
+
 ## Scan storage and reviewed cleanup
 
 Storage pressure is measured afresh for each response. Scout validates journal

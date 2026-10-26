@@ -38,7 +38,7 @@ export function validateNotifications(value) {
     || !Array.isArray(value.alerts) || value.alerts.length > MAX_ALERTS + MAX_PROVIDER_ALERTS) fail();
   for (const [id, item] of Object.entries(value.matches)) if (!HASH.test(id) || !tuple(item)) fail();
   for (const [provider, item] of Object.entries(value.providerEpisodes)) {
-    if (!['codex', 'claude'].includes(provider) || !(keys(item, ['state', 'episode']) || keys(item, ['state', 'episode', 'intentId']))
+    if (!['codex', 'claude', 'local'].includes(provider) || !(keys(item, ['state', 'episode']) || keys(item, ['state', 'episode', 'intentId']))
       || !(item.state === null || BLOCKING.has(item.state))
       || !Number.isSafeInteger(item.episode) || item.episode < 0
       || (item.intentId !== undefined && item.intentId !== null && !HASH.test(item.intentId))) fail();
@@ -47,7 +47,7 @@ export function validateNotifications(value) {
   for (const item of value.alerts) {
     if (!keys(item, ['id', 'kind', 'provider', 'count', 'createdAt', 'deliveredAt', 'acknowledgedAt'])
       || !HASH.test(item.id) || ids.has(item.id) || !['match', 'digest', 'provider'].includes(item.kind)
-      || ![null, 'codex', 'claude'].includes(item.provider)
+      || ![null, 'codex', 'claude', 'local'].includes(item.provider)
       || (item.kind === 'provider') !== (item.provider !== null)
       || !Number.isSafeInteger(item.count) || item.count < 1 || item.count > MAX_MATCHES
       || !iso(item.createdAt) || !nullableTime(item.deliveredAt) || !nullableTime(item.acknowledgedAt)) fail();
@@ -118,7 +118,7 @@ function combine(base, runtime, receipts, providerState = emptyNotifications(), 
 }
 
 export function readNotifications(root) {
-  for (const provider of ['codex', 'claude']) readProviderIntent(root, provider);
+  for (const provider of ['codex', 'claude', 'local']) readProviderIntent(root, provider);
   const runtime = readRuntime(root);
   return combine(readState(root), runtime.state, readReceipts(root), readProviderState(root), runtime.consumedPending);
 }
@@ -304,7 +304,7 @@ function providerEvent(record) {
 // effort: a notification error must never prevent authoritative health writes.
 export function prepareProviderNotificationUnderFence(root, current, record) {
   const provider = record?.provider;
-  if (!['codex', 'claude'].includes(provider)) throw new TypeError('notification provider is unsupported');
+  if (!['codex', 'claude', 'local'].includes(provider)) throw new TypeError('notification provider is unsupported');
   const state = readProviderState(root);
   const existing = readProviderIntent(root, provider);
   const events = existing && state.providerEpisodes[provider]?.intentId !== existing.id
@@ -324,7 +324,7 @@ export function prepareProviderNotificationUnderFence(root, current, record) {
 }
 
 export function publishProviderNotificationIntentUnderFence(root, provider) {
-  if (!['codex', 'claude'].includes(provider)) throw new TypeError('notification provider is unsupported');
+  if (!['codex', 'claude', 'local'].includes(provider)) throw new TypeError('notification provider is unsupported');
   const intent = readProviderIntent(root, provider);
   if (!intent) return;
   const state = readProviderState(root);
@@ -384,7 +384,7 @@ export function markNotification(root, id, action, at = new Date().toISOString()
 
 export function refreshNotificationDigest(root, config, at = new Date().toISOString()) {
   return withWorkspaceMutationAuthority(root, { kind: 'notifications', phase: 'digest' }, () => {
-    for (const provider of ['codex', 'claude']) publishProviderNotificationIntentUnderFence(root, provider);
+    for (const provider of ['codex', 'claude', 'local']) publishProviderNotificationIntentUnderFence(root, provider);
     const current = readNotifications(root);
     const next = flushNotificationDigest(current, config, at, { tracker: loadNotificationTracker(root) });
     const known = new Set(current.alerts.map((item) => item.id));
@@ -410,7 +410,7 @@ export function notificationView(input) {
     .map(([name, value]) => hash(`provider:${name}:${value.episode}`)));
   const view = (item) => ({
     ...item,
-    title: item.kind === 'provider' ? `${item.provider === 'claude' ? 'Claude' : 'Codex'} provider warning`
+    title: item.kind === 'provider' ? `${({ codex: 'Codex', claude: 'Claude', local: 'Local model' })[item.provider]} provider warning`
       : item.kind === 'digest' ? 'Your daily Scout matches' : 'An exceptional match is ready',
     body: item.kind === 'provider' ? 'A provider problem was recorded. Open Scout to review its current state and any missed work.'
       : item.kind === 'digest' ? `${item.count} new match${item.count === 1 ? '' : 'es'} to review. Your feedback helps Scout learn what matters.`
