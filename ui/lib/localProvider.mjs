@@ -7,6 +7,7 @@ const ajv = new Ajv({ strict: false, allErrors: false, validateFormats: false })
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 30 * 60 * 1000;
+const HEALTH_SCHEMA = Object.freeze({ type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { const: true } } });
 
 function failure(reasonCode = 'provider-error') {
   const error = new Error(`Local provider request failed (${reasonCode}). Check the local model server and settings.`);
@@ -51,9 +52,16 @@ function readKey(config, root) {
   // the key or a filesystem error in a thrown/public result.
   let descriptor;
   try {
-    descriptor = fs.openSync(file, 'r');
-    const stat = fs.fstatSync(descriptor);
-    if (!stat.isFile() || stat.size < 1 || stat.size > 8192) throw failure('authentication-required');
+    const selected = fs.lstatSync(file, { bigint: true });
+    if (!selected.isFile() || selected.isSymbolicLink() || selected.size < 1n || selected.size > 8192n) throw failure('authentication-required');
+    // O_NONBLOCK prevents a regular-file -> FIFO replacement from blocking
+    // open before the descriptor can be checked. O_NOFOLLOW rejects a final
+    // symlink replacement on platforms that expose that flag. The descriptor
+    // must still match the regular file selected by lstat on every platform.
+    descriptor = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+    const stat = fs.fstatSync(descriptor, { bigint: true });
+    if (!stat.isFile() || stat.dev !== selected.dev || stat.ino !== selected.ino
+      || stat.size < 1n || stat.size > 8192n) throw failure('authentication-required');
     const bytes = Buffer.alloc(8193);
     const count = fs.readSync(descriptor, bytes, 0, bytes.length, 0);
     if (count > 8192) throw failure('authentication-required');
@@ -61,7 +69,7 @@ function readKey(config, root) {
     if (!key || /[\x00-\x20\x7f]/.test(key)) throw failure('authentication-required');
     return key;
   } catch { throw failure('authentication-required'); }
-  finally { if (descriptor !== undefined) fs.closeSync(descriptor); }
+  finally { if (descriptor !== undefined) { try { fs.closeSync(descriptor); } catch { /* never expose a raw file error */ } } }
 }
 
 export function localProviderStatus({ local = {}, root } = {}) {
@@ -187,7 +195,7 @@ export function runLocalTurn({ status, prompt, messages, model, schema, timeoutM
 export async function localProviderHealthSignal(status, { source = 'provider-operation' } = {}) {
   if (!status?.installed) return { kind: 'provider-failure', source, reasonCode: 'provider-error' };
   if (!status.authenticated) return { kind: 'remote-auth-failure', source, reasonCode: 'authentication-required' };
-  const turn = runLocalTurn({ status, timeoutMs: 10_000, prompt: 'Respond only with {"ready":true}.', schema: { type: 'object', additionalProperties: false, required: ['ready'], properties: { ready: { const: true } } } });
+  const turn = runLocalTurn({ status, timeoutMs: 10_000, prompt: 'Respond only with {"ready":true}.', maxOutputBytes: 32 * 1024, schema: HEALTH_SCHEMA });
   const result = await turn.finished;
   const kind = result.ok ? 'remote-success' : { 'authentication-required': 'remote-auth-failure', 'network-unavailable': 'network-failure', 'rate-limited': 'rate-limit' }[result.reasonCode] || 'provider-failure';
   return { kind, source };

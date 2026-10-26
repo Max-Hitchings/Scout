@@ -4,6 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { providerStatus, providerLocalHealthSignal } from './providers.mjs';
 import { runStructuredTurn } from './structuredTurn.mjs';
@@ -110,6 +111,50 @@ test('local response envelopes are byte-bounded before JSON parsing', async (t) 
   const f = await fixture(t, (_req, res) => respond(res, 200, completion('x'.repeat(8192))));
   await assert.rejects(run(f.local, { maxOutputBytes: 128 }), (error) => error.reasonCode === 'provider-error');
   assert.equal(f.requests.length, 1);
+});
+
+for (const substitution of [false, true]) {
+  test(`local API-key ${substitution ? 'FIFO substitution' : 'FIFO'} cannot block provider detection`, { skip: process.platform === 'win32' }, (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-local-key-file-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const keyFile = path.join(root, 'key-file');
+    if (substitution) fs.writeFileSync(keyFile, randomBytes(24).toString('hex'));
+    else assert.equal(spawnSync('mkfifo', [keyFile]).status, 0);
+    // This runs in its own bounded process: the pre-fix blocking open must
+    // never hang the suite, nor consume a live provider or real credential.
+    const script = `
+      import fs from 'node:fs';
+      import { spawnSync } from 'node:child_process';
+      import { providerStatus } from ${JSON.stringify(new URL('./providers.mjs', import.meta.url).href)};
+      const file = ${JSON.stringify(keyFile)};
+      if (${substitution}) {
+        const original = fs.openSync;
+        fs.openSync = (value, ...args) => {
+          if (value === file) {
+            fs.unlinkSync(file);
+            if (spawnSync('mkfifo', [file]).status !== 0) process.exit(3);
+          }
+          return original(value, ...args);
+        };
+      }
+      const status = providerStatus('local', { local: { baseUrl: 'http://localhost:8000/v1', model: 'synthetic-model', apiKeyFile: file } });
+      process.stdout.write(JSON.stringify({ authenticated: status.authenticated, reasonCode: status.reasonCode }));
+    `;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 2000 });
+    assert.equal(child.status, 0, `provider detection must settle; child error: ${child.error?.code || 'none'}`);
+    assert.deepEqual(JSON.parse(child.stdout), { authenticated: false, reasonCode: 'authentication-required' });
+    assert.doesNotMatch(child.stdout + child.stderr, new RegExp(root));
+  });
+}
+
+test('local API-key selectors reject final symlinks without reading their target', { skip: process.platform === 'win32' }, async (t) => {
+  const f = await fixture(t, (_req, res) => respond(res, 200, completion()));
+  const link = path.join(f.root, 'key-link');
+  fs.symlinkSync(f.local.apiKeyFile, link);
+  const status = providerStatus('local', { local: { ...f.local, apiKeyFile: link } });
+  assert.equal(status.authenticated, false);
+  assert.equal(status.reasonCode, 'authentication-required');
+  assert.equal(f.requests.length, 0);
 });
 
 test('local workspace configuration and schedules accept exact local model names', () => {

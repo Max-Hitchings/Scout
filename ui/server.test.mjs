@@ -110,6 +110,33 @@ test('server startup and periodic provider health use the configured runtime ent
   assert.equal(cleared, true);
 });
 
+test('local runtime health verifies a completion and clears auth barriers only after real success', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-local-runtime-health-'));
+  let content = '{"ready":false}';
+  let requests = 0;
+  const fake = http.createServer(async (req, res) => {
+    for await (const _chunk of req) { /* consume the synthetic request */ }
+    requests += 1;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }));
+  });
+  await new Promise((resolve) => fake.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { fake.closeAllConnections(); await new Promise((resolve) => fake.close(resolve)); fs.rmSync(root, { recursive: true, force: true }); });
+  const { mergeWorkspaceDefaults } = await import('./lib/workspace.mjs');
+  const { providerStatus } = await import('./lib/providers.mjs');
+  writeWorkspaceConfig(root, mergeWorkspaceDefaults({ ai: { provider: 'local', local: { baseUrl: `http://127.0.0.1:${fake.address().port}/v1`, model: 'synthetic/model-27b', retries: 0 } } }));
+  recordProviderHealth(root, 'local', { kind: 'remote-auth-failure', source: 'provider-operation' }, { purpose: 'manual-run' });
+  const options = { source: 'manual-preflight', detectProvidersFn: async (config) => ({ local: providerStatus('local', config) }) };
+  assert.equal((await runtimeProviderPreflight(root, 'local', 'retry', options)).ok, false);
+  assert.equal(readProviderHealth(root, 'local').remoteAuthBarrier, true);
+  content = '{"ready":true}';
+  const verified = await runtimeProviderPreflight(root, 'local', 'retry', options);
+  assert.equal(verified.state, 'ready');
+  assert.equal(verified.verified, true);
+  assert.equal(readProviderHealth(root, 'local').remoteAuthBarrier, false);
+  assert.equal(requests, 2);
+});
+
 test('shutdown drainage starts a queued checkpoint immediately and settles its promise', async () => {
   const pending = scheduleCheckpoint('test: acknowledged mutation');
   await drainScheduledCheckpoints();

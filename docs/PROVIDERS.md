@@ -6,7 +6,7 @@ Scout needs one configured provider: Codex, Claude, or a local OpenAI-compatible
 
 In **Settings → AI providers**, choose **Local OpenAI-compatible**, enter your model server's base URL (including `/v1` when required), and its exact model name. Leave the API-key file blank if the server requires no key. Otherwise enter a file path on the Scout host, never the key itself. Relative file paths resolve from the selected workspace; absolute paths are supported. The Scout service account must be able to read the file.
 
-Keep a key file outside the workspace with access restricted to the service account, and back it up through your own secret-recovery process. Scout reads its contents only when checking configuration or making a request; it never copies the key into configuration, provider health, run journals or diagnostics. The file's path is private workspace configuration and is visible in the owner's settings. A restore to another computer needs that computer's endpoint and credential-file setup.
+Keep a regular key file outside the workspace with access restricted to the service account, and back it up through your own secret-recovery process. Symlink selectors and non-regular files such as named pipes are rejected. Scout reads its bounded contents only when checking configuration or making a request; it never copies the key into configuration, provider health, run journals or diagnostics. The file's path is private workspace configuration and is visible in the owner's settings. A restore to another computer needs that computer's endpoint and credential-file setup.
 
 For manual configuration, merge this into your private `workspace.json`:
 
