@@ -35,7 +35,9 @@ every five minutes, so delivery can be a few minutes after the due time or
 wait until a scan releases the workspace. When the host is stopped, the next
 start or local delivery poll catches up. Changing to background watch clears
 ordinary unsent active matches, while preserving outstanding exceptional
-matches as background alerts. Already-created alerts remain reviewable.
+matches as background alerts. This change survives reloads and a later return
+to active hunting; those cleared or already-alerted matches do not reappear in
+a digest. Already-created alerts remain reviewable.
 
 ## Local delivery and acknowledgement
 
@@ -43,7 +45,9 @@ Assessed-match state is kept in the workspace's private
 `.scout/notifications.json` and committed with the tracker/report mutation and
 its recovery receipt. Provider episodes have independent reserved capacity in
 `.scout/provider-notifications.json`. Timer-produced digests use
-`.scout/notifications-runtime.json`; delivery and acknowledgement use
+`.scout/notifications-runtime.json`, together with bounded consumed-pending IDs
+that preserve mode-switch and digest completion without rewriting scan state;
+delivery and acknowledgement use
 `.scout/notification-receipts.json`. Those companion files never rewrite a
 scan's receipted target. Lifetime vacancy dedupe is a small `notificationState`
 tuple on the existing private tracker entry, committed in the same mutation. Repeating or recovering that mutation does not create another

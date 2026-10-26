@@ -100,8 +100,11 @@ function trimAcknowledged(alerts) {
   }
 }
 
-function combine(base, runtime, receipts, providerState = emptyNotifications()) {
+function combine(base, runtime, receipts, providerState = emptyNotifications(), consumedPending = []) {
   const state = structuredClone(base);
+  const consumed = new Set(consumedPending);
+  state.pending = state.pending.filter((id) => !consumed.has(id));
+  if (!state.pending.length) state.digestAfter = null;
   state.providerEpisodes = structuredClone(providerState.providerEpisodes);
   state.alerts = [...new Map([...base.alerts, ...runtime.alerts].filter((item) => item.kind !== 'provider').map((item) => [item.id, item])).values()]
     .map((item) => ({ ...item, ...(receipts.receipts[item.id] || {}) }));
@@ -116,7 +119,8 @@ function combine(base, runtime, receipts, providerState = emptyNotifications()) 
 
 export function readNotifications(root) {
   for (const provider of ['codex', 'claude']) readProviderIntent(root, provider);
-  return combine(readState(root), readState(root, 'notifications-runtime.json'), readReceipts(root), readProviderState(root));
+  const runtime = readRuntime(root);
+  return combine(readState(root), runtime.state, readReceipts(root), readProviderState(root), runtime.consumedPending);
 }
 
 function persistJson(root, name, state) {
@@ -126,18 +130,31 @@ function persistJson(root, name, state) {
 }
 
 function readRuntime(root) {
-  const state = readState(root, 'notifications-runtime.json');
+  const { consumedPending = [], ...state } = readJson(root, 'notifications-runtime.json') || emptyNotifications();
+  if (!Array.isArray(consumedPending) || consumedPending.length > MAX_MATCHES
+    || new Set(consumedPending).size !== consumedPending.length || !consumedPending.every((id) => HASH.test(id))) {
+    throw new Error('notification runtime storage has an unsupported schema');
+  }
+  validateNotifications(state);
   const receipts = readReceipts(root);
   state.alerts = state.alerts.filter((item) => item.kind !== 'provider').map((item) => ({ ...item, ...(receipts.receipts[item.id] || {}) }));
   state.providerEpisodes = {};
-  return state;
+  return { state, consumedPending };
 }
 
-function persistRuntime(root, state) {
-  const merged = combine(readState(root), validateNotifications(state), readReceipts(root), readProviderState(root));
+function persistRuntime(root, runtime) {
+  const { state } = runtime;
+  const base = readState(root);
+  const pending = new Set(base.pending);
+  // Polls cannot rewrite the scan's receipted target. Keep bounded tombstones
+  // beside runtime alerts until a later scan removes those pending identities.
+  const consumedPending = [...new Set(runtime.consumedPending)].filter((id) => pending.has(id));
+  const merged = combine(base, validateNotifications(state), readReceipts(root), readProviderState(root), consumedPending);
   const retained = new Set(merged.alerts.map((item) => item.id));
   state.alerts = state.alerts.filter((item) => retained.has(item.id));
-  persistJson(root, 'notifications-runtime.json', state);
+  const stored = { ...state, consumedPending };
+  if (Buffer.byteLength(JSON.stringify(stored)) > MAX_BYTES) throw new Error('notification storage needs review');
+  persistJson(root, 'notifications-runtime.json', stored);
 }
 
 function addAlert(state, kind, identity, at, count = 1, provider = null) {
@@ -347,7 +364,7 @@ export function markNotification(root, id, action, at = new Date().toISOString()
     const state = readNotifications(root);
     if (!state.alerts.some((item) => item.id === id)) throw new Error('notification is unavailable');
     const base = readState(root);
-    const runtime = readState(root, 'notifications-runtime.json');
+    const runtime = readRuntime(root).state;
     const providerState = readProviderState(root);
     const retained = new Set([...base.alerts, ...runtime.alerts, ...providerState.alerts].map((item) => item.id));
     retained.add(pendingDigestId(base.pending));
@@ -372,12 +389,15 @@ export function refreshNotificationDigest(root, config, at = new Date().toISOStr
     const next = flushNotificationDigest(current, config, at, { tracker: loadNotificationTracker(root) });
     const known = new Set(current.alerts.map((item) => item.id));
     const added = next.alerts.filter((item) => !known.has(item.id));
-    if (added.length) {
+    const remaining = new Set(next.pending);
+    const consumed = current.pending.filter((id) => !remaining.has(id));
+    if (added.length || consumed.length) {
       const runtime = readRuntime(root);
       for (const item of added) {
-        runtime.alerts.push(item);
-        trimAcknowledged(runtime.alerts);
+        runtime.state.alerts.push(item);
+        trimAcknowledged(runtime.state.alerts);
       }
+      runtime.consumedPending.push(...consumed);
       persistRuntime(root, runtime);
     }
     return notificationView(readNotifications(root));

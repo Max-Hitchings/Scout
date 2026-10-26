@@ -137,6 +137,72 @@ test('switching to background watch preserves an outstanding exceptional match b
   assert.equal(state.pending.length, 0);
 });
 
+for (const score of [98, 76]) {
+  test(`a background poll durably consumes a pending active match scored ${score} without rewriting scan state`, async () => {
+    const n = await import('./notifications.mjs');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-mode-poll-'));
+    try {
+      const tracker = { opportunities: [{ id: 'synthetic-pending-match' }] };
+      const state = n.notificationsForAssessment(n.emptyNotifications(), { mode: 'active' }, [good('synthetic-pending-match', score)], at, { tracker });
+      fs.mkdirSync(path.join(root, '.scout'), { recursive: true });
+      fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+      fs.writeFileSync(n.notificationFile(root), JSON.stringify(state));
+      fs.writeFileSync(path.join(root, 'data', 'opportunities.json'), JSON.stringify(tracker));
+      const before = fs.readFileSync(n.notificationFile(root), 'utf8');
+      const expectedKinds = score >= 95 ? ['match'] : [];
+      assert.deepEqual(n.refreshNotificationDigest(root, { mode: 'background' }, '2026-10-25T09:00:00.000Z').alerts.map((item) => item.kind), expectedKinds);
+      assert.equal(n.readNotifications(root).pending.length, 0, 'a reload must retain the background poll\'s removal of unsent active matches');
+      n.refreshNotificationDigest(root, { mode: 'background' }, '2026-10-25T10:00:00.000Z');
+      assert.deepEqual(n.refreshNotificationDigest(root, { mode: 'active' }, later).alerts.map((item) => item.kind), expectedKinds, 'switching back must not digest a cleared or already-alerted vacancy');
+      assert.equal(fs.readFileSync(n.notificationFile(root), 'utf8'), before, 'polling must preserve the scan-receipted target');
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}
+
+test('mode-switch polling preserves scan receipt recovery and permits a later new-match digest', async () => {
+  const { coordinateScanArtifacts } = await import('./scanPipeline.mjs');
+  const { acquireScanLease, currentLeaseOwner, releaseScanLease } = await import('./scanLease.mjs');
+  const { openRunJournal } = await import('./runJournal.mjs');
+  const n = await import('./notifications.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-mode-receipt-'));
+  let lease;
+  try {
+    fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'data', 'opportunities.json'), JSON.stringify({ opportunities: [] }));
+    const input = (vacancy, startedAt = at) => ({
+      provider: 'codex', mode: 'primary', startedAt,
+      candidates: [{ candidateId: 'candidate-001', vacancyId: vacancy, company: 'Synthetic Studio', role: vacancy, source: 'ats', url: `https://example.test/${vacancy}`, preRankScore: 98 }],
+      sources: { ats: { status: 'healthy', count: 1 } },
+      assessmentResult: { assessments: [{ candidateId: 'candidate-001', recommendation: 'keep', mandatoryRequirements: [], responsibilityFit: { rating: 'strong' } }] },
+      policy: { actionScore: 70, checkScore: 55 }, notificationConfig: { mode: 'active' },
+    });
+    const run = openRunJournal(root, 'synthetic-mode-first');
+    lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: run.runId });
+    assert.ok(coordinateScanArtifacts(root, input('synthetic-first'), { run, lease }).mutationReceipt);
+    releaseScanLease(lease);
+    lease = null;
+    const before = fs.readFileSync(n.notificationFile(root), 'utf8');
+    n.refreshNotificationDigest(root, { mode: 'background' }, '2026-10-25T09:00:00.000Z');
+    assert.equal(n.readNotifications(root).pending.length, 0, 'the real scan pending obligation must stay consumed after reload');
+    assert.equal(fs.readFileSync(n.notificationFile(root), 'utf8'), before);
+    lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: run.runId });
+    assert.ok(coordinateScanArtifacts(root, input('synthetic-first'), { run, lease }).mutationReceipt, 'receipt recovery must accept the untouched scan targets');
+    releaseScanLease(lease);
+    lease = null;
+    assert.deepEqual(n.refreshNotificationDigest(root, { mode: 'active' }, later).alerts.map((item) => item.kind), ['match']);
+
+    const nextRun = openRunJournal(root, 'synthetic-mode-second');
+    lease = acquireScanLease(root, currentLeaseOwner(), { kind: 'scan', runId: nextRun.runId });
+    coordinateScanArtifacts(root, input('synthetic-second', later), { run: nextRun, lease });
+    releaseScanLease(lease);
+    lease = null;
+    assert.equal(n.readNotifications(root).pending.length, 1, 'consumed identities must not suppress a later new vacancy');
+    const alerts = n.refreshNotificationDigest(root, { mode: 'active' }, '2026-10-27T08:00:00.000Z').alerts;
+    assert.deepEqual(alerts.map((item) => [item.kind, item.count]), [['match', 1], ['digest', 1]]);
+    assert.equal(n.readNotifications(root).pending.length, 0);
+  } finally { if (lease) releaseScanLease(lease); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('delivery acknowledgement and provider transitions cannot rewrite the scan-receipted outbox target', async () => {
   const n = await import('./notifications.mjs');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-receipted-outbox-'));

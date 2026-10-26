@@ -128,7 +128,10 @@ The maintained beta deployment uses one private, single-owner Ubuntu VPS:
   receipt; provider-failure episodes enter the bounded private local outbox
   independently of fenced health replacement, using a bounded pending intent.
   Full notification storage cannot override a remote-authentication failure. Active hunting flushes a non-empty daily
-  digest; background watch has no routine digest. Windows tray delivery polls
+  digest; background watch has no routine digest. Polls atomically retain
+  consumed pending identities beside runtime alerts, including ordinary
+  active matches cleared by a switch to background watch. They never rewrite
+  the scan's receipted notification target. Windows tray delivery polls
   only local endpoints and acknowledges delivery separately from dashboard
   acknowledgement. No outbound notification service is configured. See
   [Search modes and alerts](SEARCH_MODES_AND_ALERTS.md).
