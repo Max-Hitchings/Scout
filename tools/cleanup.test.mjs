@@ -286,7 +286,7 @@ fs.readFileSync = function(file, ...args) {
 test('malformed private review content is never copied into CLI diagnostics', (t) => {
   const { parent, cli } = fixture(t);
   const file = path.join(parent, 'invalid-review.json');
-  const privateMarker = `SyntheticPrivateReview${crypto.randomBytes(8).toString('hex')}`;
+  const privateMarker = 'PRIVATE_CV';
   fs.writeFileSync(file, privateMarker, { mode: 0o600 });
   const result = cli('--apply', file, '--confirm', 'a'.repeat(64));
   assert.notEqual(result.status, 0);
