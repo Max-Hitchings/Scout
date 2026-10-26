@@ -43,7 +43,7 @@ Verification status in this initial ledger is deliberately `unverified`: the aud
 
 | ID | Severity | Provenance | Verification | Beta gate | Workstream | Required disposition and evidence | Branch / commit / PR / tests / CI / review |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| F-1 | Critical | Epic-introduced | reproduced; repaired and independently approved at exact code head | **BLOCK: integration native acceptance and final review** | 1 | Reproduce clean seal→assert failure; preserve pre-seal audit and read-only seal; authorise sealed digest; clean pass plus content/mode/path/link/add/delete/replace tamper failures; pre/post packager checks; primary error not masked by cleanup; execute real packager round trips; publish only authorized private temporary artifacts with atomic no-overwrite promotion. | PR #84 carried unchanged into `friend/f1-sealed-release` after integration merge `592c3ed`; merge interactions reproduced and repaired; focused 123/123 under umask 077, release fixture focus 31/31 under 022. Final hosted/review evidence pending; original exact code head `d165e1d9099b93b705e56aea0a170f2d9ab0b979`; focused 118/118; exact-SHA specification/code/security reviews APPROVE; CI run 30946243076 has six green jobs and one stalled Intel macOS attempt; see F-1 evidence below. |
+| F-1 | Critical | Epic-introduced | reproduced; repaired; independent code review and exact-head hosted validation complete | **PASS on continuation; canonical integration gate pending** | 1 | Reproduce clean seal→assert failure; preserve pre-seal audit and read-only seal; authorise sealed digest; clean pass plus content/mode/path/link/add/delete/replace tamper failures; pre/post packager checks; primary error not masked by cleanup; execute real packager round trips; publish only authorized private temporary artifacts with atomic no-overwrite promotion. Require real install/first-launch/onboard/publish/mode/scan/results/uninstall acceptance on all four OS. | PR #114 carries all 33 original #84 commits unchanged after integration `592c3ed`. Exact code head `1b085e30e71bb88977044d5b4c718a7db16e8332`: [CI run 365](https://github.com/oliver-hitchings/Scout/actions/runs/40407699890) completed 21/21, including all four native installations and Linux portable. Full npm: 1,772 passed / seven platform skips / zero failures. Non-author composition review: 215/215; final server-fixture delta: 73/73, APPROVE, no outstanding findings. Required-marker source audit: 438 files, no findings. See hosted completion evidence below; owner merge and exact canonical integration validation remain required. |
 | D-1 | Critical | Pre-existing but amplified by Epic authority model | unverified | **BLOCK** | 2 | Put adoption under shared mutation/OS exclusion; heartbeat and recheck fence through renames/receipt/publication; advance generation lineage; prove stale owners cannot write; crash-safe rollback; require service stop/restart ordering in workflow and operations docs. Synthetic roots only. | pending |
 | E-1 | Important | Epic-introduced | unverified | **BLOCK** | 3/7 | Upgraded users must be gated on publication or shown an explicit legacy-discovery disclosure; ranked-stage/UI claims must match the actual engine; update troubleshooting and composition/browser coverage. | pending |
 | E-2 | Important | Epic-introduced | unverified | **BLOCK** | 3 | Derive provider card, sign-in panel and verification offer from one health-gated presentation authority; contradictory signed-in/blocked states and suppressed remedies must be impossible. | pending |
@@ -365,10 +365,67 @@ allowing only the prescribed permission changes. New race tests cover marker
 insertion, same-byte replacement, added files and writable file/directory modes.
 The existing complete tree/identity/ancestor checks remain in force.
 The six requested release suites pass 123/123 with umask 077, and the release
-fixture suites pass 31/31 with umask 022. Native install acceptance, all 21 hosted
-jobs and fresh independent merged-code security review remain required. Their
-exact pushed head and evidence will be recorded on the continuation PR and #85;
-none is inferred from PR #84's old-base results.
+fixture suites pass 31/31 with umask 022. Those focused integration checks are
+followed by the exact-head hosted and independent-review evidence below; none
+is inferred from PR #84's old-base results.
+
+## F-1 hosted completion — 2026-10-26 UTC
+
+The exact code head `1b085e30e71bb88977044d5b4c718a7db16e8332` on
+[PR #114](https://github.com/oliver-hitchings/Scout/pull/114) completed
+[CI run 365](https://github.com/oliver-hitchings/Scout/actions/runs/40407699890)
+with all **21/21 jobs green**: test-and-audit on Windows 2022, Ubuntu 22.04,
+macOS 15 ARM and Intel; twelve browser jobs; Windows native compilation; and
+four installed-artifact jobs. Each native job installs the real package,
+launches it, creates a private workspace, imports synthetic CV text, approves
+and publishes the profile, chooses mode, enters production scan readiness,
+shows the synthetic result and uninstalls while preserving every private
+workspace path and file digest. Linux also runs the portable artifact
+independently. Providers, collection and advert liveness use synthetic
+boundaries; no live account acceptance is claimed.
+
+Actual umask-077 Debian and portable builds verified readable sealed payload
+files and traversable directories, including generated platform metadata.
+Permission preparation happens before auditing and leaves the uninspected
+outer stage and audit copy private; Windows creation verifies the protected
+owner-only DACL. The inspected-content binding, read-only seal, required
+markers, no-overwrite publication and all pre/post identity checks remain
+required. Installed first-run repairs retain the publication guard, refresh
+only bounded private managed copies, and preserve approval only through
+reviewed operational choices. Native fixture ordering waits for the owned
+real Git checkpoint; it never retries a rejected domain action.
+
+Full npm at that code head passed **1,772 tests**, with seven platform skips
+and zero failures (1,779 total). The required synthetic-marker tracked-source
+audit scanned 438 files with no findings, digest
+`cdec342ca06083a3c78a038b01136831a487c0da9f106ba82ef15913c5135d51`;
+the allowlisted public-source stage separately passed its required-marker
+audit across 400 files. Original #84 remains an ancestor with all 33 commits
+and authorship unchanged; every carried F-1-derived change retains its credit.
+
+Independent non-author release-security composition review approved
+`9bf30e51a18b0bcb217a61b4dc3c7ffca2a9151e` with 215/215 checks. Subsequent
+native-control and browser-ordering deltas were independently approved with
+24/24 plus isolation probes. Final server-fixture review is bound to exact
+`1b085e30e71bb88977044d5b4c718a7db16e8332`, with 73/73 server checks and
+independent abort/body-error probes, APPROVE and no outstanding findings.
+The original tracker race assertions remain byte-identical after preparatory
+checkpoint draining; provider isolation requires a real unrelated response
+while provider and setup remain pending. Controlled dependent-response
+negatives fail within the bounded watchdog and clean up their owned requests.
+These are review evidence, not self-submitted formal GitHub approvals.
+
+This entry records the verified code head. Documentation-only descendants
+are separately bound to their exact tests, audit and hosted results on PR #114.
+At this evidence checkpoint, canonical integration remains `592c3ed` and main
+remains `1f8310c`; the owner must merge the focused work, validate all 21 jobs
+on the actual integration head and bind fresh review to its tree before the
+#85 main gate can be cleared. No merged-main Epic checkbox is inferred here.
+Production trust remains intentionally empty and updates fail closed. Owner
+key enrollment is required before signing/deployment/publication; the recorded
+default permits code merge with those release paths disabled. Live provider
+checks, real-host systemd/VPS rehearsal, protected release rehearsal and
+tag/publish remain operator work and were not performed.
 
 ## Evidence update protocol
 
