@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 
 const EXPIRED = {
   provider: 'claude',
@@ -187,7 +188,7 @@ test('remote settings keep local model transport read-only and roundtrip its exa
     scanHealth: { healthy: true }, schedule: { enabled: false, runs: [] }, sync: { state: 'disabled' },
     device: { updates: { policy: 'notify' }, startupStatus: {} }, remoteAccess: {}, pendingSetupSections: [],
   })));
-  await page.route('**/api/provider-login/status**', (route) => route.fulfill(json({ session: null, csrfToken: 'synthetic-browser-csrf' })));
+  await page.route('**/api/provider-login/status**', (route) => route.fulfill(json({ session: null, csrfToken: randomUUID() })));
   await page.route('**/api/setup/config', (route) => {
     saved = route.request().postDataJSON();
     return route.fulfill(json({ ok: true, config }));
