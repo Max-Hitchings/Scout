@@ -1,3 +1,5 @@
+import { workspaceModePolicy } from './lib/workspaceMode.mjs';
+import { markNotification, notificationView, readNotifications, refreshNotificationDigest } from './lib/notifications.mjs';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -183,7 +185,10 @@ function createRuntimeHttpHandlerBarrier() {
 function startRuntimeSyncTimer() {
   if (runtimeSyncTimer) return;
   runtimeSyncTimer = setInterval(() => {
-    if (workspaceInitialised()) void scheduleCheckpoint('periodic sync');
+    if (workspaceInitialised()) {
+      try { refreshNotificationDigest(WORKSPACE_ROOT, loadWorkspaceConfig(WORKSPACE_ROOT)); } catch { /* retry on the next tick if a scan owns the fence */ }
+      void scheduleCheckpoint('periodic sync');
+    }
   }, 5 * 60 * 1000);
   runtimeSyncTimer.unref();
 }
@@ -668,6 +673,7 @@ export function requestAccess(req, url, settings = loadDeviceSettings()) {
     || url.pathname.startsWith('/api/remote-access/')
     || url.pathname.startsWith('/api/provider-login/')
     || url.pathname.startsWith('/api/provider-health/')
+    || url.pathname.startsWith('/api/notifications/')
     || ['POST /api/restart', 'POST /api/setup/proposal', 'POST /api/setup/activate', 'POST /api/setup/recovery'].includes(`${req.method} ${url.pathname}`);
   if (mutatingApi && requiresJson) {
     const mediaType = String(req.headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
@@ -1117,21 +1123,25 @@ async function handleRead(req, res, url) {
     const config = loadWorkspaceConfig(WORKSPACE_ROOT);
     return sendJson(res, 200, {
       ...data,
-      triage: triage(data, todayValue, config.triage),
-      pipeline: pipeline(data, todayValue, config.triage),
+      triage: triage(data, todayValue, workspaceModePolicy(config).triage),
+      pipeline: pipeline(data, todayValue, workspaceModePolicy(config).triage),
       scanHealth: readScanHealth(),
       schedule: readScheduleSummary(config),
       categories: readCategories(),
-      workspaceConfig: config,
+      workspaceConfig: { ...config, modePolicy: workspaceModePolicy(config) },
       trackerRevision: snapshot.revision,
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/pipeline') {
     const data = readTracker();
-    return sendJson(res, 200, pipeline(data, today(), loadWorkspaceConfig(WORKSPACE_ROOT).triage));
+    return sendJson(res, 200, pipeline(data, today(), workspaceModePolicy(loadWorkspaceConfig(WORKSPACE_ROOT)).triage));
   }
   if (req.method === 'GET' && url.pathname === '/api/scan-health') {
     return sendJson(res, 200, readScanHealth());
+  }
+  if (req.method === 'GET' && url.pathname === '/api/notifications') {
+    if (!fs.existsSync(WORKSPACE_ROOT)) return sendJson(res, 200, { alerts: [], outbox: [] });
+    return sendJson(res, 200, notificationView(readNotifications(WORKSPACE_ROOT)));
   }
   if (req.method === 'GET' && url.pathname === '/api/provider-health') {
     let runs = [];
@@ -2425,6 +2435,25 @@ routes['DELETE /api/setup/proposal'] = (req, res) => {
   void scheduleCheckpoint('discard setup proposal');
   return replyJson(res, 200, result);
 };
+
+routes['POST /api/notifications/poll'] = (req, res) => {
+  if (req.scoutAccess !== 'local') return replyJson(res, 403, { error: 'Desktop delivery is available only on the Scout host.' });
+  try { return replyJson(res, 200, refreshNotificationDigest(WORKSPACE_ROOT, loadWorkspaceConfig(WORKSPACE_ROOT))); }
+  catch { return replyJson(res, 409, { error: 'Notifications are busy or need review. Open Scout and retry.' }); }
+};
+
+for (const [route, action] of [['delivered', 'delivered'], ['acknowledge', 'acknowledged']]) {
+  routes[`POST /api/notifications/${route}`] = (req, res, body) => {
+    if (action === 'delivered' && req.scoutAccess !== 'local') return replyJson(res, 403, { error: 'Desktop delivery is available only on the Scout host.' });
+    const value = parseBody(body);
+    if (!value) return replyJson(res, 400, { error: 'Notification request is invalid.' });
+    try { return replyJson(res, 200, markNotification(WORKSPACE_ROOT, value.id, action)); }
+    catch (error) {
+      if (error?.message === 'notification is unavailable') return replyJson(res, 404, { error: 'Notification is no longer pending.' });
+      return replyJson(res, 409, { error: 'Notification could not be updated. Retry when the scan finishes.' });
+    }
+  };
+}
 
 routes['POST /api/setup/config'] = (req, res, body) => {
   const b = parseBody(body); if (!b) return replyJson(res, 400, { error: 'bad json' });

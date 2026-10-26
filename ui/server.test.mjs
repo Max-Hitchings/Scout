@@ -317,6 +317,41 @@ const JSON_HEADERS = () => {
   return { host, origin: `http://${host}`, 'content-type': 'application/json' };
 };
 
+test('notification HTTP flow preserves unacknowledged alerts after desktop delivery and rejects cross-origin acknowledgement', async () => {
+  seedWorkspace(APP_ROOT, testWorkspace);
+  const { notificationFile } = await import('./lib/notifications.mjs');
+  const file = notificationFile(testWorkspace);
+  const notificationFiles = [file, ...['notifications-runtime.json', 'notification-receipts.json', 'provider-notifications.json', 'notification-pending-codex.json', 'notification-pending-claude.json'].map((name) => path.join(testWorkspace, '.scout', name))];
+  const previousNotifications = notificationFiles.map((target) => fs.existsSync(target) ? fs.readFileSync(target) : null);
+  const healthFile = path.join(testWorkspace, '.scout', 'provider-health', 'v1', 'codex.json');
+  const previousHealth = fs.existsSync(healthFile) ? fs.readFileSync(healthFile) : null;
+  try {
+    for (const target of notificationFiles) fs.rmSync(target, { force: true });
+    recordProviderHealth(testWorkspace, 'codex', { kind: 'remote-auth-failure', source: 'provider-operation' });
+    const first = await request({ path: '/api/notifications', headers: JSON_HEADERS() });
+    assert.equal(first.status, 200);
+    const body = JSON.parse(first.text);
+    const id = body.alerts.find((item) => item.kind === 'provider' && item.provider === 'codex').id;
+    const crossOrigin = await request({ method: 'POST', path: '/api/notifications/acknowledge', headers: { ...JSON_HEADERS(), origin: 'https://example.invalid' }, body: JSON.stringify({ id }) });
+    assert.equal(crossOrigin.status, 403);
+    const delivered = await request({ method: 'POST', path: '/api/notifications/delivered', headers: JSON_HEADERS(), body: JSON.stringify({ id }) });
+    assert.equal(delivered.status, 200);
+    assert.ok(JSON.parse(delivered.text).alerts.some((item) => item.id === id));
+    assert.equal(JSON.parse(delivered.text).outbox.some((item) => item.id === id), false);
+    const acknowledged = await request({ method: 'POST', path: '/api/notifications/acknowledge', headers: JSON_HEADERS(), body: JSON.stringify({ id }) });
+    assert.equal(acknowledged.status, 200);
+    assert.equal(JSON.parse(acknowledged.text).alerts.some((item) => item.id === id), false);
+    assert.doesNotMatch(first.text, /provider-health:|\.scout|credential|token|\/tmp\//);
+  } finally {
+    if (previousHealth) fs.writeFileSync(healthFile, previousHealth);
+    else fs.rmSync(healthFile, { force: true });
+    notificationFiles.forEach((target, index) => {
+      if (previousNotifications[index]) fs.writeFileSync(target, previousNotifications[index]);
+      else fs.rmSync(target, { force: true });
+    });
+  }
+});
+
 test('provider health banner lists an expired session and "Remind me later" acknowledges it durably', async () => {
   const originalConfig = loadWorkspaceConfig(WORKSPACE_ROOT);
   writeWorkspaceConfig(WORKSPACE_ROOT, {

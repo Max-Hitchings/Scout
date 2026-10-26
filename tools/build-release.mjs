@@ -39,6 +39,7 @@ export const RELEASE_FILES = Object.freeze([
   { source: 'docs/VPS_BACKUP_AND_STATE.md', target: 'docs/VPS_BACKUP_AND_STATE.md' },
   { source: 'docs/AI_SETUP.md', target: 'docs/AI_SETUP.md' },
   { source: 'docs/CONFIGURATION.md', target: 'docs/CONFIGURATION.md' },
+  { source: 'docs/SEARCH_MODES_AND_ALERTS.md', target: 'docs/SEARCH_MODES_AND_ALERTS.md' },
   { source: 'docs/PRIVACY.md', target: 'docs/PRIVACY.md' },
   { source: 'docs/PRIVATE_REMOTE_ACCESS.md', target: 'docs/PRIVATE_REMOTE_ACCESS.md' },
   { source: 'docs/CV_QUALITY.md', target: 'docs/CV_QUALITY.md' },
