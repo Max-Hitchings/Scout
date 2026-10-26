@@ -84,7 +84,9 @@ export async function sendHeadlessAlert(config, alert, { root, runCommand = runP
 
 async function persistDeliveryReceipt(api, root, id, { ownership, timeoutMs, shouldContinue }) {
   const deadline = performance.now() + timeoutMs;
+  let retryError = null;
   while (true) {
+    if (retryError && (!shouldContinue() || performance.now() >= deadline)) throw retryError;
     ownership.assertOwned();
     try {
       api.markNotification(root, id, 'delivered');
@@ -95,6 +97,7 @@ async function persistDeliveryReceipt(api, root, id, { ownership, timeoutMs, sho
       // Quiescence stops waiting and leaves the original alert pending.
       const remaining = deadline - performance.now();
       if (error?.reasonCode !== 'mutation-busy' || !shouldContinue() || remaining <= 0) throw error;
+      retryError = error;
       await new Promise((resolve) => setTimeout(resolve, Math.min(50, remaining)));
     }
   }
