@@ -124,7 +124,8 @@ test('local key reads cannot forward readable files outside the approved secret 
 
 test('local endpoint policy uses canonical IP addresses and rejects public HTTP aliases', () => {
   for (const baseUrl of [
-    'http://198.51.100.12/v1', 'http://model.example.test/v1', 'http://model.local/v1',
+    'http://198.51.100.12/v1', 'http://0xc633640c/v1', 'http://0306.063.0144.014/v1',
+    'http://model.example.test/v1', 'http://127.model.example.test/v1', 'http://model.local/v1',
     'http://[::ffff:c633:640c]/v1', 'http://[2001:db8::1]/v1',
     'http://100.128.0.1/v1', 'http://172.32.0.1/v1', 'http://192.169.0.1/v1',
   ]) assert.throws(() => validateLocalProviderConfig({ baseUrl, model: 'synthetic/model' }), /HTTPS|private|loopback/);
@@ -147,4 +148,33 @@ test('local key selectors reject a linked ancestor escaping the owning workspace
   } });
   assert.equal(status.authenticated, false);
   assert.equal(status.reasonCode, 'authentication-required');
+});
+
+test('legacy untrusted local settings remain readable for host repair without provider traffic', async (t) => {
+  await drainScheduledCheckpoints();
+  const file = path.join(root, 'workspace.json');
+  const before = fs.readFileSync(file);
+  const config = JSON.parse(before);
+  config.ai.local = { baseUrl: 'http://198.51.100.12/v1', model: 'synthetic/model', apiKeyFile: path.join(temporary, 'outside-credential') };
+  fs.writeFileSync(file, JSON.stringify(config));
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; throw new Error('Unexpected external provider request'); };
+  t.after(async () => {
+    globalThis.fetch = originalFetch;
+    await drainScheduledCheckpoints();
+    fs.writeFileSync(file, before);
+  });
+  assert.equal(loadWorkspaceConfig(root).ai.local.baseUrl, config.ai.local.baseUrl);
+  assert.equal(fs.readFileSync(file, 'utf8'), JSON.stringify(config), 'reading cannot silently rewrite the workspace');
+  const status = localProviderStatus({ local: config.ai.local, root });
+  assert.equal(status.installed, false);
+  assert.equal((await runLocalTurn({ status, prompt: 'Synthetic request.' }).finished).ok, false);
+  assert.equal(calls, 0);
+  const remote = await settings({ ai: { local: config.ai.local }, profile: { tone: 'Synthetic remote edit' } }, { remote: true });
+  assert.equal(remote.status, 400, 'an unchanged legacy value must not acquire new persisted authority');
+  const repaired = await settings({ ai: { local: { baseUrl: 'https://model.example.test/v1', model: 'synthetic/model' } } });
+  assert.equal(repaired.status, 200);
+  assert.equal(loadWorkspaceConfig(root).ai.local.baseUrl, 'https://model.example.test/v1');
+  assert.equal(calls, 0);
 });
