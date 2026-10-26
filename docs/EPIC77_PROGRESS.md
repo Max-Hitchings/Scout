@@ -253,3 +253,10 @@ a new request deliberately; automatic replay is never attempted.
   pending intent preserves failure/recovery episodes until publication. The
   independent 64-record operational reserve retires superseded/resolved history
   while retaining current warnings and monotonic episode identities.
+
+Independent review found candidate-version ordering still used a lexical fallback.
+Observed RED at the public update-check action for an installed candidate moving
+to the final beta; numeric `rc10` versus `rc2` was also wrong. Semantic candidate
+ordering and all supported version projections now agree. Candidate-tag artifact
+uploads are disabled as well as deployment/publication. Post-fix full Node
+verification passed 1,587 total, 1,581 passed, zero failed, six platform skips.

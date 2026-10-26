@@ -67,7 +67,8 @@ jobs:
           if (-not (Test-Path "$installed\Scout.exe")) { throw 'Scout host missing' }
           $u = Start-Process "$installed\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
           if ($u.ExitCode -or -not (Test-Path "$workspace\workspace.json")) { throw 'Uninstall smoke failed' }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - if: ${{ !contains(github.ref_name, '-rc') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows
           path: installer/output/*.exe
@@ -127,7 +128,8 @@ jobs:
           test -f "$workspace/logs/ui-stdout.log"
           hdiutil detach "$mount"
           test -f "$workspace/workspace.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - if: ${{ !contains(github.ref_name, '-rc') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos-${{ matrix.os }}
           path: installer/output/*.dmg
@@ -153,7 +155,8 @@ jobs:
           /opt/scout/runtime/node /opt/scout/app/tools/typst-runtime.mjs verify --compile
           sudo apt-get remove -y scout; test -f "$workspace/workspace.json"
           tar -tzf installer/output/*.tar.gz | grep -q scout-dashboard
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - if: ${{ !contains(github.ref_name, '-rc') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux
           path: |

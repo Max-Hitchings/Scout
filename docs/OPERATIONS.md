@@ -270,7 +270,7 @@ Access details differ by operator and must be discovered from the private operat
    detached signature trusted by the locally bundled public-key registry.
    Installer preflight uses the same verifier. CI uses generated temporary test
    keys; production signing requires owner public-key enrollment and the
-   protected `release-signing` environment. Candidate `-rc` tags do not deploy
+   protected `release-signing` environment. Candidate `-rc` tags do not deploy, upload artifacts
    or publish. Signed metadata does not supersede the F-1 packaging gate.
    Workflow-policy tests check immutable action pins throughout every workflow
    receiving secrets. Allowlisted application and public-source trees exclude

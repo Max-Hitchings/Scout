@@ -209,3 +209,16 @@ test('a trusted signed installer still streams and returns its verified signing 
   assert.deepEqual(fs.readFileSync(result.path), fixture.bytes);
   assert.equal(result.signingKeyId, fixture.keyId);
 });
+
+test('an installed release candidate discovers the final beta and orders candidate numbers numerically', async () => {
+  const result = await checkForUpdate('0.1.0-beta.24-rc1', async () => ({ ok: true, json: async () => [{
+    tag_name: '0.1.0-beta.24', draft: false,
+    html_url: 'https://github.com/oliver-hitchings/Scout/releases/tag/0.1.0-beta.24', assets: [],
+  }] }));
+  assert.equal(result.available, true, 'the final release must be offered to an installed candidate');
+  assert.equal(result.latestVersion, '0.1.0-beta.24');
+  assert.equal(compareVersions('0.1.0-beta.24', '0.1.0-beta.24-rc1'), 1);
+  assert.equal(compareVersions('0.1.0-beta.24-rc10', '0.1.0-beta.24-rc2'), 1);
+  assert.equal(compareVersions('0.1.0-beta.25-rc1', '0.1.0-beta.24'), 1);
+
+});
