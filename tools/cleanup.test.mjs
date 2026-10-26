@@ -210,3 +210,28 @@ test('cleanup plan publication uses the canonical checked parent after an alias 
   assert.equal(fs.existsSync(path.join(publicApp, 'review.json')), false, 'private workspace paths must not be written into the application');
   assert.equal(fs.existsSync(path.join(privateDirectory, 'review.json')), true);
 });
+
+test('cleanup plan creation detects a substituted canonical parent before writing private bytes', async (t) => {
+  const { createRunCleanupReview } = await import('../ui/lib/runCleanup.mjs');
+  const { root, parent } = fixture(t);
+  const directory = path.join(parent, 'private-plan-parent');
+  const displaced = path.join(parent, 'displaced-plan-parent');
+  fs.mkdirSync(directory);
+  const output = path.join(directory, 'review.json');
+  const open = fs.openSync;
+  let replaced = false;
+  fs.openSync = (file, ...options) => {
+    if (!replaced && String(file) === output) {
+      replaced = true;
+      fs.renameSync(directory, displaced);
+      fs.mkdirSync(directory);
+    }
+    return open(file, ...options);
+  };
+  t.after(() => { fs.openSync = open; });
+  assert.throws(() => createRunCleanupReview(root, { output }), /could not be safely created/);
+  fs.openSync = open;
+  assert.equal(replaced, true);
+  assert.deepEqual(fs.readdirSync(displaced), []);
+  assert.deepEqual(fs.readdirSync(directory), [], 'the exact newly created empty file is cleaned up');
+});

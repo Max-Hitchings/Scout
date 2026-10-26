@@ -56,6 +56,35 @@ function inside(root, file) {
   const relative = path.relative(root, file);
   return !relative || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
+function privatePlanParentIdentity(parent) {
+  const stat = fs.lstatSync(parent, { bigint: true });
+  if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync(parent) !== parent) throw new Error('Private cleanup plan parent changed');
+  return `${stat.dev}:${stat.ino}:${stat.mode}:${stat.uid}:${stat.gid}`;
+}
+function writePrivatePlan(target, bytes, parent, parentIdentity) {
+  let descriptor;
+  let created;
+  try {
+    if (privatePlanParentIdentity(parent) !== parentIdentity) throw new Error();
+    descriptor = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
+    created = fs.fstatSync(descriptor, { bigint: true });
+    // The create may traverse a parent replaced after validation. Verify its
+    // identity again before writing any private workspace metadata.
+    if (privatePlanParentIdentity(parent) !== parentIdentity) throw new Error();
+    fs.writeFileSync(descriptor, bytes);
+    fs.fsyncSync(descriptor);
+    if (privatePlanParentIdentity(parent) !== parentIdentity) throw new Error();
+  } catch {
+    if (created) {
+      try {
+        const current = fs.lstatSync(target, { bigint: true });
+        if (current.isFile() && !current.isSymbolicLink() && current.dev === created.dev && current.ino === created.ino) fs.unlinkSync(target);
+      } catch { /* never remove a replacement or an existing review */ }
+    }
+    throw new Error('Private cleanup plan could not be safely created; no existing review was replaced');
+  } finally { if (descriptor !== undefined) fs.closeSync(descriptor); }
+}
+
 export function createRunCleanupReview(root, { selectedRunIds = [], output = null, appRoot = null, queue = false } = {}) {
   root = canonicalWorkspace(root);
   const review = { schemaVersion: 1, workspaceIdentity: workspaceIdentity(root), plan: planRunCleanup(root, { selectedRunIds }) };
@@ -63,14 +92,14 @@ export function createRunCleanupReview(root, { selectedRunIds = [], output = nul
   review.reviewDigest = reviewedDigest(review);
   if (review.plan.refusedSelections.length) throw new Error('Cleanup selection contains retained, recovery-critical or unknown data; review the eligible candidate list');
   if (output) {
-    const target = path.resolve(output);
-    const parent = fs.realpathSync(path.dirname(target));
-    if (appRoot && inside(fs.realpathSync(appRoot), path.join(parent, path.basename(target)))) throw new Error('Keep private cleanup plans outside the application repository');
+    const selected = path.resolve(output);
+    const parent = fs.realpathSync(path.dirname(selected));
+    const target = path.join(parent, path.basename(selected));
+    const parentIdentity = privatePlanParentIdentity(parent);
+    if (appRoot && inside(fs.realpathSync(appRoot), target)) throw new Error('Keep private cleanup plans outside the application repository');
     const bytes = `${JSON.stringify(review, null, 2)}\n`;
     if (Buffer.byteLength(bytes) > MAX_PLAN_BYTES) throw new Error('Cleanup review is too large; select a smaller batch');
-    const descriptor = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
-    try { fs.writeFileSync(descriptor, bytes); fs.fsyncSync(descriptor); }
-    finally { fs.closeSync(descriptor); }
+    writePrivatePlan(target, bytes, parent, parentIdentity);
   }
   return review;
 }
