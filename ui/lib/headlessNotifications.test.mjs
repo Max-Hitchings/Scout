@@ -3,7 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
+// Hosted Node tool caches may be group-writable. Exercise the production
+// protected-executable boundary with an owner-only disposable copy instead.
+const runtimeDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-protected-runtime-'));
+const protectedRuntime = process.platform === 'win32' ? process.execPath : path.join(runtimeDirectory, 'node');
+if (process.platform !== 'win32') { fs.copyFileSync(process.execPath, protectedRuntime); fs.chmodSync(protectedRuntime, 0o700); }
+after(() => fs.rmSync(runtimeDirectory, { recursive: true, force: true }));
 const alert = { id: 'a'.repeat(64), kind: 'digest', provider: null, count: 2, createdAt: '2026-10-26T08:00:00.000Z', title: 'PRIVATE', body: 'PRIVATE' };
 
 test('headless notification dispatch is off by default and does not touch the outbox', async () => {
@@ -44,7 +50,7 @@ test('headless webhook sends only allowlisted alert data, rejects redirects, and
 test('headless command uses fixed argv with shell disabled and a minimal environment', async () => {
   const { sendHeadlessAlert, validateOutboundConfig } = await import('./headlessNotifications.mjs');
   let call;
-  const config = validateOutboundConfig({ schemaVersion: 1, enabled: true, type: 'command', command: process.execPath, args: ['--synthetic', '$(never)'] });
+  const config = validateOutboundConfig({ schemaVersion: 1, enabled: true, type: 'command', command: protectedRuntime, args: ['--synthetic', '$(never)'] });
   const result = await sendHeadlessAlert(config, alert, { root: os.tmpdir(), runCommand: async (...args) => { call = args; return { status: 0 }; } });
   assert.equal(result.ok, true);
   assert.equal(call[2].shell, false);
@@ -61,11 +67,11 @@ test('headless command delivery runs a real process with literal arguments and l
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-outbound-command-'));
   try {
     const receipt = path.join(root, 'received.json');
-    const config = validateOutboundConfig({ schemaVersion: 1, enabled: true, type: 'command', command: process.execPath,
+    const config = validateOutboundConfig({ schemaVersion: 1, enabled: true, type: 'command', command: protectedRuntime,
       args: ['--input-type=module', '-e', 'import fs from "node:fs";fs.writeFileSync(process.argv[1],process.argv[2]);', receipt] });
     assert.equal((await sendHeadlessAlert(config, alert, { root })).ok, true);
     assert.equal(JSON.parse(fs.readFileSync(receipt)).notification.id, alert.id);
-    const hangs = validateOutboundConfig({ schemaVersion: 1, enabled: true, type: 'command', command: process.execPath,
+    const hangs = validateOutboundConfig({ schemaVersion: 1, enabled: true, type: 'command', command: protectedRuntime,
       args: ['-e', 'setInterval(()=>{},1000)'], timeoutMs: 100 });
     assert.equal((await sendHeadlessAlert(hangs, alert, { root })).ok, false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -86,7 +92,7 @@ test('overlapping headless senders do not both deliver the same notification', a
   const { dispatchHeadlessNotifications } = await import('./headlessNotifications.mjs');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-outbound-overlap-'));
   const file = path.join(root, 'outbound.json');
-  fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, enabled: true, type: 'command', command: process.execPath, args: [] }), { mode: 0o600 });
+  fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, enabled: true, type: 'command', command: protectedRuntime, args: [] }), { mode: 0o600 });
   let finish; let started;
   const ready = new Promise((resolve) => { started = resolve; });
   const api = { refreshNotificationDigest: () => ({ outbox: [alert] }), markNotification() {} };
@@ -103,7 +109,7 @@ test('runtime quiescence stops further outbound alerts after the current child c
   const { dispatchHeadlessNotifications } = await import('./headlessNotifications.mjs');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-outbound-drain-'));
   const file = path.join(root, 'outbound.json');
-  fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, enabled: true, type: 'command', command: process.execPath, args: [] }), { mode: 0o600 });
+  fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, enabled: true, type: 'command', command: protectedRuntime, args: [] }), { mode: 0o600 });
   let admission = true; let sent = 0;
   try {
     const result = await dispatchHeadlessNotifications(root, { file, config: {},
@@ -125,7 +131,7 @@ test('real notification digest reaches a headless hook once and preserves its de
     const state = n.notificationsForAssessment(n.emptyNotifications(), { mode: 'active' }, [{ id: 'synthetic-job', score: 80, outcome: 'kept' }], '2026-01-01T08:00:00.000Z');
     fs.writeFileSync(n.notificationFile(root), JSON.stringify(state));
     const file = path.join(root, '.scout', 'outbound-notifications.json');
-    fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, enabled: true, type: 'command', command: process.execPath, args: [] }), { mode: 0o600 });
+    fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, enabled: true, type: 'command', command: protectedRuntime, args: [] }), { mode: 0o600 });
     const sent = [];
     const options = { config: { mode: 'active' }, send: async (_config, value) => { sent.push(value); return { ok: true }; } };
     assert.equal((await dispatchHeadlessNotifications(root, options)).delivered, 1);
