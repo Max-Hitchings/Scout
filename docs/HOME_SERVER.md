@@ -176,6 +176,19 @@ unverifiable owners remain busy even when old, preventing overlapping writes.
 The coordination directory can remain after a successful command and is not
 itself evidence that a command is still running.
 
+## Reviewed scan storage maintenance
+
+Storage warnings appear in the local summary API and the normal notification
+outbox before pressure blocks new scans. On the instance's host, use
+`scout cleanup --workspace YOUR_PRIVATE_WORKSPACE --plan` to list eligible data.
+Select runs explicitly, save a private plan, inspect its digest and apply only
+that confirmed plan. `--plan --queue` separately reviews queue compaction.
+The [reviewed cleanup procedure](OPERATIONS.md#scan-storage-and-reviewed-cleanup)
+covers credentials, retained/recovery-critical work, encrypted archives and
+interruption recovery. There is no unattended deletion policy. Run the command
+as the owning instance account with its explicit workspace; household selection
+does not authorize maintenance on a different person's data.
+
 ## Local dashboard API
 
 `GET /api/summary` is read-only, local-only and uncached. It never starts a provider, scan, digest or tracker mutation. The response has `schemaVersion: 1` and:
